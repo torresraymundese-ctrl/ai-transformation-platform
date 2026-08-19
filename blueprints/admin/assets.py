@@ -6,6 +6,7 @@ from flask import abort, redirect, render_template, request
 
 from blueprints.admin import bp
 from models import get_db
+from repository import execute_write, run_transaction
 from validation import (ValidationError, choice as valid_choice,
                         integer as valid_integer, text as valid_text)
 
@@ -121,13 +122,10 @@ def admin_asset_codes_list():
 def admin_asset_code_new():
     if request.method == "POST":
         item = asset_code_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "INSERT INTO asset_codes (code,name,category,sort_order) VALUES (?,?,?,?)",
             tuple(item.values()),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/assets/codes")
     return render_template("admin/asset_code_edit.html", code=None)
 
@@ -136,13 +134,10 @@ def admin_asset_code_new():
 def admin_asset_code_edit(code_id):
     if request.method == "POST":
         item = asset_code_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "UPDATE asset_codes SET code=?,name=?,category=?,sort_order=? WHERE id=?",
             (*item.values(), code_id),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/assets/codes")
     db = get_db()
     code = db.execute("SELECT * FROM asset_codes WHERE id=?", (code_id,)).fetchone()
@@ -166,13 +161,10 @@ def admin_departments_list():
 def admin_department_new():
     if request.method == "POST":
         item = department_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "INSERT INTO asset_departments (name,sort_order) VALUES (?,?)",
             tuple(item.values()),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/assets/departments")
     return render_template("admin/department_edit.html", department=None)
 
@@ -181,13 +173,10 @@ def admin_department_new():
 def admin_department_edit(dept_id):
     if request.method == "POST":
         item = department_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "UPDATE asset_departments SET name=?,sort_order=? WHERE id=?",
             (*item.values(), dept_id),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/assets/departments")
     db = get_db()
     department = db.execute(
@@ -234,11 +223,11 @@ def admin_unit_a_list():
 def unit_a_form(asset_id=None):
     if request.method == "POST":
         item = asset_payload(request.form, include_department=True)
-        db = get_db()
-        try:
+
+        def save(db):
             validate_asset_references(db, item)
             if asset_id is None:
-                db.execute(
+                return db.execute(
                     "INSERT INTO unit_a_assets (department,asset_code_id,quantity,remark) "
                     "VALUES (?,?,?,?)",
                     (
@@ -246,18 +235,16 @@ def unit_a_form(asset_id=None):
                         item["remark"],
                     ),
                 )
-            else:
-                db.execute(
-                    "UPDATE unit_a_assets SET department=?,asset_code_id=?,quantity=?,"
-                    "remark=? WHERE id=?",
-                    (
-                        item["department"], item["asset_code_id"], item["quantity"],
-                        item["remark"], asset_id,
-                    ),
-                )
-            db.commit()
-        finally:
-            db.close()
+            return db.execute(
+                "UPDATE unit_a_assets SET department=?,asset_code_id=?,quantity=?,"
+                "remark=? WHERE id=?",
+                (
+                    item["department"], item["asset_code_id"], item["quantity"],
+                    item["remark"], asset_id,
+                ),
+            )
+
+        run_transaction(save)
         return redirect("/admin/assets/unit-a")
     db = get_db()
     asset = None if asset_id is None else db.execute(
@@ -287,10 +274,7 @@ def admin_unit_a_edit(asset_id):
 
 @bp.route("/admin/assets/unit-a/delete/<int:asset_id>", methods=["POST"])
 def admin_unit_a_delete(asset_id):
-    db = get_db()
-    db.execute("DELETE FROM unit_a_assets WHERE id=?", (asset_id,))
-    db.commit()
-    db.close()
+    execute_write("DELETE FROM unit_a_assets WHERE id=?", (asset_id,))
     return redirect("/admin/assets/unit-a")
 
 
@@ -309,23 +293,21 @@ def admin_unit_b_list():
 def unit_b_form(asset_id=None):
     if request.method == "POST":
         item = asset_payload(request.form, include_department=False)
-        db = get_db()
-        try:
+
+        def save(db):
             validate_asset_references(db, item)
             if asset_id is None:
-                db.execute(
+                return db.execute(
                     "INSERT INTO unit_b_assets (asset_code_id,quantity,remark) "
                     "VALUES (?,?,?)",
                     (item["asset_code_id"], item["quantity"], item["remark"]),
                 )
-            else:
-                db.execute(
-                    "UPDATE unit_b_assets SET asset_code_id=?,quantity=?,remark=? WHERE id=?",
-                    (item["asset_code_id"], item["quantity"], item["remark"], asset_id),
-                )
-            db.commit()
-        finally:
-            db.close()
+            return db.execute(
+                "UPDATE unit_b_assets SET asset_code_id=?,quantity=?,remark=? WHERE id=?",
+                (item["asset_code_id"], item["quantity"], item["remark"], asset_id),
+            )
+
+        run_transaction(save)
         return redirect("/admin/assets/unit-b")
     db = get_db()
     asset = None if asset_id is None else db.execute(
@@ -350,10 +332,7 @@ def admin_unit_b_edit(asset_id):
 
 @bp.route("/admin/assets/unit-b/delete/<int:asset_id>", methods=["POST"])
 def admin_unit_b_delete(asset_id):
-    db = get_db()
-    db.execute("DELETE FROM unit_b_assets WHERE id=?", (asset_id,))
-    db.commit()
-    db.close()
+    execute_write("DELETE FROM unit_b_assets WHERE id=?", (asset_id,))
     return redirect("/admin/assets/unit-b")
 
 

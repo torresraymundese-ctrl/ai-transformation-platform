@@ -14,8 +14,10 @@ from blueprints.api import bp as api_bp
 from blueprints.public import bp as public_bp, svc_emoji
 from models import init_db
 from security import (add_security_headers, audit_admin_actions, csrf_token,
-                      forbidden, invalid_form, not_found, protect_admin_routes,
-                      request_too_large, sanitize_html, unexpected_error)
+                      data_conflict, forbidden, invalid_form, not_found,
+                      protect_admin_routes, request_too_large, sanitize_html,
+                      unexpected_error)
+from repository import DataConflictError
 from validation import ValidationError, safe_external_url
 
 
@@ -55,6 +57,7 @@ def create_app(test_config=None):
     )
 
     flask_app.register_error_handler(ValidationError, invalid_form)
+    flask_app.register_error_handler(DataConflictError, data_conflict)
     flask_app.register_error_handler(403, forbidden)
     flask_app.register_error_handler(404, not_found)
     flask_app.register_error_handler(RequestEntityTooLarge, request_too_large)

@@ -7,6 +7,7 @@ from flask import (abort, current_app, jsonify, redirect, render_template,
 
 from blueprints.admin import bp
 from models import get_db
+from repository import execute_write
 from security import sanitize_html
 from validation import (choice as valid_choice, external_url as valid_external_url,
                         integer as valid_integer, text as valid_text)
@@ -90,8 +91,7 @@ def admin_articles():
 def admin_article_edit(article_id):
     if request.method == "POST":
         item = article_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "UPDATE articles SET title=?,source=?,source_url=?,summary=?,"
             "content_html=?,tags=?,category=?,is_featured=?,status=? WHERE id=?",
             (
@@ -100,8 +100,6 @@ def admin_article_edit(article_id):
                 item["is_featured"], item["status"], article_id,
             ),
         )
-        db.commit()
-        db.close()
         return redirect(url_for("admin.admin_articles"))
     db = get_db()
     article = db.execute(
@@ -117,8 +115,7 @@ def admin_article_edit(article_id):
 def admin_article_new():
     if request.method == "POST":
         item = article_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "INSERT INTO articles (title_hash,title,source,source_url,summary,"
             "content_html,tags,category,is_featured,status) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
@@ -127,8 +124,6 @@ def admin_article_new():
                 item["is_featured"], item["status"],
             ),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/articles")
     return render_template("admin/article_edit.html", article=None)
 
@@ -145,14 +140,11 @@ def admin_cases():
 def admin_case_new():
     if request.method == "POST":
         item = case_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "INSERT INTO cases (title,industry,scale,pain_point,solution,result,tags,"
             "logo_text) VALUES (?,?,?,?,?,?,?,?)",
             tuple(item.values()),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/cases")
     return render_template("admin/case_edit.html", case=None)
 
@@ -161,14 +153,11 @@ def admin_case_new():
 def admin_case_edit(case_id):
     if request.method == "POST":
         item = case_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "UPDATE cases SET title=?,industry=?,scale=?,pain_point=?,solution=?,"
             "result=?,tags=?,logo_text=? WHERE id=?",
             (*item.values(), case_id),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/cases")
     db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
@@ -213,14 +202,11 @@ def admin_announcements():
 def admin_announcement_new():
     if request.method == "POST":
         item = announcement_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "INSERT INTO announcements (title,content_html,is_pinned,status) "
             "VALUES (?,?,?,?)",
             tuple(item.values()),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/announcements")
     return render_template("admin/announcement_edit.html", announcement=None)
 
@@ -229,14 +215,11 @@ def admin_announcement_new():
 def admin_announcement_edit(aid):
     if request.method == "POST":
         item = announcement_payload(request.form)
-        db = get_db()
-        db.execute(
+        execute_write(
             "UPDATE announcements SET title=?,content_html=?,is_pinned=?,status=? "
             "WHERE id=?",
             (*item.values(), aid),
         )
-        db.commit()
-        db.close()
         return redirect("/admin/announcements")
     db = get_db()
     announcement = db.execute(

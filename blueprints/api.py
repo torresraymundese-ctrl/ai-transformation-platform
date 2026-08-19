@@ -6,6 +6,7 @@ import re
 from flask import Blueprint, current_app, jsonify, request
 
 from models import get_db
+from repository import execute_write
 from security import consume_rate_limit, rate_limit_response
 
 
@@ -46,12 +47,9 @@ def api_assessment():
     if len(scores_json.encode("utf-8")) > 16 * 1024:
         return jsonify({"error": "invalid assessment payload"}), 400
 
-    db = get_db()
-    db.execute(
+    execute_write(
         "INSERT INTO assessments (company_name, contact_email, scores, result) "
         "VALUES (?,?,?,?)",
         (company.strip(), email.strip().lower(), scores_json, result.strip()),
     )
-    db.commit()
-    db.close()
     return jsonify({"success": True})

@@ -14,6 +14,7 @@ from markupsafe import Markup
 from werkzeug.exceptions import HTTPException
 
 from models import get_db
+from repository import DataConflictError
 from validation import ValidationError
 
 
@@ -133,6 +134,14 @@ def forbidden(error):
         title="操作被拒绝",
         message="请求缺少有效授权或安全校验，请返回后重试。",
     ), 403
+
+
+def data_conflict(error):
+    return render_template(
+        "error.html",
+        title="数据冲突",
+        message="该记录与已有数据冲突，请检查唯一编码或关联关系。",
+    ), 409
 
 
 def not_found(error):

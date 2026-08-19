@@ -109,6 +109,36 @@ def test_admin_rejects_zero_asset_quantity(admin_client):
     assert response.status_code == 400
 
 
+def test_duplicate_asset_code_returns_conflict_and_next_write_still_works(
+    admin_client
+):
+    """A unique-key conflict must roll back, close cleanly, and return HTTP 409."""
+    duplicate = admin_client.post(
+        "/admin/assets/code/new",
+        data={
+            "csrf_token": "test-csrf-token",
+            "code": "Z001",
+            "name": "重复编码",
+            "category": "table",
+            "sort_order": "0",
+        },
+    )
+    valid = admin_client.post(
+        "/admin/assets/code/new",
+        data={
+            "csrf_token": "test-csrf-token",
+            "code": "TEST-UNIQUE-001",
+            "name": "后续合法编码",
+            "category": "table",
+            "sort_order": "0",
+        },
+    )
+
+    assert duplicate.status_code == 409
+    assert "数据冲突".encode("utf-8") in duplicate.data
+    assert valid.status_code == 302
+
+
 def test_missing_page_uses_safe_custom_error_page(client):
     """Unknown routes must return a useful page without framework diagnostics."""
     response = client.get("/definitely-missing")
