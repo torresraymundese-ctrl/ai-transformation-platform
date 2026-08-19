@@ -92,8 +92,8 @@ def consume_rate_limit(bucket, limit, window_seconds):
             (bucket, identity_hash, window_start),
         ).fetchone()[0]
         db.execute(
-            "DELETE FROM request_rate_limits WHERE window_start < ?",
-            (window_start - window_seconds,),
+            "DELETE FROM request_rate_limits WHERE bucket=? AND window_start < ?",
+            (bucket, window_start - window_seconds),
         )
         db.commit()
     finally:

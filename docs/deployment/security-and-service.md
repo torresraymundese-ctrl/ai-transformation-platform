@@ -50,7 +50,15 @@ systemctl daemon-reload
 systemd-analyze verify /etc/systemd/system/ai-platform.service
 ```
 
-服务单元使用 `EnvironmentFile`，并将 Gunicorn 绑定到 loopback。正式启用前必须先完成数据库备份、文件权限验证和本地迁移演练。
+服务单元使用 `EnvironmentFile`，并将 Gunicorn 绑定到 loopback。每次启动 Gunicorn 前，`ExecStartPre` 会运行 `manage.py migrate`，以幂等方式应用尚未执行的数据库迁移。正式启用前必须先完成数据库备份、文件权限验证和本地迁移演练。
+
+可在维护窗口单独演练迁移：
+
+```bash
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python /opt/ai-platform/manage.py migrate
+```
+
+命令成功且备份验证完成后，才允许重启应用服务。
 
 ## 凭据轮换
 

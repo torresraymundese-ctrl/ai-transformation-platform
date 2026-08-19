@@ -27,5 +27,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 ReadWritePaths=/opt/ai-platform/data
 
+ExecStartPre=/opt/ai-platform/.venv/bin/python /opt/ai-platform/manage.py migrate
+
 [Install]
 WantedBy=multi-user.target

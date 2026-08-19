@@ -76,6 +76,37 @@ def test_login_rate_limit_blocks_repeated_wrong_passwords(client):
     assert blocked.headers["Retry-After"] == "900"
 
 
+def test_short_rate_limit_window_cannot_delete_an_active_long_window(
+    client, monkeypatch
+):
+    """Cleanup for one bucket must never reset another bucket's active quota."""
+    import security
+
+    clock = {"now": 100}
+    monkeypatch.setattr(security.time, "time", lambda: clock["now"])
+    client.application.config.update(
+        ASSESSMENT_RATE_LIMIT=1,
+        ASSESSMENT_RATE_WINDOW=3600,
+        LOGIN_RATE_LIMIT=10,
+        LOGIN_RATE_WINDOW=900,
+    )
+    assert client.post("/api/assessment", json=VALID_ASSESSMENT).status_code == 200
+
+    token = login_csrf(client)
+    clock["now"] = 2000
+    assert client.post(
+        "/admin/login",
+        data={
+            "csrf_token": token,
+            "username": "test-admin",
+            "password": "definitely-wrong",
+        },
+    ).status_code == 401
+
+    clock["now"] = 2001
+    assert client.post("/api/assessment", json=VALID_ASSESSMENT).status_code == 429
+
+
 def test_scrape_rate_limit_blocks_repeated_external_jobs(admin_client, monkeypatch):
     """An administrator must not trigger unbounded external scrape jobs."""
     import scraper

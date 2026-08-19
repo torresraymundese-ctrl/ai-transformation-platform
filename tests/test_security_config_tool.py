@@ -1,10 +1,14 @@
 import os
 import stat
+from pathlib import Path
 
 import pytest
 from werkzeug.security import check_password_hash
 
 from scripts.configure_security import build_environment, write_environment_file
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_environment(text):
@@ -50,3 +54,25 @@ def test_environment_file_is_created_exclusively_and_not_overwritten(tmp_path):
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with pytest.raises(FileExistsError):
         write_environment_file(path, content)
+
+
+def test_production_service_runs_migrations_before_gunicorn():
+    service = (
+        PROJECT_ROOT / "ops" / "systemd" / "ai-platform.service"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "ExecStartPre=/opt/ai-platform/.venv/bin/python "
+        "/opt/ai-platform/manage.py migrate"
+    ) in service
+    assert "ExecStart=/opt/ai-platform/.venv/bin/gunicorn" in service
+
+
+def test_manage_migrate_command_initializes_database(monkeypatch):
+    import manage
+
+    calls = []
+    monkeypatch.setattr(manage, "init_db", lambda: calls.append("migrated"))
+
+    assert manage.main(["migrate"]) == 0
+    assert calls == ["migrated"]
