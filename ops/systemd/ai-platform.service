@@ -1,0 +1,31 @@
+[Unit]
+Description=Enterprise AI Transformation Platform
+After=network.target
+
+[Service]
+Type=simple
+User=ai-platform
+Group=ai-platform
+WorkingDirectory=/opt/ai-platform
+EnvironmentFile=/etc/ai-platform/ai-platform.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/ai-platform/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5080 --access-logfile - --error-logfile - --capture-output --timeout 60 wsgi:app
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/ai-platform/data
+
+[Install]
+WantedBy=multi-user.target

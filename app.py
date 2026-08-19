@@ -19,6 +19,7 @@ import bleach
 from flask import (Flask, abort, g, jsonify, redirect, render_template, request,
                    session, url_for)
 from markupsafe import Markup
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 # 上述导入: Flask(核心) render_template(模板) request(请求) jsonify(JSON响应) redirect(重定向) url_for(路由URL)
 
@@ -27,6 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))  # 将当前目录加入 Python �
 from models import get_db, init_db              # 导入数据库连接和初始化函数
 
 app = Flask(__name__)                   # ✅ 创建 Flask 应用实例
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # === 安全配置与后台鉴权 ===
 app.config.update(

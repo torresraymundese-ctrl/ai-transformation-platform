@@ -36,6 +36,28 @@ def test_assessment_rate_limit_blocks_excess_submissions(client):
     assert blocked.headers["Retry-After"] == "3600"
 
 
+def test_rate_limit_distinguishes_clients_behind_the_trusted_proxy(client):
+    """Nginx-forwarded client addresses must not collapse all visitors into one bucket."""
+    client.application.config.update(
+        ASSESSMENT_RATE_LIMIT=1,
+        ASSESSMENT_RATE_WINDOW=3600,
+    )
+
+    first = client.post(
+        "/api/assessment",
+        json=VALID_ASSESSMENT,
+        headers={"X-Forwarded-For": "198.51.100.10", "X-Forwarded-Proto": "https"},
+    )
+    second = client.post(
+        "/api/assessment",
+        json=VALID_ASSESSMENT,
+        headers={"X-Forwarded-For": "198.51.100.11", "X-Forwarded-Proto": "https"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
 def test_login_rate_limit_blocks_repeated_wrong_passwords(client):
     """Repeated login failures from one source must be throttled."""
     client.application.config.update(LOGIN_RATE_LIMIT=2, LOGIN_RATE_WINDOW=900)
