@@ -1,0 +1,23 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2>资产编码管理 ({{ codes|length }})</h2>
+<div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;">
+  <a href="/admin/assets/code/new" class="btn btn-primary">+ 新增编码</a>
+  <a href="/admin/assets" class="btn btn-outline">← 返回仪表盘</a>
+</div>
+<table>
+<thead><tr><th>ID</th><th>编码</th><th>名称</th><th>类别</th><th>排序</th><th>操作</th></tr></thead>
+<tbody>
+{% for c in codes %}
+<tr>
+  <td>{{ c.id }}</td>
+  <td><strong>{{ c.code }}</strong></td>
+  <td>{{ c.name }}</td>
+  <td><span class="tag">{{ '桌子' if c.category == 'table' else '椅子' }}</span></td>
+  <td>{{ c.sort_order }}</td>
+  <td><a href="/admin/assets/code/{{ c.id }}" class="btn btn-outline btn-sm">编辑</a></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block title %}企业AI转型平台 - 从RAG知识库开始，完成AI转型{% endblock %}
+
+{% block extra_css %}
+/* Trust bar under hero */
+.trust-bar { display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; padding: 32px 24px; background: var(--bg); border-bottom: 1px solid var(--border-light); }
+.trust-item { text-align: center; }
+.trust-item .n { font-size: 28px; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+.trust-item .u { font-size: 13px; color: var(--primary); font-weight: 600; }
+.trust-item .l { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+/* Why-us section */
+.why-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+.why-card { text-align: center; padding: 32px 20px; }
+.why-icon { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 26px; margin: 0 auto 16px; }
+.why-card h4 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+.why-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+
+/* Industry coverage */
+.industry-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+.industry-cell { background: #fff; border-radius: var(--radius); padding: 20px 12px; text-align: center; box-shadow: var(--shadow-sm); transition: all var(--transition); cursor: default; }
+.industry-cell:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.industry-cell .ind-icon { font-size: 28px; margin-bottom: 8px; }
+.industry-cell .ind-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.industry-cell .ind-count { font-size: 11px; color: var(--text-tertiary); }
+
+/* Logo wall */
+.logo-wall { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; align-items: center; opacity: 0.6; }
+.logo-placeholder { width: 80px; height: 32px; background: var(--bg-gray); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-tertiary); font-weight: 600; letter-spacing: 0.02em; }
+
+/* Assurance badges */
+.assurance-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.assurance-card { display: flex; gap: 16px; align-items: flex-start; padding: 24px; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.assurance-card .as-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.assurance-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.assurance-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+/* Stats band */
+.stats-band { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.stat-block { text-align: center; padding: 40px 20px; border-right: 1px solid var(--border-light); }
+.stat-block:last-child { border-right: none; }
+.stat-block .sn { font-size: 44px; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 4px; }
+.stat-block .sl { font-size: 14px; color: var(--text-secondary); }
+.stat-block .ss { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+
+@media (max-width: 768px) {
+  .why-grid, .assurance-grid { grid-template-columns: repeat(2, 1fr); }
+  .industry-grid { grid-template-columns: repeat(3, 1fr); }
+  .stats-band { grid-template-columns: repeat(2, 1fr); }
+  .trust-bar { gap: 20px; }
+  .trust-item .n { font-size: 22px; }
+}
+{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-inner">
+    <h1 style="white-space: nowrap; font-size: clamp(1.8rem, 4vw, 3.5rem);">"企业 AI 转型，从 RAG 知识库开始"</h1>
+    <p>数据不出内网 · 知识可问答 · 流程可自动化 · 决策可智能化<br>帮企业低成本、私有化、可落地完成 AI 转型</p>
+    <div class="hero-btns">
+      <a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估</a>
+      <a href="/services" class="btn btn-outline">查看服务方案</a>
+    </div>
+  </div>
+</section>
+
+<!-- Trust bar — 对标阿里云首页数字栏 -->
+<div class="trust-bar">
+  <div class="trust-item"><div class="n"><span class="count-up" data-count="27" data-suffix="+" data-duration="1500">27</span><span class="u">+</span></div><div class="l">真实落地案例</div></div>
+  <div class="trust-item"><div class="n"><span class="count-up" data-count="9" data-duration="1400">9</span></div><div class="l">大行业覆盖</div></div>
+  <div class="trust-item"><div class="n"><span class="count-up" data-count="12" data-duration="1400">12</span></div><div class="l">项标准化服务</div></div>
+  <div class="trust-item"><div class="n"><span class="count-up" data-count="100" data-suffix="%" data-duration="1600">100</span><span class="u">%</span></div><div class="l">私有化部署</div></div>
+</div>
+
+<!-- 为什么选择我们 — 对标阿里云"为什么选择阿里云" -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>为什么选择我们</h2>
+      <p>四大核心能力，为企业 AI 转型保驾护航</p>
+    </div>
+    <div class="why-grid">
+      <div class="why-card reveal reveal-delay-1">
+        <div class="why-icon" style="background:#e8f4fd;">🛡️</div>
+        <h4>全私有化部署</h4>
+        <p>数据 100% 留在企业内网，满足金融、医疗等强监管行业合规要求。开源模型本地运行，零外部数据传输。</p>
+      </div>
+      <div class="why-card reveal reveal-delay-2">
+        <div class="why-icon" style="background:#fef4ee;">⚡</div>
+        <h4>2-4 周快速交付</h4>
+        <p>标准化产品 + 成熟方法论，启航包最快 2 周上线。不拖工期，不堆人力，让您尽快看到 AI 的实际价值。</p>
+      </div>
+      <div class="why-card reveal reveal-delay-3">
+        <div class="why-icon" style="background:#e8f4fd;">🔓</div>
+        <h4>开源技术栈</h4>
+        <p>优先采用 Qwen/DeepSeek/GLM 等国产开源模型和 ChromaDB/Milvus 开放生态。零供应商锁定，自主可控。</p>
+      </div>
+      <div class="why-card reveal reveal-delay-4">
+        <div class="why-icon" style="background:#fef4ee;">🎯</div>
+        <h4>渐进式路线</h4>
+        <p>从 RAG 知识库（90% 企业起点）→ Agent 智能体 → AI 中台。每一步都有明确里程碑，可量化、可验证。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 行业覆盖全景 — 对标腾讯云"方案全景" -->
+<section class="section section-gray">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>行业 AI 转型全景</h2>
+      <p>覆盖 9 大行业，每个行业都有可复制的成功路径</p>
+    </div>
+    <div class="industry-grid">
+      <a href="/cases?industry=制造业" class="industry-cell glow-ring reveal reveal-delay-1" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🏭</div><div class="ind-name">制造业</div><div class="ind-count">5 个案例</div>
+      </a>
+      <a href="/cases?industry=金融" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🏦</div><div class="ind-name">金融</div><div class="ind-count">5 个案例</div>
+      </a>
+      <a href="/cases?industry=零售/电商" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🛒</div><div class="ind-name">零售/电商</div><div class="ind-count">4 个案例</div>
+      </a>
+      <a href="/cases?industry=医疗/健康" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🏥</div><div class="ind-name">医疗/健康</div><div class="ind-count">4 个案例</div>
+      </a>
+      <a href="/cases?industry=建筑/地产" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🏗️</div><div class="ind-name">建筑/地产</div><div class="ind-count">3 个案例</div>
+      </a>
+      <a href="/cases?industry=科技/互联网" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">💻</div><div class="ind-name">科技/互联网</div><div class="ind-count">3 个案例</div>
+      </a>
+      <a href="/cases?industry=教育" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">📚</div><div class="ind-name">教育</div><div class="ind-count">1 个案例</div>
+      </a>
+      <a href="/cases?industry=物流" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🚚</div><div class="ind-name">物流</div><div class="ind-count">1 个案例</div>
+      </a>
+      <a href="/cases?industry=农业" class="industry-cell" style="text-decoration:none;color:inherit;">
+        <div class="ind-icon">🌾</div><div class="ind-name">农业</div><div class="ind-count">1 个案例</div>
+      </a>
+      <a href="/cases" class="industry-cell" style="text-decoration:none;color:var(--primary);border:2px dashed var(--primary);background:var(--primary-light);">
+        <div class="ind-icon">+</div><div class="ind-name">更多行业</div><div class="ind-count">定制方案</div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- 三层服务 — 精简版 -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>三层服务体系</h2>
+      <p>从入门到高阶，渐进式完成 AI 转型</p>
+    </div>
+    <div class="three-col">
+      <div class="card reveal reveal-delay-1" style="border-top:3px solid var(--primary);">
+        <div class="card-icon blue">🚀</div>
+        <h3>启航包</h3>
+        <p style="color:var(--primary);font-weight:600;margin-bottom:8px;">企业 AI 就绪</p>
+        <p style="color:var(--text-secondary);font-size:14px;">数据治理 + 本地大模型 + RAG 知识库 + AI 办公助手</p>
+        <div style="margin-top:12px;display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);"><span>⏱ 2-4 周</span><span>🏢 所有企业</span></div>
+        <a href="/services" style="display:inline-block;margin-top:16px;font-size:14px;font-weight:600;">了解详情 →</a>
+      </div>
+      <div class="card reveal reveal-delay-2" style="border-top:3px solid var(--accent);">
+        <div class="card-icon orange">⚡</div>
+        <h3>加速包</h3>
+        <p style="color:var(--accent);font-weight:600;margin-bottom:8px;">行业 AI 落地</p>
+        <p style="color:var(--text-secondary);font-size:14px;">垂直行业 RAG + AI Agent + RPA 自动化 + 决策 AI</p>
+        <div style="margin-top:12px;display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);"><span>⏱ 4-8 周</span><span>🏭 行业深度</span></div>
+        <a href="/services" style="display:inline-block;margin-top:16px;font-size:14px;font-weight:600;">了解详情 →</a>
+      </div>
+      <div class="card reveal reveal-delay-3" style="border-top:3px solid #1d1d1f;">
+        <div class="card-icon" style="background:#1d1d1f;color:#fff;">🏢</div>
+        <h3>旗舰包</h3>
+        <p style="color:var(--text);font-weight:600;margin-bottom:8px;">AI 中台建设</p>
+        <p style="color:var(--text-secondary);font-size:14px;">AI 私有中台 + 多模态 AI + 安全合规 + 战略咨询</p>
+        <div style="margin-top:12px;display:flex;gap:16px;font-size:12px;color:var(--text-tertiary);"><span>⏱ 3-6 月</span><span>🏢 大型企业</span></div>
+        <a href="/services" style="display:inline-block;margin-top:16px;font-size:14px;font-weight:600;">了解详情 →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 客户案例精选 -->
+{% if cases %}
+<section class="section section-gray">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>客户案例</h2>
+      <p>真实落地场景，可复制的 AI 转型路径</p>
+    </div>
+    <div class="card-grid">
+      {% for c in cases[:6] %}
+      <div class="case-card">
+        <div class="case-header">
+          <div class="case-logo">{{ c.logo_text or 'E' }}</div>
+          <div>
+            <div style="font-weight:600;">{{ c.title }}</div>
+            <div class="case-meta">{{ c.industry }} · {{ c.scale }}</div>
+          </div>
+        </div>
+        <div class="case-body">
+          <p style="font-size:14px;color:var(--text-secondary);"><strong>痛点：</strong>{{ c.pain_point }}</p>
+          <p style="font-size:14px;color:var(--text-secondary);margin-top:8px;"><strong>方案：</strong>{{ c.solution }}</p>
+          <p style="font-size:14px;color:var(--accent);margin-top:8px;font-weight:600;">📈 {{ c.result }}</p>
+          <div class="case-tags">
+            {% for tag in (c.tags or '').split(',')[:3] %}
+            <span class="tag">{{ tag.strip() }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="text-align:center;margin-top:32px;">
+      <a href="/cases" class="btn btn-white">查看全部 27 个案例 →</a>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- 服务保障 — 对标腾讯云"VIP客户服务模块" -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>服务保障体系</h2>
+      <p>不只交付系统，更交付安心</p>
+    </div>
+    <div class="assurance-grid">
+      <div class="assurance-card reveal reveal-delay-1">
+        <div class="as-icon" style="background:#e8f4fd;">🔒</div>
+        <div>
+          <h4>数据安全承诺</h4>
+          <p>全部数据留在您的内网，部署全程不接触任何外部服务。支持签署 NDA 和数据处理协议。</p>
+        </div>
+      </div>
+      <div class="assurance-card reveal reveal-delay-2">
+        <div class="as-icon" style="background:#fef4ee;">📋</div>
+        <div>
+          <h4>全流程文档</h4>
+          <p>部署手册、运维指南、API 文档、应急预案——全套交付，让您的团队真正掌控系统。</p>
+        </div>
+      </div>
+      <div class="assurance-card reveal reveal-delay-3">
+        <div class="as-icon" style="background:#e8f4fd;">🎓</div>
+        <div>
+          <h4>培训 + 知识转移</h4>
+          <p>不只是"给一套系统"，我们培训您的团队——从管理员到最终用户，确保独立运营能力。</p>
+        </div>
+      </div>
+      <div class="assurance-card reveal reveal-delay-4">
+        <div class="as-icon" style="background:#fef4ee;">🔄</div>
+        <div>
+          <h4>持续迭代支持</h4>
+          <p>模型升级、知识库更新、性能优化——我们提供长期运维支持，系统随业务一起成长。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 行业数字大屏 — 对标阿里云数据可视化 -->
+<section class="section section-gray">
+  <div class="section-inner">
+    <div class="stats-band">
+      <div class="stat-block reveal reveal-delay-1">
+        <div class="sn" style="color:var(--primary);"><span class="count-up" data-count="90" data-suffix="%" data-duration="1600">90</span></div>
+        <div class="sl">企业从 RAG 知识库起步</div>
+        <div class="ss">行业公认最低门槛路径</div>
+      </div>
+      <div class="stat-block reveal reveal-delay-2">
+        <div class="sn" style="color:var(--accent);"><span class="count-up" data-count="2" data-suffix="~4 周" data-duration="1400">2</span></div>
+        <div class="sl">启航包最快交付周期</div>
+        <div class="ss">标准化产品，即装即用</div>
+      </div>
+      <div class="stat-block reveal reveal-delay-3">
+        <div class="sn" style="color:var(--primary);"><span class="count-up" data-count="27" data-suffix="+" data-duration="1500">27</span></div>
+        <div class="sl">真实落地案例积累</div>
+        <div class="ss">覆盖 9 大行业</div>
+      </div>
+      <div class="stat-block reveal reveal-delay-4">
+        <div class="sn" style="color:var(--accent);"><span class="count-up" data-count="0" data-duration="1000">0</span></div>
+        <div class="sl">数据外泄事故</div>
+        <div class="ss">100% 私有化部署保障</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 资讯 -->
+{% if articles %}
+<section class="section">
+  <div class="section-inner">
+    <div class="section-h">
+      <h2>资讯</h2>
+      <p>精选行业研究报告、技术科普与实践案例</p>
+    </div>
+    <div class="card-grid">
+      {% for a in articles[:6] %}
+      <div class="card">
+        <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">{{ a.source }} · {{ a.publish_date or '' }}</div>
+        <h3 style="font-size:15px;margin-bottom:8px;"><a href="/article/{{ a.id }}">{{ a.title }}</a></h3>
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;">{{ a.summary[:120] }}{% if a.summary|length > 120 %}...{% endif %}</p>
+        <div style="margin-top:12px;">
+          {% for tag in (a.tags or '').split(',')[:3] %}
+          <span class="tag">{{ tag.strip() }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="text-align:center;margin-top:32px;">
+      <a href="/insights" class="btn btn-white">查看全部资讯 →</a>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- 底部 CTA — 对标阿里云/腾讯云底部转化区 -->
+<section class="section" style="background:var(--bg-gray);text-align:center;">
+  <div class="section-inner">
+    <h2 style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin-bottom:12px;">准备好开启 AI 转型了吗？</h2>
+    <p style="font-size:17px;color:var(--text-secondary);margin-bottom:28px;">5 分钟完成行业化评估，获取量身定制的方案建议与路线图</p>
+    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+      <a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估 →</a>
+      <a href="/services" class="btn btn-outline">查看服务方案</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2 style="margin-bottom:24px;">{% if announcement %}编辑公告 #{{ announcement.id }}{% else %}新建公告{% endif %}</h2>
+<div class="card" style="padding:24px;">
+<form method="POST">
+  <div class="form-group"><label>标题</label><input type="text" name="title" value="{{ announcement.title if announcement else '' }}" required></div>
+  <div class="form-group"><label>内容 HTML</label><textarea name="content_html" style="min-height:200px;">{{ announcement.content_html if announcement else '' }}</textarea></div>
+  <div style="display:flex;gap:12px;">
+    <div class="form-group"><label>置顶</label><select name="is_pinned"><option value="0" {% if not announcement or not announcement.is_pinned %}selected{% endif %}>否</option><option value="1" {% if announcement and announcement.is_pinned %}selected{% endif %}>是</option></select></div>
+    <div class="form-group"><label>状态</label><select name="status"><option value="published" {% if not announcement or announcement.status=='published' %}selected{% endif %}>已发布</option><option value="draft" {% if announcement and announcement.status=='draft' %}selected{% endif %}>草稿</option></select></div>
+  </div>
+  <button type="submit" class="btn btn-primary">保存</button>
+  <a href="/admin/announcements" class="btn btn-outline">返回</a>
+</form>
+</div>
+{% endblock %}

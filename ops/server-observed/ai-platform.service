@@ -1,0 +1,15 @@
+[Unit]
+Description=Enterprise AI Transformation Platform
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/ai-platform
+ExecStart=/usr/bin/python3 -m gunicorn -w 2 -b 0.0.0.0:5080 --access-logfile /var/log/ai-platform-access.log --error-logfile /var/log/ai-platform-error.log wsgi:app
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

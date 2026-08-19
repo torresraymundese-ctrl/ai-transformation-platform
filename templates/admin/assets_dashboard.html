@@ -1,0 +1,61 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2>资产管理仪表盘</h2>
+
+<div class="admin-stats" style="margin-bottom:24px;">
+  <div class="stat-card">
+    <div class="num">{{ stats.total_codes }}</div>
+    <div style="color:var(--text-secondary);font-size:12px;">资产编码</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ stats.total_unit_a }}</div>
+    <div style="color:var(--text-secondary);font-size:12px;">单位A 资产条目</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ stats.total_unit_b }}</div>
+    <div style="color:var(--text-secondary);font-size:12px;">单位B 资产条目</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ stats.total_qty_a + stats.total_qty_b }}</div>
+    <div style="color:var(--text-secondary);font-size:12px;">资产总数量</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+  <div class="card" style="padding:16px;">
+    <h3 style="margin-bottom:12px;">单位A — 按科室分布</h3>
+    {% if unit_a_by_dept %}
+    <table><thead><tr><th>科室</th><th>条目数</th><th>总数量</th></tr></thead>
+    <tbody>
+    {% for row in unit_a_by_dept %}
+    <tr><td>{{ row.department }}</td><td>{{ row.cnt }}</td><td>{{ row.total_qty }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% else %}<p style="color:var(--text-secondary);">暂无数据</p>{% endif %}
+  </div>
+  <div class="card" style="padding:16px;">
+    <h3 style="margin-bottom:12px;">资产类型分布</h3>
+    <table><thead><tr><th>单位</th><th>桌子</th><th>椅子</th></tr></thead>
+    <tbody>
+    <tr>
+      <td><strong>单位A</strong></td>
+      <td>{{ unit_a_table_qty }}</td>
+      <td>{{ unit_a_chair_qty }}</td>
+    </tr>
+    <tr>
+      <td><strong>单位B</strong></td>
+      <td>{{ unit_b_table_qty }}</td>
+      <td>{{ unit_b_chair_qty }}</td>
+    </tr>
+    </tbody></table>
+  </div>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;">
+  <a href="/admin/assets/codes" class="btn btn-outline">资产编码管理</a>
+  <a href="/admin/assets/departments" class="btn btn-outline">科室管理</a>
+  <a href="/admin/assets/unit-a" class="btn btn-outline">单位A 资产</a>
+  <a href="/admin/assets/unit-b" class="btn btn-outline">单位B 资产</a>
+  <a href="/admin/assets/labels" class="btn btn-primary">标签打印</a>
+</div>
+{% endblock %}

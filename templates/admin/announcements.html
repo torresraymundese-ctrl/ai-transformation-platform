@@ -1,0 +1,21 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2 style="margin-bottom:20px;">📢 公告管理</h2>
+<a href="/admin/announcement/new" class="btn btn-primary btn-sm" style="margin-bottom:16px;display:inline-block;">+ 新建公告</a>
+<table style="width:100%;border-collapse:collapse;">
+<thead><tr style="text-align:left;border-bottom:2px solid var(--border);">
+<th style="padding:10px;">标题</th><th>置顶</th><th>状态</th><th>发布时间</th><th>操作</th></tr></thead>
+<tbody>
+{% for a in announcements %}
+<tr style="border-bottom:1px solid var(--border);">
+<td style="padding:10px;">{{ a.title }}</td>
+<td>{{ '📌' if a.is_pinned else '-' }}</td>
+<td>{{ a.status }}</td>
+<td style="font-size:12px;">{{ a.created_at }}</td>
+<td><a href="/admin/announcement/{{ a.id }}">编辑</a></td>
+</tr>
+{% else %}
+<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-tertiary);">暂无公告</td></tr>
+{% endfor %}
+</tbody></table>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2 style="margin-bottom:4px;">{% if article %}编辑文章 #{{ article.id }}{% else %}✍️ 新建文章{% endif %}</h2>
+<p style="font-size:13px;color:var(--text-secondary);margin-bottom:24px;">{% if article %}修改已有文章的内容、标签和状态{% else %}手动上传优秀行业报告、技术科普或平台原创内容{% endif %}</p>
+
+<div class="card" style="padding:28px;">
+<form method="POST">
+  <div class="form-group">
+    <label>📰 文章标题 *</label>
+    <input type="text" name="title" value="{{ article.title if article else '' }}" required placeholder="请输入文章标题">
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+    <div class="form-group">
+      <label>📂 来源</label>
+      <input type="text" name="source" value="{{ article.source if article else '' }}" placeholder="如：企业AI转型平台原创">
+    </div>
+    <div class="form-group">
+      <label>🔗 来源链接</label>
+      <input type="text" name="source_url" value="{{ article.source_url if article else '' }}" placeholder="原文 URL（选填）">
+    </div>
+    <div class="form-group">
+      <label>🏷️ 分类</label>
+      <select name="category">
+        <option value="insight" {% if article and article.category=='insight' %}selected{% endif %}>行业洞察</option>
+        <option value="whitepaper" {% if article and article.category=='whitepaper' %}selected{% endif %}>白皮书</option>
+        <option value="tech" {% if article and article.category=='tech' %}selected{% endif %}>技术科普</option>
+        <option value="announcement" {% if article and article.category=='announcement' %}selected{% endif %}>平台公告</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>🏷️ 标签</label>
+    <input type="text" name="tags" value="{{ article.tags if article else '' }}" placeholder="逗号分隔，如：RAG,制造业,知识库">
+  </div>
+  <div class="form-group">
+    <label>📝 摘要</label>
+    <textarea name="summary" placeholder="简要概括文章核心内容（1-3 句话）">{{ article.summary if article else '' }}</textarea>
+  </div>
+  <div class="form-group">
+    <label>📄 正文 HTML <span style="font-weight:400;color:var(--text-tertiary);font-size:12px;">— 支持 HTML 标签，留空则前端自动展示摘要+原文链接</span></label>
+    <textarea name="content_html" style="min-height:280px;font-family:monospace;font-size:13px;" placeholder="&lt;p&gt;第一段正文内容...&lt;/p&gt;
+&lt;p&gt;第二段正文内容...&lt;/p&gt;
+&lt;blockquote&gt;引用内容&lt;/blockquote&gt;">{{ article.content_html if article else '' }}</textarea>
+  </div>
+  <div style="display:flex;gap:16px;align-items:end;flex-wrap:wrap;">
+    <div class="form-group" style="margin-bottom:0;">
+      <label>⭐ 精选</label>
+      <select name="is_featured">
+        <option value="0" {% if not article or not article.is_featured %}selected{% endif %}>否</option>
+        <option value="1" {% if article and article.is_featured %}selected{% endif %}>是（展示在首页）</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label>📌 状态</label>
+      <select name="status">
+        <option value="published" {% if not article or article.status=='published' %}selected{% endif %}>已发布</option>
+        <option value="draft" {% if article and article.status=='draft' %}selected{% endif %}>草稿</option>
+      </select>
+    </div>
+    <div style="flex:1;"></div>
+    <button type="submit" class="btn btn-primary">💾 保存文章</button>
+    <a href="/admin/articles" class="btn btn-outline">返回列表</a>
+  </div>
+</form>
+</div>
+
+<div style="margin-top:16px;padding:14px 20px;background:#fef4ee;border-radius:var(--radius);font-size:12px;color:var(--accent);">
+  💡 <strong>提示：</strong>如果文章有外部原文链接，正文可留空——前端会自动展示「阅读全文」跳转按钮，方便读者去原文网站查看完整内容。平台原创文章建议填写正文。
+</div>
+{% endblock %}

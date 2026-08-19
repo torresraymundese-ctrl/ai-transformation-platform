@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}资讯 - 企业AI转型平台{% endblock %}
+{% block extra_css %}
+.search-box { position: relative; margin-bottom: 24px; }
+.search-box input { width: 100%; padding: 14px 20px 14px 48px; border: 1.5px solid var(--border-light); border-radius: var(--radius-full); font-size: 16px; font-family: inherit; background: var(--bg); transition: all var(--transition); }
+.search-box input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0,113,227,0.1); }
+.search-box .search-icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); font-size: 18px; pointer-events: none; }
+.deep-topic-card { background: var(--bg); border-radius: var(--radius-lg); padding: 24px; display: flex; gap: 20px; align-items: center; border: 1.5px solid var(--border-light); transition: all var(--transition); cursor: pointer; }
+.deep-topic-card:hover { border-color: var(--primary); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.deep-topic-icon { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0; }
+.topic-tag { display: inline-block; font-size: 11px; padding: 2px 10px; border-radius: var(--radius-full); background: var(--accent-light); color: var(--accent); font-weight: 600; margin-right: 6px; }
+.empty-state { text-align: center; padding: 80px 20px; }
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+{% endblock %}
+{% block content %}
+<section class="page-hero"><h1>资讯</h1><p>精选行业研究报告、技术科普与落地案例 · 持续更新</p></section>
+<section class="section" style="padding-top:48px;"><div class="section-inner">
+
+  <!-- Search -->
+  <div class="search-box">
+    <span class="search-icon">🔍</span>
+    <input type="text" id="searchInput" placeholder="搜索文章、报告、关键词..." value="{{ search or '' }}" onkeydown="if(event.key==='Enter')doSearch()">
+    {% if search %}<div style="margin-top:8px;font-size:13px;color:var(--text-secondary);">搜索 "{{ search }}" 的结果（{{ articles|length }} 条）· <a href="/insights">清除</a></div>{% endif %}
+  </div>
+
+  <!-- Filter tags -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:32px;">
+    <a href="/insights" class="btn btn-sm {% if not current_category and not current_tag %}btn-primary{% else %}btn-white{% endif %}">全部</a>
+    <a href="/insights?category=insight" class="btn btn-sm {% if current_category=='insight' %}btn-primary{% else %}btn-white{% endif %}">行业洞察</a>
+    <a href="/insights?category=whitepaper" class="btn btn-sm {% if current_category=='whitepaper' %}btn-primary{% else %}btn-white{% endif %}">白皮书</a>
+    <a href="/insights?category=tech" class="btn btn-sm {% if current_category=='tech' %}btn-primary{% else %}btn-white{% endif %}">技术科普</a>
+    <span style="color:var(--border);margin:0 2px;">|</span>
+    <a href="/insights?tag=RAG" class="btn btn-sm {% if current_tag=='RAG' %}btn-primary{% else %}btn-white{% endif %}">#RAG</a>
+    <a href="/insights?tag=大模型" class="btn btn-sm {% if current_tag=='大模型' %}btn-primary{% else %}btn-white{% endif %}">#大模型</a>
+    <a href="/insights?tag=制造" class="btn btn-sm {% if current_tag=='制造' %}btn-primary{% else %}btn-white{% endif %}">#制造业</a>
+    <a href="/insights?tag=金融" class="btn btn-sm {% if current_tag=='金融' %}btn-primary{% else %}btn-white{% endif %}">#金融</a>
+    <a href="/insights?tag=Agent" class="btn btn-sm {% if current_tag=='Agent' %}btn-primary{% else %}btn-white{% endif %}">#Agent</a>
+    <span style="color:var(--border);margin:0 2px;">|</span>
+    <a href="/insights?category=announcement" class="btn btn-sm {% if current_category=='announcement' %}btn-primary{% else %}btn-white{% endif %}">📢 公告</a>
+  </div>
+
+  <!-- Deep Topics Section (only on main page, not filtered) -->
+  {% if not current_category and not current_tag and not search %}
+  <div style="margin-bottom:40px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="font-size:18px;font-weight:700;">🔥 深度专题</h3>
+      <span style="font-size:12px;color:var(--text-tertiary);">定期更新 · 可下载 PDF</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
+      <div class="deep-topic-card" onclick="location.href='/insights?tag=制造'">
+        <div class="deep-topic-icon" style="background:#e8f4fd;">🏭</div>
+        <div>
+          <div style="font-weight:700;font-size:16px;margin-bottom:4px;">制造业 AI 转型路线图 2026</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">从设备数据采集到智能排产，拆解制造企业 AI 落地的 6 个关键步骤。</div>
+          <div style="margin-top:8px;"><span class="topic-tag">深度报告</span><span style="font-size:11px;color:var(--text-tertiary);">含实施清单 PDF</span></div>
+        </div>
+      </div>
+      <div class="deep-topic-card" onclick="location.href='/insights?tag=RAG'">
+        <div class="deep-topic-icon" style="background:#fef4ee;">📚</div>
+        <div>
+          <div style="font-weight:700;font-size:16px;margin-bottom:4px;">企业 RAG 知识库搭建完全指南</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">从选型到上线：数据治理→向量化→检索优化→效果评估全流程拆解。</div>
+          <div style="margin-top:8px;"><span class="topic-tag">实操手册</span><span style="font-size:11px;color:var(--text-tertiary);">含技术选型对比表</span></div>
+        </div>
+      </div>
+      <div class="deep-topic-card" onclick="location.href='/insights?tag=金融'">
+        <div class="deep-topic-icon" style="background:#e8f4fd;">🏦</div>
+        <div>
+          <div style="font-weight:700;font-size:16px;margin-bottom:4px;">金融行业 AI Agent 落地案例集</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.5;">智能风控·合规审查·投研助理·客服 Agent——金融AI四大场景实战。</div>
+          <div style="margin-top:8px;"><span class="topic-tag">案例合集</span><span style="font-size:11px;color:var(--text-tertiary);">4大场景 12个案例</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Article cards -->
+  {% if articles %}
+  <div class="card-grid">
+    {% for a in articles %}
+    <div class="card">
+      <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">{{ a.source }} · {{ a.publish_date or '' }} · {{ {'insight':'行业洞察','whitepaper':'白皮书','tech':'技术科普','announcement':'公告'}.get(a.category, a.category) }}</div>
+      <h3 style="font-size:15px;margin-bottom:8px;line-height:1.5;"><a href="/article/{{ a.id }}">{{ a.title }}</a></h3>
+      <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;">{{ a.summary[:150] }}{% if a.summary|length > 150 %}...{% endif %}</p>
+      <div style="margin-top:12px;">{% for tag in (a.tags or '').split(',')[:3] %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif not search %}
+  <div class="empty-state">
+    <div class="icon">📚</div>
+    <p style="font-size:18px;color:var(--text);margin-bottom:8px;">内容建设中</p>
+    <p style="color:var(--text-secondary);">内容抓取引擎正在采集行业最新报告和文章，请稍后刷新查看</p>
+  </div>
+  {% endif %}
+
+  <!-- Announcements -->
+  {% if announcements and not current_category and not search %}
+  <div style="margin-top:48px;">
+    <h3 style="margin-bottom:12px;font-size:16px;">📢 平台公告</h3>
+    {% for a in announcements %}
+    <div style="background:var(--bg-gray);border-left:3px solid var(--primary);padding:16px 20px;margin-bottom:8px;border-radius:var(--radius);">
+      <div style="font-weight:600;margin-bottom:4px;">{{ a.title }}</div>
+      <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">{{ a.content_html | safe if a.content_html else '' }}</div>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">{{ a.created_at }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div></section>
+
+<script>
+function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (q) window.location.href = '/insights?search=' + encodeURIComponent(q);
+  else window.location.href = '/insights';
+}
+</script>
+{% endblock %}

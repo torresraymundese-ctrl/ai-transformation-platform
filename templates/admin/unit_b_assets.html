@@ -1,0 +1,30 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2>单位B资产 ({{ assets|length }} 条)</h2>
+<div style="margin-bottom:16px;display:flex;gap:12px;">
+  <a href="/admin/assets/unit-b/new" class="btn btn-primary">+ 新增资产</a>
+  <a href="/admin/assets/labels?unit=B" class="btn btn-outline">打印标签</a>
+  <a href="/admin/assets" class="btn btn-outline">← 返回仪表盘</a>
+</div>
+<table>
+<thead><tr><th>ID</th><th>编码</th><th>名称</th><th>类别</th><th>数量</th><th>备注</th><th>操作</th></tr></thead>
+<tbody>
+{% for a in assets %}
+<tr>
+  <td>{{ a.id }}</td>
+  <td><strong>{{ a.code }}</strong></td>
+  <td>{{ a.code_name }}</td>
+  <td><span class="tag">{{ '桌子' if a.category == 'table' else '椅子' }}</span></td>
+  <td>{{ a.quantity }}</td>
+  <td>{{ a.remark }}</td>
+  <td style="display:flex;gap:4px;">
+    <a href="/admin/assets/unit-b/{{ a.id }}" class="btn btn-outline btn-sm">编辑</a>
+    <form method="POST" action="/admin/assets/unit-b/delete/{{ a.id }}" style="display:inline;" onsubmit="return confirm('确定删除吗？');">
+      <button class="btn btn-danger btn-sm">删除</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,431 @@
+#!/usr/bin/env python                # ✅ 指定 Python 解释器
+# -*- coding: utf-8 -*-               # ✅ UTF-8 编码声明
+"""企业AI转型平台 — 数据库模型 & 初始化"""
+
+import sqlite3                          # SQLite 数据库驱动
+import os                               # 文件系统操作（路径、目录）
+import json                             # JSON 数据（备用）
+
+DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
+    os.path.dirname(__file__),          # 当前脚本所在目录
+    "data",                             # data 子目录
+    "platform.db"                       # 数据库文件名
+)
+
+def get_db():                           # 🔌 获取数据库连接
+    """返回带 Row 工厂的数据库连接（支持字段名访问）"""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # 自动创建 data/ 目录
+    conn = sqlite3.connect(DB_PATH)     # 连接 SQLite 数据库
+    conn.row_factory = sqlite3.Row      # 启用行工厂（查询结果可通过字段名访问）
+    conn.execute("PRAGMA journal_mode=WAL")  # 启用 WAL 写入模式（提升并发性能）
+    return conn
+
+def init_db():                          # 🏗️ 初始化数据库
+    """创建所有表结构 + 插入种子数据（如果表为空）"""
+    conn = get_db()
+    conn.executescript("""
+        -- 📰 文章表：存储资讯文章和公告内容
+        CREATE TABLE IF NOT EXISTS articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,   -- 主键，自增
+            title_hash TEXT UNIQUE,                  -- 标题 MD5 去重标识
+            title TEXT NOT NULL,                     -- 文章标题
+            source TEXT NOT NULL,                    -- 文章来源
+            source_url TEXT,                         -- 原文链接
+            summary TEXT,                            -- 文章摘要
+            content_html TEXT,                       -- 正文 HTML
+            tags TEXT,                               -- 逗号分隔的标签
+            category TEXT DEFAULT 'insight',         -- 分类（insight/whitepaper/tech/announcement）
+            publish_date TEXT,                       -- 发布日期
+            created_at TEXT DEFAULT (datetime('now','localtime')),  -- 创建时间
+            is_featured INTEGER DEFAULT 0,           -- 是否精选（0=否 1=是）
+            status TEXT DEFAULT 'published'          -- 状态（published/draft）
+        );
+
+        -- 📋 案例表：存储企业 AI 转型成功案例
+        CREATE TABLE IF NOT EXISTS cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,   -- 主键，自增
+            title TEXT NOT NULL,                     -- 案例标题
+            industry TEXT NOT NULL,                  -- 所属行业
+            scale TEXT,                              -- 企业规模
+            pain_point TEXT,                         -- 痛点描述
+            solution TEXT,                           -- 解决方案
+            result TEXT,                             -- 实施效果
+            tags TEXT,                               -- 逗号分隔的标签
+            logo_text TEXT,                          -- Logo 文字（缩写）
+            is_featured INTEGER DEFAULT 0,           -- 是否精选
+            sort_order INTEGER DEFAULT 0,            -- 排序序号
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        -- 📦 服务表：存储三层服务方案（启航/加速/旗舰）
+        CREATE TABLE IF NOT EXISTS services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,                      -- 服务名称
+            tier TEXT NOT NULL,                      -- 层级（starter/accelerate/flagship）
+            category TEXT,                           -- 服务分类
+            description TEXT,                        -- 服务描述
+            pain_point TEXT,                         -- 解决的痛点
+            timeline TEXT,                           -- 交付周期
+            icon TEXT,                                -- 图标标识符
+            sort_order INTEGER DEFAULT 0
+        );
+
+        -- 📊 评估记录表：存储企业 AI 就绪度评估结果
+        CREATE TABLE IF NOT EXISTS assessments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT,                       -- 公司名称
+            contact_email TEXT,                      -- 联系邮箱
+            scores TEXT,                             -- 评分详情（JSON 字符串）
+            result TEXT,                             -- 推荐方案
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        -- ⚙️ 站点配置表：键值对存储
+        CREATE TABLE IF NOT EXISTS site_config (
+            key TEXT PRIMARY KEY,                    -- 配置键（主键）
+            value TEXT                               -- 配置值
+        );
+
+        -- 📢 公告表：平台公告内容
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,                     -- 公告标题
+            content_html TEXT,                       -- 公告内容 HTML
+            is_pinned INTEGER DEFAULT 0,             -- 是否置顶
+            status TEXT DEFAULT 'published',         -- 状态
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        -- 🏷️ 资产编码表：统一管理桌椅等资产的编码与分类
+        CREATE TABLE IF NOT EXISTS asset_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE,                -- 资产编码（如 Z001, Y001）
+            name TEXT NOT NULL,                       -- 资产名称
+            category TEXT NOT NULL CHECK(category IN ('table','chair')),  -- 类别
+            sort_order INTEGER DEFAULT 0
+        );
+
+        -- 🏢 科室表：单位A的科室列表
+        CREATE TABLE IF NOT EXISTS asset_departments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,                -- 科室名称
+            sort_order INTEGER DEFAULT 0
+        );
+
+        -- 📦 单位A资产表：按科室归类的资产记录
+        CREATE TABLE IF NOT EXISTS unit_a_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            department TEXT NOT NULL,                 -- 所属科室
+            asset_code_id INTEGER NOT NULL,           -- 关联资产编码
+            quantity INTEGER NOT NULL DEFAULT 1,      -- 数量
+            remark TEXT DEFAULT '',                   -- 备注
+            FOREIGN KEY (asset_code_id) REFERENCES asset_codes(id)
+        );
+
+        -- 📦 单位B资产表：不分科室的资产记录
+        CREATE TABLE IF NOT EXISTS unit_b_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_code_id INTEGER NOT NULL,           -- 关联资产编码
+            quantity INTEGER NOT NULL DEFAULT 1,      -- 数量
+            remark TEXT DEFAULT '',                   -- 备注
+            FOREIGN KEY (asset_code_id) REFERENCES asset_codes(id)
+        );
+    """)
+
+    # 🌱 如果服务表为空，插入种子数据
+    if conn.execute("SELECT COUNT(*) FROM services").fetchone()[0] == 0:
+        seed_services(conn)
+    # 🌱 如果案例表为空，插入种子数据
+    if conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0] == 0:
+        seed_cases(conn)
+    # 🌱 如果资产编码表为空，插入种子数据
+    if conn.execute("SELECT COUNT(*) FROM asset_codes").fetchone()[0] == 0:
+        seed_asset_codes(conn)
+
+    conn.commit()                        # 提交所有变更
+    conn.close()                         # 关闭连接
+
+def seed_services(conn):                 # 🌱 插入种子服务数据
+    """向 services 表插入 12 项标准化服务（启航包 4 + 加速包 4 + 旗舰包 4）"""
+    services = [
+        # ===== 启航包（starter）：企业 AI 就绪，2-4 周交付 =====
+        ("企业数据治理与标准化", "starter", "data",
+         "清洗、标准化、去重、结构化企业数据，建立统一数据目录和权限体系。",
+         "数据散落在各个系统，格式不统一，AI 根本用不了。",
+         "2-4周", "database"),
+
+        ("本地私有大模型部署", "starter", "model",
+         "私有化部署 Qwen/DeepSeek/GLM 等开源大模型，数据不出内网。",
+         "担心数据安全，不敢用公有云 AI 服务。",
+         "1-2周", "server"),
+
+        ("RAG 智能知识库", "starter", "rag",
+         "文档解析→向量化→检索→生成答案，企业知识可问答，90% 客户第一个 AI 场景。",
+         "员工花大量时间找文档、查资料、问老员工。",
+         "1-2周", "book"),
+
+        ("AI 办公助手", "starter", "office",
+         "文档总结/翻译/润色，会议纪要生成，客服 FAQ 自动回复。",
+         "日常重复性文字工作占据大量时间。",
+         "1周", "file-text"),
+
+        # ===== 加速包（accelerate）：行业 AI 落地，4-8 周交付 =====
+        ("垂直行业 RAG", "accelerate", "rag",
+         "制造/医疗/金融/建筑等行业定制化知识库，比通用 RAG 更精准。",
+         "通用方案解决不了行业特有的文档格式和专业术语。",
+         "3-6周", "target"),
+
+        ("AI 智能体 Agent", "accelerate", "agent",
+         "自动走审批、查数据、生成报表、推送提醒，AI 真正融入业务流程。",
+         "跨系统操作繁琐，人工处理效率低、易出错。",
+         "4-8周", "cpu"),
+
+        ("RPA+AI 流程自动化", "accelerate", "rpa",
+         "财务/人力/供应链/生产四大场景的自动化改造。",
+         "重复性操作多，人力成本高，旺季忙不过来。",
+         "4-8周", "repeat"),
+
+        ("数据洞察与决策 AI", "accelerate", "analytics",
+         "自动生成经营分析报告、异常预警、客户分群、销售预测。",
+         "数据有，但没人分析；报表滞后，决策靠经验。",
+         "4-8周", "trending-up"),
+
+        # ===== 旗舰包（flagship）：AI 中台建设，3-6 月交付 =====
+        ("AI 私有中台建设", "flagship", "platform",
+         "统一算力管理、模型仓库、低代码 AI 应用搭建平台。",
+         "AI 能力碎片化，无法统一管理和复用。",
+         "3-6月", "layers"),
+
+        ("多模态 AI 应用", "flagship", "multimodal",
+         "视觉质检/OCR/语音转写/智能外呼/视频监控异常识别。",
+         "不只是文本——图片、语音、视频里也有大量信息需要 AI 处理。",
+         "2-6月", "eye"),
+
+        ("AI 安全合规体系", "flagship", "security",
+         "数据脱敏/水印/模型安全检测/审计追溯/合规报备。",
+         "监管要求越来越严，AI 系统必须合规可控。",
+         "1-3月", "shield"),
+
+        ("AI 战略咨询+培训", "flagship", "consulting",
+         "现状评估→机会点梳理→分阶段路线图→组织架构调整→人才培养。",
+         "不知道从哪开始，担心投入打水漂，团队没有 AI 能力。",
+         "1-3月", "users"),
+    ]
+    conn.executemany(
+        "INSERT INTO services (name,tier,category,description,pain_point,timeline,icon) VALUES (?,?,?,?,?,?,?)",
+        services
+    )
+
+def seed_cases(conn):                    # 🌱 插入种子案例数据
+    """向 cases 表插入 27 个企业 AI 转型案例（覆盖 9 大行业）"""
+    cases = [
+        # ===== 制造业 (5) =====
+        ("某中型制造企业 RAG 知识库落地", "制造业", "500-1000人",
+         "设备维修手册、工艺文档散落在老师傅脑子里，新人培训周期长达3个月",
+         "RAG 知识库 + 设备维修文档向量化 + 故障诊断问答助手",
+         "维修响应时间缩短 60%，新人上手从 3 个月降到 2 周",
+         "制造,RAG,知识库", "M"),  # M = Manufacturing
+
+        ("某汽车零部件厂 AI 视觉质检", "制造业", "1000+人",
+         "人工目检效率低、漏检率高，关键缺陷检出率仅 85%",
+         "AI 视觉检测 + 缺陷自动分类 + 不良品追溯系统",
+         "缺陷检出率提升至 99.7%，质检人力减少 60%，年节省 300 万+",
+         "制造,视觉AI,质检", "A"),  # A = Automotive
+
+        ("某电子制造企业生产排产优化", "制造业", "1000+人",
+         "多品种小批量生产，排产靠经验，换线频繁浪费严重",
+         "MES数据治理 + AI 智能排产 + OEE实时分析",
+         "设备综合效率OEE提升 12%，换线时间缩短 35%",
+         "制造,数据分析,排产", "E"),  # E = Electronics
+
+        ("某化工企业安全生产 AI 监控", "制造业", "500-1000人",
+         "危险区域人工巡检风险高，安全帽/防护服穿戴靠人盯",
+         "AI 视频分析 + 危险行为实时预警 + 电子围栏",
+         "安全事故下降 80%，巡检效率提升 3 倍",
+         "制造,视觉AI,安全", "C"),  # C = Chemical
+
+        ("某食品加工企业供应链协同", "制造业", "200-500人",
+         "原料采购/生产计划/仓储物流各自独立，库存积压与缺货并存",
+         "供应链数据打通 + AI 需求预测 + 智能补货",
+         "库存周转率提升 45%，缺货率从 8% 降到 1.5%",
+         "制造,供应链,预测", "F"),  # F = Food
+
+        # ===== 金融 (5) =====
+        ("某城商行合规审查 AI 化", "金融", "200-500人",
+         "合同审查依赖人工逐条比对，一份合同平均耗时 3 天",
+         "本地大模型 + 合规规则库 + 合同 AI 审查系统",
+         "合同审查时间从 3 天缩短到 2 小时，准确率提升至 95%",
+         "金融,RAG,合规", "B"),  # B = Bank
+
+        ("某保险公司智能理赔 RAG", "金融", "500-1000人",
+         "理赔条款复杂，核赔人员需翻阅大量保单文档和医疗记录",
+         "RAG 知识库 + 条款自动匹配 + 核赔辅助决策",
+         "核赔效率提升 70%，件均处理时间从 2 天缩至 40 分钟",
+         "金融,RAG,保险", "I"),  # I = Insurance
+
+        ("某证券公司投研 AI 助手", "金融", "200-500人",
+         "研究员人工搜集研报、财报、新闻，信息过载效率低",
+         "多源数据 RAG + 知识图谱 + AI 研报自动生成",
+         "研报撰写效率提升 50%，信息覆盖度从 60% 提升到 95%",
+         "金融,知识图谱,投研", "S"),  # S = Securities
+
+        ("某银行智能风控引擎升级", "金融", "1000+人",
+         "传统评分卡模型效果衰减，新型欺诈手法识别滞后",
+         "知识图谱 + 机器学习 + 实时规则引擎",
+         "不良率下降 1.8 个百分点，反欺诈识别率提升至 98%",
+         "金融,风控,机器学习", "B"),
+
+        ("某消费金融公司智能客服", "金融", "200-500人",
+         "日均咨询量 5 万+，人工客服 200 人仍应接不暇",
+         "RAG FAQ + 多轮对话 Agent + 工单自动分类",
+         "自助解决率 78%，客服成本降低 55%，客户满意度 +12%",
+         "金融,客服,Agent", "C"),  # C = Consumer Finance
+
+        # ===== 零售/电商 (4) =====
+        ("某连锁零售企业 AI 经营分析", "零售/电商", "1000+人",
+         "300+门店数据靠 Excel 手工汇总，周报滞后 1 周",
+         "数据治理 + 自动报表 + 异常预警 + 归因分析",
+         "周报从 2 天缩至 5 分钟，异常 24h 内自动预警",
+         "零售,数据分析,自动化", "R"),  # R = Retail
+
+        ("某快消品牌 AI 营销 Agent", "零售/电商", "500-1000人",
+         "营销活动策划依赖人工，精准度低、ROI 难追踪",
+         "全域 CDP + AI 精准分群 + 自动生成营销策略",
+         "营销转化率提升 35%，获客成本降低 28%",
+         "零售,营销,Agent", "K"),
+
+        ("某生鲜电商 AI 动态定价", "零售/电商", "200-500人",
+         "生鲜保质期短，定价策略靠经验，损耗率高",
+         "AI 需求预测 + 动态定价模型 + 库存出清策略",
+         "损耗率从 15% 降到 6%，毛利率提升 4 个百分点",
+         "电商,定价,预测", "S"),
+
+        ("某家居品牌私域 AI 客服", "零售/电商", "200-500人",
+         "微信/APP/官网多渠道咨询分散，回复慢、转化低",
+         "全渠道 AI 客服 + 产品知识 RAG + 导购 Agent",
+         "响应时间从 3 分钟降到 3 秒，夜间订单转化率 +22%",
+         "零售,客服,RAG", "H"),
+
+        # ===== 医疗/健康 (4) =====
+        ("某三甲医院 AI 病历质控", "医疗/健康", "1000+人",
+         "医生每天写病历 2 小时，质控抽查覆盖率仅 5%",
+         "RAG 知识库 + AI 辅助写病历 + 全量质控检查",
+         "病历撰写时间减 70%，质控覆盖率从 5% 提升到 100%",
+         "医疗,RAG,质控", "H"),  # H = Hospital
+
+        ("某连锁体检中心影像 AI 辅助", "医疗/健康", "500-1000人",
+         "CT/超声影像量大，放射科医生超负荷，漏诊风险高",
+         "AI 影像辅助诊断 + 优先级分级 + 结构化报告",
+         "阅片效率提升 3 倍，早期病灶检出率提升 40%",
+         "医疗,视觉AI,影像", "T"),  # T = Testing/体检
+
+        ("某药企临床试验文档 RAG", "医疗/健康", "500-1000人",
+         "临床试验方案/报告/文献海量且分散，检索效率极低",
+         "垂直行业 RAG + 医学文献自动摘要 + 合规审核",
+         "文档检索效率提升 90%，方案撰写周期缩短 50%",
+         "医疗,RAG,制药", "P"),  # P = Pharma
+
+        ("某医保局 DRG 智能分组", "医疗/健康", "1000+人",
+         "DRG分组靠人工编码，准确率不足，申诉率高",
+         "AI 辅助编码 + DRG 分组预测 + 费用合理性审核",
+         "分组准确率从 82% 提升至 96%，申诉率下降 70%",
+         "医疗,AI,医保", "D"),  # D = DRG
+
+        # ===== 建筑/地产 (3) =====
+        ("某建筑集团工程文档 AI 检索", "建筑/地产", "1000+人",
+         "施工规范、安全标准、图纸说明分散在不同部门",
+         "垂直行业 RAG + 图纸 OCR 识别 + 施工规范知识库",
+         "文档查找效率提升 80%，投标方案编制周期缩短 50%",
+         "建筑,RAG,多模态", "B"),  # B = Building
+
+        ("某地产公司 AI 安全巡检", "建筑/地产", "200-500人",
+         "工地安全靠人工巡检，覆盖面有限，隐患发现不及时",
+         "AI 视频监控 + 安全违规识别 + 自动预警推送",
+         "安全隐患发现率提升 3 倍，事故率下降 65%",
+         "建筑,视觉AI,安全", "D"),  # D = Developer
+
+        ("某设计院 BIM+AI 审图", "建筑/地产", "200-500人",
+         "大型项目图纸审核靠经验，碰撞检查费时且容易遗漏",
+         "BIM 模型 AI 碰撞检测 + 规范合规自动审查",
+         "审图效率提升 60%，设计变更减少 40%",
+         "建筑,BIM,AI审图", "S"),
+
+        # ===== 科技/互联网 (3) =====
+        ("某 SaaS 企业技术文档 AI 知识库", "科技/互联网", "200-500人",
+         "产品迭代快，技术文档 3000+ 篇，客服/客户找不到答案",
+         "RAG 技术文档知识库 + AI 问答 + 自动更新索引",
+         "客服工单减少 45%，客户自助解决率从 20% 提升到 65%",
+         "科技,RAG,知识库", "S"),
+
+        ("某互联网公司 AIOps 智能运维", "科技/互联网", "500-1000人",
+         "微服务 500+，告警日均 3000 条，故障定位靠人肉排查",
+         "AIOps 告警聚合 + 根因分析 + 自动故障处理",
+         "MTTR 从 45 分钟降到 8 分钟，P1 事故减少 70%",
+         "科技,AIOps,运维", "T"),
+
+        ("某游戏公司 AI 代码审查", "科技/互联网", "200-500人",
+         "代码 Review 占开发时间 30%，低级 Bug 反复出现",
+         "AI 代码审查 + 自动测试生成 + 安全漏洞扫描",
+         "Code Review 效率提升 50%，线上 Bug 减少 40%",
+         "科技,AI代码,提效", "G"),  # G = Gaming
+
+        # ===== 教育/物流/农业 (3) =====
+        ("某在线教育平台 AI 教研助手", "教育", "200-500人",
+         "课程内容研发依赖教研员个人经验，标准化难，产出慢",
+         "RAG 知识库 + AI 课程大纲生成 + 题库自动构建",
+         "课程研发周期缩短 60%，内容复用率提升 3 倍",
+         "教育,RAG,内容", "E"),
+
+        ("某物流企业智能调度 RAG", "物流", "500-1000人",
+         "调度规则复杂，调度员需记忆大量路线/车型/价格规则",
+         "RAG 规则知识库 + AI 调度建议 + 异常处理 Agent",
+         "调度效率提升 40%，车辆空驶率降低 18%",
+         "物流,RAG,调度", "L"),
+
+        ("某农业企业病虫害 AI 识别", "农业", "200-500人",
+         "病虫害识别依赖农技员经验，覆盖面有限，响应慢",
+         "AI 图像识别 + 病虫害知识 RAG + 防治方案推荐",
+         "病害识别准确率 96%，响应时间从 3 天缩至实时",
+         "农业,视觉AI,RAG", "A"),
+    ]
+    conn.executemany(
+        "INSERT INTO cases (title,industry,scale,pain_point,solution,result,tags,logo_text) VALUES (?,?,?,?,?,?,?,?)",
+        cases
+    )
+    # ⭐ 将前 3 个案例标记为精选（首页展示）
+    conn.execute("UPDATE cases SET is_featured=1 WHERE id IN (1,2,3)")
+
+def seed_asset_codes(conn):              # 🌱 插入种子资产编码数据
+    """向 asset_codes 表插入 20 条预置编码（桌子 10 + 椅子 10）"""
+    codes = [
+        # 桌子 (10 种)
+        ('Z001', '办公桌-标准型', 'table', 1),
+        ('Z002', '办公桌-大型', 'table', 2),
+        ('Z003', '会议桌-小型', 'table', 3),
+        ('Z004', '会议桌-中型', 'table', 4),
+        ('Z005', '会议桌-大型', 'table', 5),
+        ('Z006', '电脑桌-普通', 'table', 6),
+        ('Z007', '电脑桌-升降', 'table', 7),
+        ('Z008', '实验台-标准', 'table', 8),
+        ('Z009', '接待台-前台', 'table', 9),
+        ('Z010', '培训桌-折叠', 'table', 10),
+        # 椅子 (10 种)
+        ('Y001', '办公椅-标准', 'chair', 11),
+        ('Y002', '办公椅-人体工学', 'chair', 12),
+        ('Y003', '会议椅-标准', 'chair', 13),
+        ('Y004', '会议椅-皮质', 'chair', 14),
+        ('Y005', '电脑椅-标准', 'chair', 15),
+        ('Y006', '电脑椅-网布', 'chair', 16),
+        ('Y007', '实验室凳-标准', 'chair', 17),
+        ('Y008', '接待椅-标准', 'chair', 18),
+        ('Y009', '培训椅-带写字板', 'chair', 19),
+        ('Y010', '折叠椅-标准', 'chair', 20),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO asset_codes (code, name, category, sort_order) VALUES (?,?,?,?)",
+        codes
+    )
+
+if __name__ == "__main__":              # 🚀 直接运行此文件时
+    init_db()                           # 初始化数据库
+    print("Database initialized successfully.")

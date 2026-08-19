@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.db
+.DS_Store
+.env
+venv/
+.venv/
+*.log
+natapp.exe
+ngrok.exe
+*.zip

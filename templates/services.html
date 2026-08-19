@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}服务方案 - 企业AI转型平台{% endblock %}
+{% block extra_css %}
+.service-hero { padding: 100px 24px 80px; text-align: center; background: var(--bg-gray); }
+.service-hero h1 { font-size: 48px; font-weight: 700; letter-spacing: -0.025em; margin-bottom: 16px; }
+.service-hero .lead { font-size: 19px; color: var(--text-secondary); max-width: 640px; margin: 0 auto 28px; line-height: 1.6; }
+.service-hero .stats { display: flex; gap: 48px; justify-content: center; flex-wrap: wrap; margin-top: 32px; }
+.service-hero .stat .n { font-size: 36px; font-weight: 700; color: var(--primary); letter-spacing: -0.02em; }
+.service-hero .stat .l { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
+
+/* Tier section headers */
+.tier-section { padding: 100px 24px; }
+.tier-section.starter-bg { background: var(--bg); }
+.tier-section.growth-bg { background: var(--bg-gray); }
+.tier-header { margin-bottom: 48px; }
+.tier-label { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 14px; border-radius: var(--radius-full); margin-bottom: 16px; }
+.tier-label.starter { background: #e8f4fd; color: #0071e3; }
+.tier-label.accelerate { background: #fef4ee; color: #bf4800; }
+.tier-label.flagship { background: #1d1d1f; color: #fff; }
+.tier-header h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 10px; }
+.tier-header .subtitle { font-size: 17px; color: var(--text-secondary); max-width: 600px; line-height: 1.6; }
+.tier-header .who-it-for { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; }
+.tier-header .who-tag { font-size: 12px; padding: 6px 14px; border-radius: var(--radius-full); background: #fff; border: 1px solid var(--border-light); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+
+/* Service capability cards */
+.capability-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.capability-card { background: #fff; border-radius: var(--radius-lg); padding: 28px; box-shadow: var(--shadow-sm); transition: all var(--transition); display: flex; gap: 18px; align-items: flex-start; }
+.capability-card:hover { box-shadow: var(--shadow-xl); transform: translateY(-2px); }
+.cap-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.cap-info h4 { font-size: 16px; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.01em; }
+.cap-info .pain { font-size: 13px; color: var(--accent); margin-bottom: 6px; line-height: 1.5; }
+.cap-info .desc { font-size: 14px; color: var(--text-secondary); line-height: 1.65; }
+.cap-info .timeline { margin-top: 8px; font-size: 12px; color: var(--text-tertiary); }
+
+/* Premium tier comparison cards */
+.premium-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.premium-card { background: #fff; border-radius: var(--radius-xl); overflow: hidden; box-shadow: var(--shadow-sm); transition: all var(--transition); display: flex; flex-direction: column; }
+.premium-card:hover { box-shadow: var(--shadow-xl); transform: translateY(-3px); }
+.premium-card.accelerate-card { border-top: 3px solid #bf4800; }
+.premium-card.flagship-card { border-top: 3px solid #1d1d1f; }
+.premium-head { padding: 32px 32px 24px; border-bottom: 1px solid var(--border-light); }
+.premium-head .ph-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 10px; display: block; }
+.premium-head h3 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; }
+.premium-head .ph-sub { font-size: 15px; color: var(--text-secondary); line-height: 1.6; }
+.premium-body { padding: 24px 32px; flex: 1; }
+.premium-body .feature-list { list-style: none; }
+.premium-body .feature-list li { padding: 12px 0; border-bottom: 1px solid var(--border-light); font-size: 14px; color: var(--text-secondary); display: flex; align-items: baseline; gap: 10px; line-height: 1.6; }
+.premium-body .feature-list li:last-child { border-bottom: none; }
+.premium-body .feature-list li .f-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 7px; }
+.premium-foot { padding: 24px 32px 32px; border-top: 1px solid var(--border-light); }
+.premium-foot .delivery-row { display: flex; gap: 24px; font-size: 13px; color: var(--text-tertiary); margin-bottom: 16px; }
+.premium-foot .delivery-row span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Compare table */
+.compare-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.compare-table th, .compare-table td { padding: 14px 16px; text-align: center; border-bottom: 1px solid var(--border-light); }
+.compare-table th:first-child, .compare-table td:first-child { text-align: left; font-weight: 600; }
+.compare-table thead th { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); background: var(--bg-gray); }
+.compare-table .check { color: var(--primary); font-weight: 700; }
+.compare-table .dash { color: var(--text-tertiary); }
+
+/* FAQ */
+.faq-item { border-bottom: 1px solid var(--border-light); }
+.faq-q { padding: 20px 0; font-size: 17px; font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: color var(--transition); }
+.faq-q:hover { color: var(--primary); }
+.faq-a { padding: 0 0 20px; font-size: 15px; color: var(--text-secondary); line-height: 1.7; display: none; }
+.faq-a.open { display: block; }
+.faq-arrow { transition: transform 0.3s var(--ease-out); font-size: 12px; color: var(--text-tertiary); }
+.faq-arrow.open { transform: rotate(180deg); }
+
+@media (max-width: 768px) {
+  .service-hero h1 { font-size: 32px; }
+  .capability-grid { grid-template-columns: 1fr; }
+  .premium-grid { grid-template-columns: 1fr; }
+  .compare-table { font-size: 12px; }
+  .compare-table th, .compare-table td { padding: 10px 8px; }
+}
+{% endblock %}
+{% block content %}
+
+<!-- Hero -->
+<section class="service-hero">
+  <h1>企业 AI 转型服务方案</h1>
+  <p class="lead">从评估诊断到全面落地，三层服务体系覆盖 AI 转型的完整生命周期。<br>90% 的企业从启航包开始，逐步升级到加速包和旗舰包。</p>
+  <div class="stats">
+    <div class="stat"><div class="n">90%</div><div class="l">企业从 RAG 起步</div></div>
+    <div class="stat"><div class="n">2~4 周</div><div class="l">最短交付周期</div></div>
+    <div class="stat"><div class="n">12</div><div class="l">项标准化服务</div></div>
+    <div class="stat"><div class="n">100%</div><div class="l">私有化部署</div></div>
+  </div>
+</section>
+
+<!-- ===== 启航包 — Full Width ===== -->
+<section class="tier-section starter-bg">
+  <div class="section-inner">
+    <div class="tier-header">
+      <span class="tier-label starter">入门级 · 90% 企业的第一步</span>
+      <h2>启航包 — 企业 AI 就绪</h2>
+      <p class="subtitle">从数据治理到 RAG 知识库快速上线，投入可控、见效快。为后续 Agent 和流程自动化打下坚实的数据与模型基础。</p>
+      <div class="who-it-for">
+        <span class="who-tag">🏢 所有规模企业</span>
+        <span class="who-tag">🔄 2-4 周交付</span>
+        <span class="who-tag">📦 标准产品化</span>
+        <span class="who-tag">🔒 数据不出内网</span>
+      </div>
+    </div>
+    <div class="capability-grid">
+      {% for s in starter %}
+      <div class="capability-card">
+        <div class="cap-icon" style="background:#e8f4fd;">{{ svc_emoji(s.icon) }}</div>
+        <div class="cap-info">
+          <h4>{{ s.name }}</h4>
+          <div class="pain">{{ s.pain_point }}</div>
+          <div class="desc">{{ s.description }}</div>
+          <div class="timeline">⏱ {{ s.timeline }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- ===== 加速包 + 旗舰包 — Side by Side ===== -->
+<section class="tier-section growth-bg">
+  <div class="section-inner">
+    <div class="premium-grid">
+
+      <!-- 加速包 -->
+      <div class="premium-card accelerate-card">
+        <div class="premium-head">
+          <span class="ph-label" style="color:#bf4800;">进阶级 · 行业定制</span>
+          <h3>加速包</h3>
+          <div class="ph-sub">在启航包基础之上叠加行业垂直能力。AI Agent 智能体 + RPA 流程自动化，打通业务全链路。</div>
+          <div style="margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;">
+            <span class="who-tag">🏭 行业深度需求</span>
+            <span class="who-tag">⏱ 4-8 周</span>
+          </div>
+        </div>
+        <div class="premium-body">
+          <ul class="feature-list">
+            {% for s in accelerate %}
+            <li>
+              <span class="f-dot" style="background:#bf4800;"></span>
+              <div><strong>{{ s.name }}</strong><br><span style="font-size:13px;">{{ s.description[:80] }}...</span></div>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="premium-foot">
+          <div class="delivery-row"><span>📦 需启航包基础</span><span>🔧 行业定制交付</span><span>📋 含培训</span></div>
+          <a href="/assessment" class="btn btn-primary" style="width:100%;text-align:center;">评估是否适合 →</a>
+        </div>
+      </div>
+
+      <!-- 旗舰包 -->
+      <div class="premium-card flagship-card">
+        <div class="premium-head">
+          <span class="ph-label" style="color:#1d1d1f;">企业级 · 长期合作</span>
+          <h3>旗舰包</h3>
+          <div class="ph-sub">面向大型企业的 AI 中台战略。统一算力、多模型管理、全业务线 AI 能力复用，驻场陪跑式交付。</div>
+          <div style="margin-top:14px;display:flex;gap:16px;flex-wrap:wrap;">
+            <span class="who-tag">🏢 大型企业</span>
+            <span class="who-tag">⏱ 3-6 月</span>
+          </div>
+        </div>
+        <div class="premium-body">
+          <ul class="feature-list">
+            {% for s in flagship %}
+            <li>
+              <span class="f-dot" style="background:#1d1d1f;"></span>
+              <div><strong>{{ s.name }}</strong><br><span style="font-size:13px;">{{ s.description[:80] }}...</span></div>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="premium-foot">
+          <div class="delivery-row"><span>📦 含启航+加速</span><span>👥 驻场陪跑</span><span>📋 战略咨询</span></div>
+          <a href="/assessment" class="btn btn-primary" style="width:100%;text-align:center;">预约专家咨询 →</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ===== 方案对比表 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-h"><h2>三层方案能力对比</h2><p>一目了然，根据需求快速选择</p></div>
+    <div style="overflow-x:auto;">
+      <table class="compare-table">
+        <thead>
+          <tr><th style="width:28%;"></th><th>启航包</th><th>加速包</th><th>旗舰包</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>数据治理与标准化</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>本地私有化大模型部署</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>RAG 智能知识库</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>AI 办公助手</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>垂直行业定制 RAG</td><td class="dash">—</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>AI Agent 智能体</td><td class="dash">—</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>RPA+AI 流程自动化</td><td class="dash">—</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>数据洞察与决策 AI</td><td class="dash">—</td><td class="check">✓</td><td class="check">✓</td></tr>
+          <tr><td>AI 私有中台</td><td class="dash">—</td><td class="dash">—</td><td class="check">✓</td></tr>
+          <tr><td>多模态 AI（视觉/语音）</td><td class="dash">—</td><td class="dash">—</td><td class="check">✓</td></tr>
+          <tr><td>AI 安全合规体系</td><td class="dash">—</td><td class="dash">—</td><td class="check">✓</td></tr>
+          <tr><td>战略咨询 + 团队培训</td><td class="dash">—</td><td class="dash">—</td><td class="check">✓</td></tr>
+          <tr style="font-weight:600;background:var(--bg-gray);"><td>适用企业</td><td>所有企业</td><td>行业深度需求</td><td>大型企业 / 长期</td></tr>
+          <tr style="font-weight:600;background:var(--bg-gray);"><td>部署周期</td><td>2-4 周</td><td>4-8 周</td><td>3-6 月</td></tr>
+          <tr style="font-weight:600;background:var(--bg-gray);"><td>服务模式</td><td>标准化产品交付</td><td>行业定制 + 集成</td><td>驻场陪跑 + 咨询</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FAQ ===== -->
+<section class="section section-gray">
+  <div class="section-inner" style="max-width:740px;">
+    <div class="section-h"><h2>常见问题</h2></div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFAQ(this)">启航包部署后，后续升级到加速包或旗舰包是否方便？<span class="faq-arrow">▼</span></div>
+      <div class="faq-a">启航包本身就是为升级设计的——RAG 知识库和本地大模型是所有升级方案的基础。升级时无需推倒重来：在现有系统上叠加行业垂直 RAG、Agent 和 RPA 模块即可，数据、模型和接口全部无缝衔接。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFAQ(this)">数据真的不出内网吗？安全合规如何保障？<span class="faq-arrow">▼</span></div>
+      <div class="faq-a">是的，所有方案均采用纯私有化部署。开源大模型（Qwen/DeepSeek/GLM）和向量数据库完全运行在您的服务器上。文档、对话记录、业务数据全部不出企业内网。旗舰包还包含完整的安全合规体系建设——数据脱敏、操作审计、模型安全检测一应俱全。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFAQ(this)">硬件需要什么配置？投入大概多少？<span class="faq-arrow">▼</span></div>
+      <div class="faq-a">启航包最低：一台 RTX 4060（8GB 显存）即可流畅运行 7B 参数模型（4-bit 量化）。硬件投入约 1-3 万元即可起步。加速包视并发量建议 24GB+ 显存。旗舰包我们会根据企业规模和业务复杂度出具完整的基础设施规划。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFAQ(this)">团队完全没有 AI 经验，能落地吗？<span class="faq-arrow">▼</span></div>
+      <div class="faq-a">完全可以。启航包正是为"零 AI 基础"企业设计的——标准化产品 + 全套操作文档 + 上线培训，2-4 周内交付可运行系统。旗舰包更包含驻场培训和战略咨询，帮助您的团队逐步建立独立的 AI 运营能力。</div>
+    </div>
+    <div class="faq-item" style="border:none;">
+      <div class="faq-q" onclick="toggleFAQ(this)">支持哪些模型？可以指定具体模型吗？<span class="faq-arrow">▼</span></div>
+      <div class="faq-a">我们支持 Qwen2.5、DeepSeek-V3、GLM-4、ChatGLM、Yi 等主流国产开源模型，也兼容 Llama 3/4、Mistral 等国际模型。您可以指定偏好的模型，我们会根据硬件配置和业务场景给出最优选型建议。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== CTA ===== -->
+<section class="section" style="text-align:center;">
+  <div class="section-inner">
+    <h2 style="font-size:32px;font-weight:700;letter-spacing:-0.02em;margin-bottom:12px;">不确定哪个方案最适合？</h2>
+    <p style="font-size:17px;color:var(--text-secondary);margin-bottom:28px;">完成 5 分钟行业化评估，获取量身定制的方案推荐与路线图</p>
+    <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+      <a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估 →</a>
+      <a href="/cases" class="btn btn-outline">查看客户案例</a>
+    </div>
+  </div>
+</section>
+
+<script>
+function toggleFAQ(el) {
+  const answer = el.nextElementSibling;
+  const arrow = el.querySelector('.faq-arrow');
+  answer.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+</script>
+{% endblock %}

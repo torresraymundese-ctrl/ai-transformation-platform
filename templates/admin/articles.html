@@ -1,0 +1,34 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+  <h2>文章管理 ({{ articles|length }})</h2>
+  <div style="display:flex;gap:10px;">
+    <a href="/admin/article/new" class="btn btn-primary">+ 新建文章</a>
+    <button class="btn btn-outline" onclick="scrapeNow()">抓取新文章</button>
+  </div>
+</div>
+<table>
+<thead><tr><th>ID</th><th>标题</th><th>来源</th><th>分类</th><th>标签</th><th>状态</th><th>操作</th></tr></thead>
+<tbody>
+{% for a in articles %}
+<tr>
+  <td>{{ a.id }}</td>
+  <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ a.title }}</td>
+  <td>{{ a.source }}</td>
+  <td>{{ a.category or '-' }}</td>
+  <td>{% for t in (a.tags or '').split(',')[:2] %}<span class="tag">{{ t.strip() }}</span>{% endfor %}</td>
+  <td>{{ a.status }}</td>
+  <td><a href="/admin/article/{{ a.id }}" class="btn btn-outline btn-sm">编辑</a></td>
+</tr>
+{% endfor %}
+</tbody></table>
+<script>
+async function scrapeNow() {
+  const btn = event.target; btn.disabled = true; btn.textContent = '抓取中...';
+  const r = await fetch('/admin/scrape', {method:'POST'});
+  const d = await r.json();
+  alert(d.success ? `成功添加 ${d.count} 篇` : `失败: ${d.error}`);
+  location.reload();
+}
+</script>
+{% endblock %}

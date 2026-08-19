@@ -1,0 +1,22 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<h2 style="margin-bottom:24px;">{% if case %}编辑案例 #{{ case.id }}{% else %}新建案例{% endif %}</h2>
+<div class="card" style="padding:24px;">
+<form method="POST">
+  <div class="form-group"><label>标题</label><input type="text" name="title" value="{{ case.title if case else '' }}" required></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="form-group"><label>行业</label><select name="industry">{% for ind in ['制造业','金融','零售','建筑','医疗','电商','科技'] %}<option value="{{ ind }}" {% if case and case.industry==ind %}selected{% endif %}>{{ ind }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>企业规模</label><input type="text" name="scale" value="{{ case.scale if case else '' }}"></div>
+  </div>
+  <div class="form-group"><label>痛点</label><textarea name="pain_point">{{ case.pain_point if case else '' }}</textarea></div>
+  <div class="form-group"><label>方案</label><textarea name="solution">{{ case.solution if case else '' }}</textarea></div>
+  <div class="form-group"><label>效果</label><textarea name="result">{{ case.result if case else '' }}</textarea></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="form-group"><label>标签 (逗号分隔)</label><input type="text" name="tags" value="{{ case.tags if case else '' }}"></div>
+    <div class="form-group"><label>Logo文字</label><input type="text" name="logo_text" value="{{ case.logo_text if case else 'E' }}"></div>
+  </div>
+  <button type="submit" class="btn btn-primary">保存</button>
+  <a href="/admin/cases" class="btn btn-outline">返回</a>
+</form>
+</div>
+{% endblock %}
