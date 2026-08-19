@@ -5,6 +5,9 @@ from decimal import Decimal
 from typing import Mapping
 
 
+ReportSnapshot = dict[str, object]
+
+
 @dataclass(frozen=True)
 class QuestionOption:
     code: str
