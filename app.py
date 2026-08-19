@@ -16,8 +16,8 @@ from hmac import compare_digest
 
 # === 第三方库导入 ===
 import bleach
-from flask import (Flask, abort, g, jsonify, redirect, render_template, request,
-                   session, url_for)
+from flask import (Blueprint, Flask, abort, current_app, g, jsonify, redirect,
+                   render_template, request, session, url_for)
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
@@ -32,26 +32,27 @@ from validation import (ValidationError, choice as valid_choice,
                         integer as valid_integer, safe_external_url,
                         text as valid_text)
 
-app = Flask(__name__)                   # ✅ 创建 Flask 应用实例
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
-
 # === 安全配置与后台鉴权 ===
-app.config.update(
-    SECRET_KEY=os.environ.get("AI_PLATFORM_SECRET_KEY"),
-    ADMIN_USERNAME=os.environ.get("AI_PLATFORM_ADMIN_USERNAME"),
-    ADMIN_PASSWORD_HASH=os.environ.get("AI_PLATFORM_ADMIN_PASSWORD_HASH"),
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
-    MAX_CONTENT_LENGTH=1024 * 1024,
-    LOGIN_RATE_LIMIT=10,
-    LOGIN_RATE_WINDOW=15 * 60,
-    ASSESSMENT_RATE_LIMIT=30,
-    ASSESSMENT_RATE_WINDOW=60 * 60,
-    SCRAPE_RATE_LIMIT=3,
-    SCRAPE_RATE_WINDOW=60 * 60,
-)
+DEFAULT_CONFIG = {
+    "SECRET_KEY": os.environ.get("AI_PLATFORM_SECRET_KEY"),
+    "ADMIN_USERNAME": os.environ.get("AI_PLATFORM_ADMIN_USERNAME"),
+    "ADMIN_PASSWORD_HASH": os.environ.get("AI_PLATFORM_ADMIN_PASSWORD_HASH"),
+    "SESSION_COOKIE_HTTPONLY": True,
+    "SESSION_COOKIE_SECURE": True,
+    "SESSION_COOKIE_SAMESITE": "Lax",
+    "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
+    "MAX_CONTENT_LENGTH": 1024 * 1024,
+    "LOGIN_RATE_LIMIT": 10,
+    "LOGIN_RATE_WINDOW": 15 * 60,
+    "ASSESSMENT_RATE_LIMIT": 30,
+    "ASSESSMENT_RATE_WINDOW": 60 * 60,
+    "SCRAPE_RATE_LIMIT": 3,
+    "SCRAPE_RATE_WINDOW": 60 * 60,
+}
+
+public_bp = Blueprint("public", __name__)
+api_bp = Blueprint("api", __name__)
+admin_bp = Blueprint("admin", __name__)
 
 ALLOWED_HTML_TAGS = {
     "a", "blockquote", "br", "code", "em", "h2", "h3", "h4", "hr",
@@ -69,9 +70,9 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 def security_configured():
     """Return whether the admin can authenticate without unsafe defaults."""
     return bool(
-        app.config.get("SECRET_KEY")
-        and app.config.get("ADMIN_USERNAME")
-        and app.config.get("ADMIN_PASSWORD_HASH")
+        current_app.config.get("SECRET_KEY")
+        and current_app.config.get("ADMIN_USERNAME")
+        and current_app.config.get("ADMIN_PASSWORD_HASH")
     )
 
 
@@ -97,7 +98,7 @@ def check_admin_auth():
     """Check the signed browser session rather than an Authorization header."""
     return (
         security_configured()
-        and session.get("admin_username") == app.config["ADMIN_USERNAME"]
+        and session.get("admin_username") == current_app.config["ADMIN_USERNAME"]
     )
 
 
@@ -163,12 +164,6 @@ def sanitize_html(value):
     return Markup(cleaned)
 
 
-app.jinja_env.globals["csrf_token"] = csrf_token
-app.jinja_env.filters["safe_html"] = sanitize_html
-app.jinja_env.filters["safe_url"] = safe_external_url
-
-
-@app.errorhandler(ValidationError)
 def invalid_form(error):
     return render_template(
         "error.html",
@@ -177,7 +172,6 @@ def invalid_form(error):
     ), 400
 
 
-@app.errorhandler(403)
 def forbidden(error):
     return render_template(
         "error.html",
@@ -186,7 +180,6 @@ def forbidden(error):
     ), 403
 
 
-@app.errorhandler(404)
 def not_found(error):
     return render_template(
         "error.html",
@@ -195,7 +188,6 @@ def not_found(error):
     ), 404
 
 
-@app.errorhandler(RequestEntityTooLarge)
 def request_too_large(error):
     if request.path.startswith("/api/"):
         return jsonify({"error": "request too large"}), 413
@@ -206,11 +198,10 @@ def request_too_large(error):
     ), 413
 
 
-@app.errorhandler(Exception)
 def unexpected_error(error):
     if isinstance(error, HTTPException):
         return error
-    app.logger.error(
+    current_app.logger.error(
         "Unhandled application error error_type=%s endpoint=%s",
         type(error).__name__,
         request.endpoint or "unknown",
@@ -222,7 +213,6 @@ def unexpected_error(error):
     ), 500
 
 
-@app.before_request
 def protect_admin_routes():
     """Fail closed, require a signed session, and protect all admin writes."""
     if not request.path.startswith("/admin"):
@@ -236,28 +226,27 @@ def protect_admin_routes():
             abort(403)
         if request.method == "POST" and not consume_rate_limit(
             "admin_login",
-            app.config["LOGIN_RATE_LIMIT"],
-            app.config["LOGIN_RATE_WINDOW"],
+            current_app.config["LOGIN_RATE_LIMIT"],
+            current_app.config["LOGIN_RATE_WINDOW"],
         ):
-            return rate_limit_response(app.config["LOGIN_RATE_WINDOW"])
+            return rate_limit_response(current_app.config["LOGIN_RATE_WINDOW"])
         return None
 
     if not check_admin_auth():
-        return redirect(url_for("admin_login", next=request.path))
+        return redirect(url_for("admin.admin_login", next=request.path))
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not csrf_is_valid():
         abort(403)
     if request.path == "/admin/scrape" and request.method == "POST":
         if not consume_rate_limit(
             "admin_scrape",
-            app.config["SCRAPE_RATE_LIMIT"],
-            app.config["SCRAPE_RATE_WINDOW"],
+            current_app.config["SCRAPE_RATE_LIMIT"],
+            current_app.config["SCRAPE_RATE_WINDOW"],
         ):
-            return rate_limit_response(app.config["SCRAPE_RATE_WINDOW"])
+            return rate_limit_response(current_app.config["SCRAPE_RATE_WINDOW"])
     return None
 
 
-@app.after_request
 def add_security_headers(response):
     """Apply browser hardening headers without breaking the legacy inline UI."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -269,7 +258,6 @@ def add_security_headers(response):
     return response
 
 
-@app.after_request
 def audit_admin_actions(response):
     """Record minimal metadata for admin state changes, including rejections."""
     if request.path.startswith("/admin") and request.method in {
@@ -278,7 +266,7 @@ def audit_admin_actions(response):
         actor = getattr(g, "audit_actor", None) or session.get(
             "admin_username"
         ) or request.form.get("username", "anonymous")[:80]
-        action = request.endpoint or "unmatched_admin_request"
+        action = (request.endpoint or "unmatched_admin_request").rsplit(".", 1)[-1]
         db = None
         try:
             db = get_db()
@@ -289,43 +277,45 @@ def audit_admin_actions(response):
             )
             db.commit()
         except sqlite3.Error:
-            app.logger.exception("Failed to write admin audit event")
+            current_app.logger.error("Failed to write admin audit event")
         finally:
             if db is not None:
                 db.close()
     return response
 
 
-@app.route("/admin/login", methods=["GET", "POST"])
+@admin_bp.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     """Authenticate an administrator against the configured password hash."""
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        username_ok = compare_digest(username, app.config["ADMIN_USERNAME"])
-        password_ok = check_password_hash(app.config["ADMIN_PASSWORD_HASH"], password)
+        username_ok = compare_digest(username, current_app.config["ADMIN_USERNAME"])
+        password_ok = check_password_hash(
+            current_app.config["ADMIN_PASSWORD_HASH"], password
+        )
         if not (username_ok and password_ok):
             return render_template("admin/login.html", error="账号或密码错误"), 401
 
         session.clear()
-        session["admin_username"] = app.config["ADMIN_USERNAME"]
+        session["admin_username"] = current_app.config["ADMIN_USERNAME"]
         session["csrf_token"] = secrets.token_urlsafe(32)
         session.permanent = True
-        return redirect(url_for("admin_index"))
+        return redirect(url_for("admin.admin_index"))
 
     if check_admin_auth():
-        return redirect(url_for("admin_index"))
+        return redirect(url_for("admin.admin_index"))
     return render_template("admin/login.html")
 
 
-@app.route("/admin/logout", methods=["POST"])
+@admin_bp.route("/admin/logout", methods=["POST"])
 def admin_logout():
     """Revoke the current administrator session."""
     g.audit_actor = session.get("admin_username", "anonymous")
     session.clear()
-    return redirect(url_for("admin_login"))
+    return redirect(url_for("admin.admin_login"))
 
-@app.route("/health")                   # 🩺 健康检查端点（供监控系统探测）
+@public_bp.route("/health")                   # 🩺 健康检查端点（供监控系统探测）
 def health():
     return jsonify({"status": "ok"})    # 返回 JSON 表示服务正常运行
 
@@ -349,11 +339,41 @@ def svc_emoji(icon):                    # 🎨 服务图标映射函数
     }
     return mapping.get(icon, "📌")       # 未匹配时返回 📌 作为默认图标
 
-app.jinja_env.globals["svc_emoji"] = svc_emoji  # ✅ 注册为 Jinja2 全局函数，模板中可直接调用
+
+def create_app(test_config=None):
+    """Build an isolated application instance from environment and overrides."""
+    flask_app = Flask(__name__)
+    flask_app.config.from_mapping(DEFAULT_CONFIG)
+    if test_config:
+        flask_app.config.update(test_config)
+    flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=1, x_proto=1)
+
+    flask_app.jinja_env.globals.update(
+        csrf_token=csrf_token,
+        svc_emoji=svc_emoji,
+    )
+    flask_app.jinja_env.filters.update(
+        safe_html=sanitize_html,
+        safe_url=safe_external_url,
+    )
+
+    flask_app.register_error_handler(ValidationError, invalid_form)
+    flask_app.register_error_handler(403, forbidden)
+    flask_app.register_error_handler(404, not_found)
+    flask_app.register_error_handler(RequestEntityTooLarge, request_too_large)
+    flask_app.register_error_handler(Exception, unexpected_error)
+    flask_app.before_request(protect_admin_routes)
+    flask_app.after_request(add_security_headers)
+    flask_app.after_request(audit_admin_actions)
+
+    flask_app.register_blueprint(public_bp)
+    flask_app.register_blueprint(api_bp)
+    flask_app.register_blueprint(admin_bp)
+    return flask_app
 
 # ========== 前端公开页面路由 ==========
 
-@app.route("/")                         # 🏠 首页路由
+@public_bp.route("/")                         # 🏠 首页路由
 def index():
     """首页：展示精选案例 + 三层服务 + 最新资讯"""
     db = get_db()                       # 获取数据库连接
@@ -375,7 +395,7 @@ def index():
                            services=services,      # 传递给模板的服务数据
                            articles=articles)      # 传递给模板的文章数据
 
-@app.route("/services")                 # 📦 服务方案页路由
+@public_bp.route("/services")                 # 📦 服务方案页路由
 def services_page():
     """服务方案页：按三层（启航/加速/旗舰）分别展示服务卡片"""
     db = get_db()
@@ -397,7 +417,7 @@ def services_page():
                            accelerate=accelerate,   # 加速包数据
                            flagship=flagship)       # 旗舰包数据
 
-@app.route("/cases")                    # 📋 案例库页路由
+@public_bp.route("/cases")                    # 📋 案例库页路由
 def cases_page():
     """案例库页：按行业筛选 + 关键词搜索，展示 27 个真实企业案例"""
     db = get_db()
@@ -427,20 +447,20 @@ def cases_page():
                            current_industry=industry, # 当前筛选行业
                            search=search)           # 当前搜索词
 
-@app.route("/assessment")               # 📊 企业AI就绪度评估页路由
+@public_bp.route("/assessment")               # 📊 企业AI就绪度评估页路由
 def assessment_page():
     """评估页：行业定制化评估问卷，纯前端 JS 交互"""
     return render_template("assessment.html")       # 页面逻辑由 JS 驱动
 
-@app.route("/api/assessment", methods=["POST"])  # 📡 评估数据提交接口（仅接收 POST）
+@api_bp.route("/api/assessment", methods=["POST"])  # 📡 评估数据提交接口（仅接收 POST）
 def api_assessment():
     """接收前端提交的评估结果，存储到数据库"""
     if not consume_rate_limit(
         "assessment",
-        app.config["ASSESSMENT_RATE_LIMIT"],
-        app.config["ASSESSMENT_RATE_WINDOW"],
+        current_app.config["ASSESSMENT_RATE_LIMIT"],
+        current_app.config["ASSESSMENT_RATE_WINDOW"],
     ):
-        return rate_limit_response(app.config["ASSESSMENT_RATE_WINDOW"])
+        return rate_limit_response(current_app.config["ASSESSMENT_RATE_WINDOW"])
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "invalid assessment payload"}), 400
@@ -479,7 +499,7 @@ def api_assessment():
     db.close()
     return jsonify({"success": True})   # 返回成功响应
 
-@app.route("/insights")                 # 📰 资讯页路由
+@public_bp.route("/insights")                 # 📰 资讯页路由
 def insights_page():
     """资讯页：支持分类筛选 + 标签筛选 + 全文搜索"""
     db = get_db()
@@ -520,7 +540,7 @@ def insights_page():
                            announcements=announcements,
                            search=search)
 
-@app.route("/article/<int:article_id>")  # 📄 文章详情页路由（动态路由参数）
+@public_bp.route("/article/<int:article_id>")  # 📄 文章详情页路由（动态路由参数）
 def article_page(article_id):
     """文章详情页：展示全文 + 相关文章推荐"""
     db = get_db()
@@ -541,14 +561,14 @@ def article_page(article_id):
                            article=article,
                            related=related)
 
-@app.route("/about")                    # ℹ️ 关于我们页路由
+@public_bp.route("/about")                    # ℹ️ 关于我们页路由
 def about_page():
     """关于我们页：公司信息、核心原则、联系方式"""
     return render_template("about.html")
 
 # ========== 管理后台路由（CMS 内容管理系统） ==========
 
-@app.route("/admin")                    # 🖥️ 后台首页/控制台
+@admin_bp.route("/admin")                    # 🖥️ 后台首页/控制台
 def admin_index():
     """后台控制台：展示文章数、案例数、评估记录数"""
     db = get_db()
@@ -563,7 +583,7 @@ def admin_index():
 
 # === 文章管理 ===
 
-@app.route("/admin/articles")           # 📝 文章列表页
+@admin_bp.route("/admin/articles")           # 📝 文章列表页
 def admin_articles():
     """后台文章列表：按创建时间倒序展示"""
     db = get_db()
@@ -573,7 +593,7 @@ def admin_articles():
     db.close()
     return render_template("admin/articles.html", articles=articles)
 
-@app.route("/admin/article/<int:article_id>", methods=["GET","POST"])  # ✏️ 编辑文章
+@admin_bp.route("/admin/article/<int:article_id>", methods=["GET","POST"])  # ✏️ 编辑文章
 def admin_article_edit(article_id):
     """后台编辑文章：GET 展示表单，POST 保存更新"""
     if request.method == "POST":        # POST 请求 = 保存修改
@@ -607,7 +627,7 @@ def admin_article_edit(article_id):
              article_id))
         db.commit()
         db.close()
-        return redirect(url_for("admin_articles"))  # 重定向回文章列表
+        return redirect(url_for("admin.admin_articles"))  # 重定向回文章列表
     # GET 请求 = 展示编辑表单
     db = get_db()
     article = db.execute(
@@ -618,7 +638,7 @@ def admin_article_edit(article_id):
         abort(404)
     return render_template("admin/article_edit.html", article=article)
 
-@app.route("/admin/article/new", methods=["GET","POST"])  # ➕ 新建文章
+@admin_bp.route("/admin/article/new", methods=["GET","POST"])  # ➕ 新建文章
 def admin_article_new():
     """后台新建文章：GET 展示空表单，POST 插入新记录"""
     if request.method == "POST":
@@ -656,7 +676,7 @@ def admin_article_new():
 
 # === 案例管理 ===
 
-@app.route("/admin/cases")              # 📋 案例列表页
+@admin_bp.route("/admin/cases")              # 📋 案例列表页
 def admin_cases():
     """后台案例列表"""
     db = get_db()
@@ -664,7 +684,7 @@ def admin_cases():
     db.close()
     return render_template("admin/cases.html", cases=cases)
 
-@app.route("/admin/case/new", methods=["GET","POST"])  # ➕ 新建案例
+@admin_bp.route("/admin/case/new", methods=["GET","POST"])  # ➕ 新建案例
 def admin_case_new():
     """后台新建案例"""
     if request.method == "POST":
@@ -685,7 +705,7 @@ def admin_case_new():
         return redirect("/admin/cases")
     return render_template("admin/case_edit.html", case=None)
 
-@app.route("/admin/case/<int:case_id>", methods=["GET","POST"])  # ✏️ 编辑案例
+@admin_bp.route("/admin/case/<int:case_id>", methods=["GET","POST"])  # ✏️ 编辑案例
 def admin_case_edit(case_id):
     """后台编辑案例"""
     if request.method == "POST":
@@ -713,7 +733,7 @@ def admin_case_edit(case_id):
 
 # === 评估记录 ===
 
-@app.route("/admin/assessments")        # 📊 评估记录列表
+@admin_bp.route("/admin/assessments")        # 📊 评估记录列表
 def admin_assessments():
     """后台评估记录：展示最新 50 条"""
     db = get_db()
@@ -725,7 +745,7 @@ def admin_assessments():
 
 # === 内容抓取 ===
 
-@app.route("/admin/scrape", methods=["POST"])  # 🔄 触发内容抓取
+@admin_bp.route("/admin/scrape", methods=["POST"])  # 🔄 触发内容抓取
 def admin_scrape():
     """后台手动触发文章抓取（调用 scraper.py 的 run_scraper）"""
     try:
@@ -733,12 +753,12 @@ def admin_scrape():
         count = run_scraper()           # 执行抓取流程
         return jsonify({"success": True, "count": count})
     except Exception as error:
-        app.logger.error("Admin scrape failed error_type=%s", type(error).__name__)
+        current_app.logger.error("Admin scrape failed error_type=%s", type(error).__name__)
         return jsonify({"success": False, "error": "scrape failed"}), 502
 
 # === 公告管理 ===
 
-@app.route("/admin/announcements")      # 📢 公告列表
+@admin_bp.route("/admin/announcements")      # 📢 公告列表
 def admin_announcements():
     """后台公告列表"""
     db = get_db()
@@ -748,7 +768,7 @@ def admin_announcements():
     db.close()
     return render_template("admin/announcements.html", announcements=announcements)
 
-@app.route("/admin/announcement/new", methods=["GET","POST"])  # ➕ 新建公告
+@admin_bp.route("/admin/announcement/new", methods=["GET","POST"])  # ➕ 新建公告
 def admin_announcement_new():
     """后台新建公告"""
     if request.method == "POST":
@@ -769,7 +789,7 @@ def admin_announcement_new():
         return redirect("/admin/announcements")
     return render_template("admin/announcement_edit.html", announcement=None)
 
-@app.route("/admin/announcement/<int:aid>", methods=["GET","POST"])  # ✏️ 编辑公告
+@admin_bp.route("/admin/announcement/<int:aid>", methods=["GET","POST"])  # ✏️ 编辑公告
 def admin_announcement_edit(aid):
     """后台编辑公告"""
     if request.method == "POST":
@@ -799,7 +819,7 @@ def admin_announcement_edit(aid):
 
 # === 仪表盘 ===
 
-@app.route("/admin/assets")
+@admin_bp.route("/admin/assets")
 def admin_assets_dashboard():
     """资产管理仪表盘"""
     db = get_db()
@@ -843,7 +863,7 @@ def admin_assets_dashboard():
 
 # === 资产编码管理 ===
 
-@app.route("/admin/assets/codes")
+@admin_bp.route("/admin/assets/codes")
 def admin_asset_codes_list():
     """资产编码列表"""
     db = get_db()
@@ -853,7 +873,7 @@ def admin_asset_codes_list():
     db.close()
     return render_template("admin/asset_codes.html", codes=codes)
 
-@app.route("/admin/assets/code/new", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/code/new", methods=["GET","POST"])
 def admin_asset_code_new():
     """新建资产编码"""
     if request.method == "POST":
@@ -874,7 +894,7 @@ def admin_asset_code_new():
         return redirect("/admin/assets/codes")
     return render_template("admin/asset_code_edit.html", code=None)
 
-@app.route("/admin/assets/code/<int:code_id>", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/code/<int:code_id>", methods=["GET","POST"])
 def admin_asset_code_edit(code_id):
     """编辑资产编码"""
     if request.method == "POST":
@@ -902,7 +922,7 @@ def admin_asset_code_edit(code_id):
 
 # === 科室管理 ===
 
-@app.route("/admin/assets/departments")
+@admin_bp.route("/admin/assets/departments")
 def admin_departments_list():
     """科室列表"""
     db = get_db()
@@ -912,7 +932,7 @@ def admin_departments_list():
     db.close()
     return render_template("admin/departments.html", departments=departments)
 
-@app.route("/admin/assets/departments/new", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/departments/new", methods=["GET","POST"])
 def admin_department_new():
     """新建科室"""
     if request.method == "POST":
@@ -929,7 +949,7 @@ def admin_department_new():
         return redirect("/admin/assets/departments")
     return render_template("admin/department_edit.html", department=None)
 
-@app.route("/admin/assets/departments/<int:dept_id>", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/departments/<int:dept_id>", methods=["GET","POST"])
 def admin_department_edit(dept_id):
     """编辑科室"""
     if request.method == "POST":
@@ -955,7 +975,7 @@ def admin_department_edit(dept_id):
 
 # === 单位A资产管理 ===
 
-@app.route("/admin/assets/unit-a")
+@admin_bp.route("/admin/assets/unit-a")
 def admin_unit_a_list():
     """单位A资产列表（支持按科室筛选）"""
     db = get_db()
@@ -982,7 +1002,7 @@ def admin_unit_a_list():
                            current_department=department,
                            departments=[r["department"] for r in dept_rows])
 
-@app.route("/admin/assets/unit-a/new", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/unit-a/new", methods=["GET","POST"])
 def admin_unit_a_new():
     """新建单位A资产"""
     if request.method == "POST":
@@ -1015,7 +1035,7 @@ def admin_unit_a_new():
     db.close()
     return render_template("admin/unit_a_edit.html", asset=None, codes=codes, departments=departments)
 
-@app.route("/admin/assets/unit-a/<int:asset_id>", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/unit-a/<int:asset_id>", methods=["GET","POST"])
 def admin_unit_a_edit(asset_id):
     """编辑单位A资产"""
     if request.method == "POST":
@@ -1053,7 +1073,7 @@ def admin_unit_a_edit(asset_id):
         abort(404)
     return render_template("admin/unit_a_edit.html", asset=asset, codes=codes, departments=departments)
 
-@app.route("/admin/assets/unit-a/delete/<int:asset_id>", methods=["POST"])
+@admin_bp.route("/admin/assets/unit-a/delete/<int:asset_id>", methods=["POST"])
 def admin_unit_a_delete(asset_id):
     """删除单位A资产"""
     db = get_db()
@@ -1063,7 +1083,7 @@ def admin_unit_a_delete(asset_id):
 
 # === 单位B资产管理 ===
 
-@app.route("/admin/assets/unit-b")
+@admin_bp.route("/admin/assets/unit-b")
 def admin_unit_b_list():
     """单位B资产列表"""
     db = get_db()
@@ -1075,7 +1095,7 @@ def admin_unit_b_list():
     db.close()
     return render_template("admin/unit_b_assets.html", assets=assets)
 
-@app.route("/admin/assets/unit-b/new", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/unit-b/new", methods=["GET","POST"])
 def admin_unit_b_new():
     """新建单位B资产"""
     if request.method == "POST":
@@ -1101,7 +1121,7 @@ def admin_unit_b_new():
     db.close()
     return render_template("admin/unit_b_edit.html", asset=None, codes=codes)
 
-@app.route("/admin/assets/unit-b/<int:asset_id>", methods=["GET","POST"])
+@admin_bp.route("/admin/assets/unit-b/<int:asset_id>", methods=["GET","POST"])
 def admin_unit_b_edit(asset_id):
     """编辑单位B资产"""
     if request.method == "POST":
@@ -1132,7 +1152,7 @@ def admin_unit_b_edit(asset_id):
         abort(404)
     return render_template("admin/unit_b_edit.html", asset=asset, codes=codes)
 
-@app.route("/admin/assets/unit-b/delete/<int:asset_id>", methods=["POST"])
+@admin_bp.route("/admin/assets/unit-b/delete/<int:asset_id>", methods=["POST"])
 def admin_unit_b_delete(asset_id):
     """删除单位B资产"""
     db = get_db()
@@ -1142,7 +1162,7 @@ def admin_unit_b_delete(asset_id):
 
 # === 标签打印 ===
 
-@app.route("/admin/assets/labels")
+@admin_bp.route("/admin/assets/labels")
 def admin_labels():
     """标签打印页"""
     unit = valid_text(request.args, "unit", maximum=1, default="A").upper() or "A"
@@ -1166,11 +1186,13 @@ def admin_labels():
 
 # ========== 应用入口 ==========
 
+app = create_app()
+
 if __name__ == "__main__":              # 🚀 直接运行此文件时（非导入模块）
     init_db()                           # 初始化数据库（创建表 + 种子数据）
     print("Enterprise AI Transformation Platform")
     print("Open http://127.0.0.1:5080")
-    app.run(host="0.0.0.0",             # 绑定所有网络接口（局域网可访问）
+    app.run(host="127.0.0.1",           # 仅供本机开发预览
             port=5080,                  # 监听 5080 端口
             debug=False,                # 关闭调试模式（生产环境）
             threaded=True)              # 开启多线程处理请求

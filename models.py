@@ -5,6 +5,7 @@
 import sqlite3                          # SQLite 数据库驱动
 import os                               # 文件系统操作（路径、目录）
 import json                             # JSON 数据（备用）
+from migrations import apply_migrations
 
 DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     os.path.dirname(__file__),          # 当前脚本所在目录
@@ -23,6 +24,7 @@ def get_db():                           # 🔌 获取数据库连接
 def init_db():                          # 🏗️ 初始化数据库
     """创建所有表结构 + 插入种子数据（如果表为空）"""
     conn = get_db()
+    apply_migrations(conn)
     conn.executescript("""
         -- 📰 文章表：存储资讯文章和公告内容
         CREATE TABLE IF NOT EXISTS articles (

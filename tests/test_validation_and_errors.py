@@ -152,7 +152,7 @@ def test_unhandled_error_uses_generic_page_and_redacted_log(
     def fail_index():
         raise RuntimeError(secret_marker)
 
-    monkeypatch.setitem(client.application.view_functions, "index", fail_index)
+    monkeypatch.setitem(client.application.view_functions, "public.index", fail_index)
     caplog.set_level(logging.ERROR)
 
     response = client.get("/")
