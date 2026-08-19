@@ -96,7 +96,13 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
     finally:
         db.close()
 
-    assert versions == ["001_initial", "002_security"]
+    assert versions == [
+        "001_initial",
+        "002_security",
+        "003_v2_catalog",
+        "004_v2_assessment_leads",
+        "005_v2_appointments_analytics",
+    ]
     assert sentinel == "keep-me"
 
 
