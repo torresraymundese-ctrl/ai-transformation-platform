@@ -21,6 +21,7 @@ DIMENSIONS = (
     "organization",
     "delivery",
 )
+DEFAULT_VERSION_CODE = "v2.0-2026-08-19"
 
 
 def load_published_catalog(branch_code: str) -> AssessmentCatalog:
@@ -176,9 +177,16 @@ def get_scenarios() -> tuple[Scenario, ...]:
 def get_service_packages() -> tuple[ServicePackage, ...]:
     db = get_db()
     try:
+        version = _published_version(db)
         rows = db.execute(
-            "SELECT * FROM services WHERE code IS NOT NULL AND status='published' "
-            "ORDER BY sort_order"
+            "SELECT DISTINCT sv.* FROM services sv "
+            "JOIN scenario_services ss ON ss.service_id=sv.id "
+            "JOIN scenarios sc ON sc.id=ss.scenario_id AND sc.status='published' "
+            "JOIN scenario_roi_profiles rp ON rp.scenario_id=sc.id "
+            "AND rp.assessment_version_id=? "
+            "WHERE sv.code IS NOT NULL AND sv.status='published' "
+            "ORDER BY sv.sort_order",
+            (version["id"],),
         ).fetchall()
         return tuple(
             ServicePackage(
@@ -211,11 +219,14 @@ def get_service_packages() -> tuple[ServicePackage, ...]:
 
 def _published_version(db):
     version = db.execute(
-        "SELECT id,code FROM assessment_versions WHERE status='published' "
-        "ORDER BY published_at DESC,id DESC LIMIT 1"
+        "SELECT id,code FROM assessment_versions "
+        "WHERE code=? AND status='published'",
+        (DEFAULT_VERSION_CODE,),
     ).fetchone()
     if version is None:
-        raise RuntimeError("no published assessment version")
+        raise RuntimeError(
+            f"published assessment version {DEFAULT_VERSION_CODE} is unavailable"
+        )
     return version
 
 

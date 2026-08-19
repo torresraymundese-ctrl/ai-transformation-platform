@@ -30,6 +30,40 @@ def repository():
     return importlib.import_module("assessment_repository")
 
 
+def insert_later_version_and_unrelated_service(db):
+    db.execute(
+        "INSERT INTO assessment_versions "
+        "(code,name,status,published_at) VALUES (?,?,?,?)",
+        ("v99.0-future", "Future", "published", "2099-01-01 00:00:00"),
+    )
+    db.execute(
+        "INSERT INTO services "
+        "(code,name,tier,category,public_name,min_budget,max_budget,min_weeks,"
+        "max_weeks,implementation_steps_json,prerequisites_json,"
+        "not_included_json,acceptance_json,support_days,status,sort_order) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "unrelated_published_service",
+            "Unrelated",
+            "assessment",
+            "test",
+            "Unrelated",
+            1,
+            2,
+            1,
+            2,
+            '["step"]',
+            '["prerequisite"]',
+            '["excluded"]',
+            '["acceptance"]',
+            1,
+            "published",
+            999,
+        ),
+    )
+    db.commit()
+
+
 def test_v2_catalog_schema_preserves_queryable_relationships(catalog_db):
     tables = {
         row[0]
@@ -505,6 +539,52 @@ def test_service_packages_have_exact_scope_delivery_and_support(catalog_db):
         }
     finally:
         db.close()
+
+
+def test_catalog_default_ignores_newer_published_version(catalog_db):
+    insert_later_version_and_unrelated_service(catalog_db)
+
+    catalog = repository().load_published_catalog("manufacturing")
+
+    assert catalog.version_code == VERSION_CODE
+    assert len(catalog.questions) == 12
+
+
+def test_scenarios_default_uses_exact_v2_roi_profiles(catalog_db):
+    insert_later_version_and_unrelated_service(catalog_db)
+
+    scenarios = repository().get_scenarios()
+
+    assert tuple(scenario.code for scenario in scenarios) == (
+        "mfg_knowledge_assistant",
+        "mfg_quality_inspection",
+        "mfg_operations_reporting",
+        "retail_ai_service",
+        "retail_marketing_content",
+        "retail_inventory_insight",
+        "pro_document_knowledge",
+        "pro_delivery_drafting",
+        "pro_contract_review",
+        "creative_content_workflow",
+        "software_support_knowledge",
+        "project_delivery_automation",
+        "data_process_foundation",
+    )
+
+
+def test_service_packages_default_only_returns_exact_v2_scenario_links(catalog_db):
+    insert_later_version_and_unrelated_service(catalog_db)
+
+    packages = repository().get_service_packages()
+
+    assert tuple(package.code for package in packages) == (
+        "foundation_workshop",
+        "knowledge_assistant_pilot",
+        "customer_growth_pilot",
+        "workflow_automation",
+        "data_insight",
+        "industry_integration",
+    )
 
 
 def test_repeated_init_never_overwrites_the_published_version(tmp_path, monkeypatch):
