@@ -6,6 +6,7 @@ import sqlite3                          # SQLite 数据库驱动
 import os                               # 文件系统操作（路径、目录）
 import json                             # JSON 数据（备用）
 from migrations import apply_migrations
+from assessment.seed import seed_v2_defaults
 
 DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     os.path.dirname(__file__),          # 当前脚本所在目录
@@ -35,6 +36,8 @@ def init_db():                          # 🏗️ 初始化数据库
     # 🌱 如果资产编码表为空，插入种子数据
     if conn.execute("SELECT COUNT(*) FROM asset_codes").fetchone()[0] == 0:
         seed_asset_codes(conn)
+
+    seed_v2_defaults(conn)
 
     conn.commit()                        # 提交所有变更
     conn.close()                         # 关闭连接

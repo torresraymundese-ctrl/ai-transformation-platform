@@ -23,6 +23,11 @@ EXPECTED_V2_TABLES = {
     "assessment_questions",
     "assessment_options",
     "industry_benchmarks",
+    "assessment_branch_weights",
+    "company_sizes",
+    "pain_points",
+    "scenario_pains",
+    "scenario_budget_options",
     "roi_option_ranges",
     "scenario_roi_profiles",
     "roi_estimates",
@@ -177,8 +182,15 @@ def test_scenario_branch_links_reference_industry_branches(tmp_path, monkeypatch
             (industry_id, "industry_branch", "Industry branch"),
         ).lastrowid
         scenario_id = db.execute(
-            "INSERT INTO scenarios (code, category_code, public_name) VALUES (?, ?, ?)",
-            ("scenario", "category", "Scenario"),
+            "INSERT INTO scenarios "
+            "(code,category_code,public_name,minimum_business_value,minimum_process,"
+            "minimum_data,minimum_systems,minimum_organization,minimum_delivery,"
+            "integration_level,min_weeks,max_weeks,risk_codes_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "scenario", "category", "Scenario", 0, 0, 0, 0, 0, 0,
+                "low", 1, 1, "[]",
+            ),
         ).lastrowid
 
         db.execute(
