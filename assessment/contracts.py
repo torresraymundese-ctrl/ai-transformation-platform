@@ -102,3 +102,24 @@ class ScenarioMatch:
     components: Mapping[str, int]
     reason_codes: tuple[str, ...]
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RoiBand:
+    band_code: str
+    current_annual_cost: Decimal
+    labor_savings: Decimal
+    loss_savings: Decimal
+    annual_savings: Decimal
+    initial_investment: Decimal
+    annual_support: Decimal
+    payback_months: Decimal | None
+    three_year_support: Decimal
+    three_year_net: Decimal
+
+
+@dataclass(frozen=True)
+class RoiResult:
+    conservative: RoiBand
+    midpoint: RoiBand
+    ideal: RoiBand
