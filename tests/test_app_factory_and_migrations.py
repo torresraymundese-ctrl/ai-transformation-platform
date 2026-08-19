@@ -123,3 +123,25 @@ def test_blueprints_delegate_database_access_to_repositories():
             violations.append(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert violations == []
+
+
+def test_base_design_system_and_behaviors_are_external_static_assets(client):
+    """The shared shell must stay small and load cacheable CSS/JS from /static."""
+    response = client.get("/")
+    page = BeautifulSoup(response.data, "html.parser")
+
+    stylesheet = page.select_one('link[rel="stylesheet"][href="/static/css/app.css"]')
+    script = page.select_one('script[src="/static/js/app.js"]')
+
+    assert stylesheet is not None
+    assert script is not None
+    assert client.get("/static/css/app.css").status_code == 200
+    assert client.get("/static/js/app.js").status_code == 200
+    assert b"Scroll animations + Sticky CTA" not in response.data
+
+
+def test_page_specific_css_block_still_renders_after_base_extraction(client):
+    response = client.get("/services")
+
+    assert response.status_code == 200
+    assert b".service-hero" in response.data
