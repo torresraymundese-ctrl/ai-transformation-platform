@@ -92,3 +92,13 @@ class ServicePackage:
     not_included: tuple[str, ...]
     acceptance: tuple[str, ...]
     support_days: int
+
+
+@dataclass(frozen=True)
+class ScenarioMatch:
+    scenario: Scenario
+    service: ServicePackage
+    total_score: int
+    components: Mapping[str, int]
+    reason_codes: tuple[str, ...]
+    reasons: tuple[str, ...]
