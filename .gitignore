@@ -9,3 +9,4 @@ venv/
 natapp.exe
 ngrok.exe
 *.zip
+.worktrees/
