@@ -20,6 +20,7 @@
   <td style="display:flex;gap:4px;">
     <a href="/admin/assets/unit-b/{{ a.id }}" class="btn btn-outline btn-sm">编辑</a>
     <form method="POST" action="/admin/assets/unit-b/delete/{{ a.id }}" style="display:inline;" onsubmit="return confirm('确定删除吗？');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-danger btn-sm">删除</button>
     </form>
   </td>

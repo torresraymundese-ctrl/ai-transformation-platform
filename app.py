@@ -7,9 +7,17 @@ import sys                              # 系统操作：路径管理
 import os                               # 文件系统：路径拼接
 import json                             # JSON 数据：序列化/反序列化
 import sqlite3                          # SQLite 数据库驱动（备用）
+import re
+import secrets
+from datetime import timedelta
+from hmac import compare_digest
 
 # === 第三方库导入 ===
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+import bleach
+from flask import (Flask, abort, jsonify, redirect, render_template, request,
+                   session, url_for)
+from markupsafe import Markup
+from werkzeug.security import check_password_hash
 # 上述导入: Flask(核心) render_template(模板) request(请求) jsonify(JSON响应) redirect(重定向) url_for(路由URL)
 
 # === 本地模块导入 ===
@@ -18,27 +26,146 @@ from models import get_db, init_db              # 导入数据库连接和初始
 
 app = Flask(__name__)                   # ✅ 创建 Flask 应用实例
 
-# === 后台鉴权 ===
-ADMIN_USERNAME = "admin"               # 🔑 后台登录用户名
-ADMIN_PASSWORD = "18013563105"         # 🔑 后台登录密码
+# === 安全配置与后台鉴权 ===
+app.config.update(
+    SECRET_KEY=os.environ.get("AI_PLATFORM_SECRET_KEY"),
+    ADMIN_USERNAME=os.environ.get("AI_PLATFORM_ADMIN_USERNAME"),
+    ADMIN_PASSWORD_HASH=os.environ.get("AI_PLATFORM_ADMIN_PASSWORD_HASH"),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=1024 * 1024,
+)
 
-def check_admin_auth():                # 🔐 验证后台登录凭证
-    """检查 HTTP Basic Auth 是否通过"""
-    auth = request.authorization
-    return auth and auth.username == ADMIN_USERNAME and auth.password == ADMIN_PASSWORD
+ALLOWED_HTML_TAGS = {
+    "a", "blockquote", "br", "code", "em", "h2", "h3", "h4", "hr",
+    "li", "ol", "p", "pre", "strong", "table", "tbody", "td", "th",
+    "thead", "tr", "ul",
+}
+ALLOWED_HTML_ATTRIBUTES = {
+    "a": ["href", "title"],
+    "th": ["colspan", "rowspan"],
+    "td": ["colspan", "rowspan"],
+}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
-@app.before_request                     # 🔐 在所有请求处理前执行的钩子
-def require_admin_auth():
-    """后台路径 /admin 需要 HTTP Basic Auth 验证"""
-    from flask import abort
-    if request.path.startswith("/admin") and not check_admin_auth():
-        return abort(401)               # 未授权 → 返回 401
 
-@app.errorhandler(401)                  # 🔐 401 错误时返回带认证头的响应
-def unauthorized(e):
-    from flask import Response
-    return Response("请输入后台管理账号和密码", 401,
-                    {"WWW-Authenticate": 'Basic realm=admin'})
+def security_configured():
+    """Return whether the admin can authenticate without unsafe defaults."""
+    return bool(
+        app.config.get("SECRET_KEY")
+        and app.config.get("ADMIN_USERNAME")
+        and app.config.get("ADMIN_PASSWORD_HASH")
+    )
+
+
+def csrf_token():
+    """Return a session-bound CSRF token for forms and JavaScript requests."""
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def csrf_is_valid():
+    """Compare submitted and session tokens without timing-dependent equality."""
+    expected = session.get("csrf_token", "")
+    supplied = request.form.get("csrf_token", "") or request.headers.get(
+        "X-CSRF-Token", ""
+    )
+    return bool(expected and supplied and compare_digest(expected, supplied))
+
+
+def check_admin_auth():
+    """Check the signed browser session rather than an Authorization header."""
+    return (
+        security_configured()
+        and session.get("admin_username") == app.config["ADMIN_USERNAME"]
+    )
+
+
+def sanitize_html(value):
+    """Clean stored rich text using a small content-oriented allowlist."""
+    without_active_blocks = re.sub(
+        r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>", "", value or ""
+    )
+    cleaned = bleach.clean(
+        without_active_blocks,
+        tags=ALLOWED_HTML_TAGS,
+        attributes=ALLOWED_HTML_ATTRIBUTES,
+        protocols={"http", "https", "mailto"},
+        strip=True,
+    )
+    return Markup(cleaned)
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+app.jinja_env.filters["safe_html"] = sanitize_html
+
+
+@app.before_request
+def protect_admin_routes():
+    """Fail closed, require a signed session, and protect all admin writes."""
+    if not request.path.startswith("/admin"):
+        return None
+
+    if not security_configured():
+        return "后台安全配置未完成", 503
+
+    if request.path == "/admin/login":
+        if request.method == "POST" and not csrf_is_valid():
+            abort(403)
+        return None
+
+    if not check_admin_auth():
+        return redirect(url_for("admin_login", next=request.path))
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not csrf_is_valid():
+        abort(403)
+    return None
+
+
+@app.after_request
+def add_security_headers(response):
+    """Apply browser hardening headers without breaking the legacy inline UI."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    return response
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Authenticate an administrator against the configured password hash."""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        username_ok = compare_digest(username, app.config["ADMIN_USERNAME"])
+        password_ok = check_password_hash(app.config["ADMIN_PASSWORD_HASH"], password)
+        if not (username_ok and password_ok):
+            return render_template("admin/login.html", error="账号或密码错误"), 401
+
+        session.clear()
+        session["admin_username"] = app.config["ADMIN_USERNAME"]
+        session["csrf_token"] = secrets.token_urlsafe(32)
+        session.permanent = True
+        return redirect(url_for("admin_index"))
+
+    if check_admin_auth():
+        return redirect(url_for("admin_index"))
+    return render_template("admin/login.html")
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    """Revoke the current administrator session."""
+    session.clear()
+    return redirect(url_for("admin_login"))
 
 @app.route("/health")                   # 🩺 健康检查端点（供监控系统探测）
 def health():
@@ -150,16 +277,39 @@ def assessment_page():
 @app.route("/api/assessment", methods=["POST"])  # 📡 评估数据提交接口（仅接收 POST）
 def api_assessment():
     """接收前端提交的评估结果，存储到数据库"""
-    data = request.get_json()           # 解析 JSON 请求体
-    scores = data.get("scores", {})     # 获取评分数据（默认为空字典）
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid assessment payload"}), 400
+
+    company = data.get("company", "")
+    email = data.get("email", "")
+    scores = data.get("scores")
+    result = data.get("result", "")
+    if not isinstance(company, str) or len(company.strip()) > 120:
+        return jsonify({"error": "invalid assessment payload"}), 400
+    if not isinstance(email, str) or len(email.strip()) > 254:
+        return jsonify({"error": "invalid assessment payload"}), 400
+    if email.strip() and not EMAIL_PATTERN.fullmatch(email.strip()):
+        return jsonify({"error": "invalid assessment payload"}), 400
+    if not isinstance(scores, dict) or not scores:
+        return jsonify({"error": "invalid assessment payload"}), 400
+    if not isinstance(result, str) or not result.strip() or len(result.strip()) > 120:
+        return jsonify({"error": "invalid assessment payload"}), 400
+    try:
+        scores_json = json.dumps(scores, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid assessment payload"}), 400
+    if len(scores_json.encode("utf-8")) > 16 * 1024:
+        return jsonify({"error": "invalid assessment payload"}), 400
+
     db = get_db()
     # 将评估记录写入 assessments 表
     db.execute(
         "INSERT INTO assessments (company_name, contact_email, scores, result) VALUES (?,?,?,?)",
-        (data.get("company",""),         # 公司名
-         data.get("email",""),           # 邮箱
-         json.dumps(scores),             # 评分数据 JSON 序列化
-         data.get("result",""))          # 推荐方案等级
+        (company.strip(),                 # 公司名
+         email.strip().lower(),           # 邮箱
+         scores_json,                     # 评分数据 JSON 序列化
+         result.strip())                  # 推荐方案等级
     )
     db.commit()                         # 提交事务
     db.close()
@@ -270,7 +420,7 @@ def admin_article_edit(article_id):
              data.get("source"),          # 来源
              data.get("source_url"),      # 来源链接
              data.get("summary"),         # 摘要
-             data.get("content_html"),    # 正文 HTML
+             str(sanitize_html(data.get("content_html"))),  # 已清洗正文 HTML
              data.get("tags"),            # 标签
              data.get("category"),        # 分类
              int(data.get("is_featured",0)),  # 是否精选
@@ -302,7 +452,7 @@ def admin_article_new():
              data.get("source"),
              data.get("source_url"),
              data.get("summary"),
-             data.get("content_html"),
+             str(sanitize_html(data.get("content_html"))),
              data.get("tags"),
              data.get("category"),
              int(data.get("is_featured",0)),
@@ -408,7 +558,7 @@ def admin_announcement_new():
         db.execute(
             "INSERT INTO announcements (title, content_html, is_pinned, status) VALUES (?,?,?,?)",
             (data.get("title"),
-             data.get("content_html"),
+             str(sanitize_html(data.get("content_html"))),
              int(data.get("is_pinned",0)),
              data.get("status","published")))
         db.commit(); db.close()
@@ -424,7 +574,7 @@ def admin_announcement_edit(aid):
         db.execute(
             "UPDATE announcements SET title=?, content_html=?, is_pinned=?, status=? WHERE id=?",
             (data.get("title"),
-             data.get("content_html"),
+             str(sanitize_html(data.get("content_html"))),
              int(data.get("is_pinned",0)),
              data.get("status"), aid))
         db.commit(); db.close()

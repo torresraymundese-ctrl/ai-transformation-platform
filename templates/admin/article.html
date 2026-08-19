@@ -24,7 +24,7 @@
 
   {% if article.content_html %}
   <div style="line-height:1.9;font-size:15px;color:var(--text);">
-    {{ article.content_html | safe }}
+    {{ article.content_html | safe_html }}
   </div>
   {% else %}
   <div style="text-align:center;padding:48px 24px;background:var(--bg-gray);border-radius:var(--radius-lg);margin-bottom:24px;">

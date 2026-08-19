@@ -2,6 +2,7 @@
 {% block admin_content %}
 <h2>{% if asset %}编辑单位B资产 #{{ asset.id }}{% else %}新增单位B资产{% endif %}</h2>
 <form method="POST" style="max-width:500px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
     <label>资产编码 *</label>
     <select name="asset_code_id" required>

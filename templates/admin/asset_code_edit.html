@@ -2,6 +2,7 @@
 {% block admin_content %}
 <h2>{% if code %}编辑编码 #{{ code.id }}{% else %}新增编码{% endif %}</h2>
 <form method="POST" style="max-width:500px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
     <label>编码 *</label>
     <input name="code" value="{{ code.code if code else '' }}" required placeholder="如 Z001, Y001">

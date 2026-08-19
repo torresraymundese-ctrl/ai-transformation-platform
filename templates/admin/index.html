@@ -27,7 +27,7 @@
 async function scrapeNow() {
   const btn = event.target;
   btn.disabled = true; btn.textContent = '抓取中...';
-  const r = await fetch('/admin/scrape', {method:'POST'});
+  const r = await fetch('/admin/scrape', {method:'POST', headers:{'X-CSRF-Token':'{{ csrf_token() }}'}});
   const d = await r.json();
   alert(d.success ? `成功添加 ${d.count} 篇文章` : `失败: ${d.error}`);
   btn.disabled = false; btn.textContent = '立即抓取文章';

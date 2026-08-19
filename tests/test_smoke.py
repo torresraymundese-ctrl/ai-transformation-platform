@@ -48,18 +48,18 @@ def test_health_endpoint_returns_expected_contract(client):
     assert response.get_json() == {"status": "ok"}
 
 
-def test_admin_rejects_unauthenticated_requests(client):
-    """Catch accidental removal of the current admin access boundary."""
+def test_admin_redirects_unauthenticated_requests_to_login(client):
+    """Catch accidental removal of the session-backed admin access boundary."""
     response = client.get("/admin")
 
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic ")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin/login?next=/admin")
 
 
 @pytest.mark.parametrize("path", ADMIN_PATHS)
-def test_authenticated_admin_entry_point_is_available(client, admin_headers, path):
+def test_authenticated_admin_entry_point_is_available(admin_client, path):
     """Catch a broken admin route, template, or asset-management query."""
-    response = client.get(path, headers=admin_headers)
+    response = admin_client.get(path)
 
     assert response.status_code == 200
 

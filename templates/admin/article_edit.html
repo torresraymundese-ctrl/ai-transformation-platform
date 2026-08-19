@@ -5,6 +5,7 @@
 
 <div class="card" style="padding:28px;">
 <form method="POST">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
     <label>📰 文章标题 *</label>
     <input type="text" name="title" value="{{ article.title if article else '' }}" required placeholder="请输入文章标题">

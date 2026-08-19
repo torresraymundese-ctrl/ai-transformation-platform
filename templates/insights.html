@@ -102,7 +102,7 @@
     {% for a in announcements %}
     <div style="background:var(--bg-gray);border-left:3px solid var(--primary);padding:16px 20px;margin-bottom:8px;border-radius:var(--radius);">
       <div style="font-weight:600;margin-bottom:4px;">{{ a.title }}</div>
-      <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">{{ a.content_html | safe if a.content_html else '' }}</div>
+      <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">{% if a.content_html %}{{ a.content_html | safe_html }}{% endif %}</div>
       <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">{{ a.created_at }}</div>
     </div>
     {% endfor %}

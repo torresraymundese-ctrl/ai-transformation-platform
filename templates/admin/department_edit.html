@@ -2,6 +2,7 @@
 {% block admin_content %}
 <h2>{% if department %}编辑科室 #{{ department.id }}{% else %}新增科室{% endif %}</h2>
 <form method="POST" style="max-width:400px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
     <label>科室名称 *</label>
     <input name="name" value="{{ department.name if department else '' }}" required placeholder="如 财务科">
