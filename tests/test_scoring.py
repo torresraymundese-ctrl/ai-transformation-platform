@@ -205,3 +205,70 @@ def test_weight_total_other_than_one_hundred_fails_closed(catalog, profile):
 
     with pytest.raises(AssessmentInputError):
         score_assessment(invalid_catalog, profile)
+
+
+def _profile_for_catalog(profile, catalog):
+    answers = {
+        question.code: profile.answers.get(question.code, "level_0")
+        for question in catalog.questions
+    }
+    return AssessmentProfile(**{**profile.__dict__, "answers": answers})
+
+
+def test_dimension_with_one_question_fails_closed(catalog, profile):
+    reduced_questions = tuple(
+        question
+        for question in catalog.questions
+        if question.code != "data_quality"
+    )
+    invalid_catalog = AssessmentCatalog(**{
+        **catalog.__dict__,
+        "questions": reduced_questions,
+    })
+    matching_profile = _profile_for_catalog(profile, invalid_catalog)
+
+    with pytest.raises(AssessmentInputError):
+        score_assessment(invalid_catalog, matching_profile)
+
+
+def test_dimension_with_three_questions_fails_closed(catalog, profile):
+    invalid_catalog = AssessmentCatalog(**{
+        **catalog.__dict__,
+        "questions": catalog.questions + (_question("data_extra", "data"),),
+    })
+    matching_profile = _profile_for_catalog(profile, invalid_catalog)
+
+    with pytest.raises(AssessmentInputError):
+        score_assessment(invalid_catalog, matching_profile)
+
+
+def test_dimension_scores_are_immutable(catalog, profile):
+    result = score_assessment(catalog, profile)
+
+    with pytest.raises(TypeError):
+        result.dimension_scores["business_value"] = 0
+    assert result.dimension_scores["business_value"] == 100
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [None, [], [["business_value_frequency", "level_3"]]],
+)
+def test_malformed_answer_containers_raise_assessment_input_error(
+    catalog, profile, answers
+):
+    invalid = AssessmentProfile(**{**profile.__dict__, "answers": answers})
+
+    with pytest.raises(AssessmentInputError):
+        score_assessment(catalog, invalid)
+
+
+@pytest.mark.parametrize("answer", [["level_3"], 3])
+def test_malformed_answer_values_raise_assessment_input_error(
+    catalog, profile, answer
+):
+    answers = {**profile.answers, "data_quality": answer}
+    invalid = AssessmentProfile(**{**profile.__dict__, "answers": answers})
+
+    with pytest.raises(AssessmentInputError):
+        score_assessment(catalog, invalid)

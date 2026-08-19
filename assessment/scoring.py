@@ -1,6 +1,8 @@
 """Pure scoring rules for the published six-dimension assessment."""
 
 from collections import defaultdict
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Iterable
 
 from .contracts import (
@@ -57,6 +59,7 @@ def score_assessment(
         raise AssessmentInputError("scoring weights must be non-negative integers totaling 100")
 
     question_by_code = {}
+    questions_by_dimension = defaultdict(list)
     for question in catalog.questions:
         if question.code in question_by_code:
             raise AssessmentInputError(f"duplicate question code: {question.code!r}")
@@ -65,9 +68,27 @@ def score_assessment(
                 f"unknown question dimension: {question.dimension!r}"
             )
         question_by_code[question.code] = question
+        questions_by_dimension[question.dimension].append(question)
 
+    if set(questions_by_dimension) != set(DIMENSION_ORDER) or any(
+        len(questions_by_dimension[dimension]) != 2
+        for dimension in DIMENSION_ORDER
+    ):
+        raise AssessmentInputError(
+            "catalog must contain exactly two questions for each dimension"
+        )
+
+    answers = profile.answers
+    if not isinstance(answers, Mapping):
+        raise AssessmentInputError("answers must be a mapping")
+    if any(
+        not isinstance(question_code, str)
+        or not isinstance(option_code, str)
+        for question_code, option_code in answers.items()
+    ):
+        raise AssessmentInputError("answer question and option codes must be strings")
     expected_codes = set(question_by_code)
-    answer_codes = set(profile.answers)
+    answer_codes = set(answers)
     missing = expected_codes - answer_codes
     unknown = answer_codes - expected_codes
     if missing:
@@ -77,7 +98,7 @@ def score_assessment(
 
     scores_by_dimension = defaultdict(list)
     for question in catalog.questions:
-        option_code = profile.answers[question.code]
+        option_code = answers[question.code]
         options = {option.code: option for option in question.options}
         option = options.get(option_code)
         if option is None:
@@ -97,10 +118,10 @@ def score_assessment(
     if set(scores_by_dimension) != set(DIMENSION_ORDER):
         raise AssessmentInputError("catalog questions must cover exactly six dimensions")
 
-    dimension_scores = {
+    dimension_scores = MappingProxyType({
         dimension: dimension_score(scores_by_dimension[dimension])
         for dimension in DIMENSION_ORDER
-    }
+    })
     overall_score = round(
         sum(dimension_scores[dimension] * weights[dimension] for dimension in DIMENSION_ORDER)
         / 100
