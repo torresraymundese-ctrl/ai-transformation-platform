@@ -2,18 +2,22 @@
 
 from .contracts import (
     AssessmentCatalog,
+    AssessmentInputError,
     AssessmentProfile,
     Question,
     QuestionOption,
     Scenario,
     ServicePackage,
+    ScoreResult,
 )
 
 __all__ = (
     "AssessmentCatalog",
+    "AssessmentInputError",
     "AssessmentProfile",
     "Question",
     "QuestionOption",
     "Scenario",
     "ServicePackage",
+    "ScoreResult",
 )

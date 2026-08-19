@@ -43,6 +43,19 @@ class AssessmentCatalog:
     reference_lines: Mapping[str, Mapping[str, int]]
 
 
+class AssessmentInputError(ValueError):
+    """Raised when an assessment profile or catalog cannot be scored."""
+
+
+@dataclass(frozen=True)
+class ScoreResult:
+    dimension_scores: Mapping[str, int]
+    overall_score: int
+    maturity_code: str
+    strongest_dimension: str
+    weakest_dimension: str
+
+
 @dataclass(frozen=True)
 class Scenario:
     code: str
