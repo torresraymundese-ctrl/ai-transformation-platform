@@ -1,6 +1,7 @@
 """Minimal ordered SQLite migration runner."""
 
 from pathlib import Path
+import sqlite3
 
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
@@ -14,6 +15,7 @@ def apply_migrations(connection):
         "applied_at TEXT DEFAULT (datetime('now','localtime'))"
         ")"
     )
+    connection.commit()
     applied = {
         row[0]
         for row in connection.execute("SELECT version FROM schema_migrations")
@@ -22,8 +24,16 @@ def apply_migrations(connection):
         version = path.stem
         if version in applied:
             continue
-        connection.executescript(path.read_text(encoding="utf-8"))
-        connection.execute(
-            "INSERT INTO schema_migrations (version) VALUES (?)", (version,)
-        )
-        connection.commit()
+        version_sql = connection.execute("SELECT quote(?)", (version,)).fetchone()[0]
+        script = path.read_text(encoding="utf-8")
+        try:
+            connection.executescript(
+                "BEGIN IMMEDIATE;\n"
+                f"{script}\n"
+                "INSERT INTO schema_migrations (version) "
+                f"VALUES ({version_sql});\n"
+                "COMMIT;\n"
+            )
+        except sqlite3.Error:
+            connection.rollback()
+            raise

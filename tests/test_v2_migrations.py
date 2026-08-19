@@ -1,9 +1,14 @@
 import sqlite3
+import shutil
+from pathlib import Path
 
 import pytest
 
+import migrations
 import models
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_V2_TABLES = {
     "industries",
@@ -34,11 +39,25 @@ EXPECTED_V2_TABLES = {
 def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
     tmp_path, monkeypatch
 ):
-    """A V0.2 assessment remains readable after all V2 schema migrations run."""
+    """A row created with only 001+002 remains readable after the V2 upgrade."""
     monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    legacy_migrations_dir = tmp_path / "legacy_migrations"
+    legacy_migrations_dir.mkdir()
+    for migration_name in ("001_initial.sql", "002_security.sql"):
+        shutil.copy2(
+            PROJECT_ROOT / "migrations" / migration_name,
+            legacy_migrations_dir / migration_name,
+        )
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", legacy_migrations_dir)
     models.init_db()
     db = models.get_db()
     try:
+        versions_before_upgrade = [
+            row[0]
+            for row in db.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
         db.execute(
             "INSERT INTO assessments (company_name, contact_email, scores, result) "
             "VALUES (?,?,?,?)",
@@ -48,6 +67,7 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
     finally:
         db.close()
 
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
     models.init_db()
     db = models.get_db()
     try:
@@ -70,6 +90,7 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
     finally:
         db.close()
 
+    assert versions_before_upgrade == ["001_initial", "002_security"]
     assert versions == [
         "001_initial",
         "002_security",
@@ -95,6 +116,84 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
     } <= columns
     assert EXPECTED_V2_TABLES <= tables
     assert legacy_company_name == "旧企业"
+
+
+def test_failed_migration_rolls_back_schema_and_can_be_retried(tmp_path, monkeypatch):
+    """A failed migration must leave no partial schema that prevents a retry."""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    migration_path = migrations_dir / "001_atomic.sql"
+    migration_path.write_text(
+        "CREATE TABLE retry_target (id INTEGER PRIMARY KEY);\n"
+        "CREATE TABLE retry_target (id INTEGER PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", migrations_dir)
+    db = sqlite3.connect(tmp_path / "platform.db")
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="already exists"):
+            migrations.apply_migrations(db)
+
+        table_names = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        versions = [
+            row[0]
+            for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")
+        ]
+
+        migration_path.write_text(
+            "CREATE TABLE retry_target (id INTEGER PRIMARY KEY);\n",
+            encoding="utf-8",
+        )
+        migrations.apply_migrations(db)
+        retried_versions = [
+            row[0]
+            for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")
+        ]
+    finally:
+        db.close()
+
+    assert "retry_target" not in table_names
+    assert versions == []
+    assert retried_versions == ["001_atomic"]
+
+
+def test_scenario_branch_links_reference_industry_branches(tmp_path, monkeypatch):
+    """A scenario assignment must point to a specific industry branch."""
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        industry_id = db.execute(
+            "INSERT INTO industries (code, name) VALUES (?, ?)",
+            ("industry", "Industry"),
+        ).lastrowid
+        industry_branch_id = db.execute(
+            "INSERT INTO industry_branches (industry_id, code, name) VALUES (?, ?, ?)",
+            (industry_id, "industry_branch", "Industry branch"),
+        ).lastrowid
+        scenario_id = db.execute(
+            "INSERT INTO scenarios (code, category_code, public_name) VALUES (?, ?, ?)",
+            ("scenario", "category", "Scenario"),
+        ).lastrowid
+
+        db.execute(
+            "INSERT INTO scenario_branches (scenario_id, industry_branch_id) "
+            "VALUES (?, ?)",
+            (scenario_id, industry_branch_id),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO scenario_branches (scenario_id, industry_branch_id) "
+                "VALUES (?, ?)",
+                (scenario_id, industry_branch_id + 1),
+            )
+    finally:
+        db.close()
 
 
 def test_analytics_server_events_are_idempotent_without_blocking_anonymous_events(

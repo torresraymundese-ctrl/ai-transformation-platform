@@ -48,10 +48,10 @@ CREATE TABLE scenarios (
 
 CREATE TABLE scenario_branches (
     scenario_id INTEGER NOT NULL,
-    industry_id INTEGER NOT NULL,
-    PRIMARY KEY (scenario_id, industry_id),
+    industry_branch_id INTEGER NOT NULL,
+    PRIMARY KEY (scenario_id, industry_branch_id),
     FOREIGN KEY (scenario_id) REFERENCES scenarios(id),
-    FOREIGN KEY (industry_id) REFERENCES industries(id)
+    FOREIGN KEY (industry_branch_id) REFERENCES industry_branches(id)
 );
 
 CREATE TABLE scenario_departments (
