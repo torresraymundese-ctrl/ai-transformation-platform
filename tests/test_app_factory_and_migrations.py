@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup
@@ -6,6 +7,9 @@ from werkzeug.security import generate_password_hash
 
 import app as app_module
 import models
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def login_token(client):
@@ -108,3 +112,14 @@ def test_database_enforces_asset_foreign_keys(tmp_path, monkeypatch):
             )
     finally:
         db.close()
+
+
+def test_blueprints_delegate_database_access_to_repositories():
+    """HTTP adapters must not grow a second, route-local data-access layer."""
+    violations = []
+    for path in (PROJECT_ROOT / "blueprints").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "get_db" in source or ".execute(" in source or "execute_write" in source:
+            violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert violations == []

@@ -6,8 +6,7 @@ from flask import (abort, current_app, jsonify, redirect, render_template,
                    request, url_for)
 
 from blueprints.admin import bp
-from models import get_db
-from repository import execute_write
+import content_repository
 from security import sanitize_html
 from validation import (choice as valid_choice, external_url as valid_external_url,
                         integer as valid_integer, text as valid_text)
@@ -67,45 +66,23 @@ def announcement_payload(data):
 
 @bp.route("/admin")
 def admin_index():
-    db = get_db()
-    stats = {
-        "articles": db.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
-        "cases": db.execute("SELECT COUNT(*) FROM cases").fetchone()[0],
-        "assessments": db.execute("SELECT COUNT(*) FROM assessments").fetchone()[0],
-    }
-    db.close()
-    return render_template("admin/index.html", stats=stats)
+    return render_template("admin/index.html", stats=content_repository.admin_counts())
 
 
 @bp.route("/admin/articles")
 def admin_articles():
-    db = get_db()
-    articles = db.execute(
-        "SELECT * FROM articles ORDER BY created_at DESC"
-    ).fetchall()
-    db.close()
-    return render_template("admin/articles.html", articles=articles)
+    return render_template(
+        "admin/articles.html", articles=content_repository.list_articles()
+    )
 
 
 @bp.route("/admin/article/<int:article_id>", methods=["GET", "POST"])
 def admin_article_edit(article_id):
     if request.method == "POST":
         item = article_payload(request.form)
-        execute_write(
-            "UPDATE articles SET title=?,source=?,source_url=?,summary=?,"
-            "content_html=?,tags=?,category=?,is_featured=?,status=? WHERE id=?",
-            (
-                item["title"], item["source"], item["source_url"], item["summary"],
-                item["content_html"], item["tags"], item["category"],
-                item["is_featured"], item["status"], article_id,
-            ),
-        )
+        content_repository.update_article(article_id, item)
         return redirect(url_for("admin.admin_articles"))
-    db = get_db()
-    article = db.execute(
-        "SELECT * FROM articles WHERE id=?", (article_id,)
-    ).fetchone()
-    db.close()
+    article = content_repository.get_article(article_id)
     if article is None:
         abort(404)
     return render_template("admin/article_edit.html", article=article)
@@ -115,36 +92,21 @@ def admin_article_edit(article_id):
 def admin_article_new():
     if request.method == "POST":
         item = article_payload(request.form)
-        execute_write(
-            "INSERT INTO articles (title_hash,title,source,source_url,summary,"
-            "content_html,tags,category,is_featured,status) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (
-                item["title_hash"], item["title"], item["source"], item["source_url"],
-                item["summary"], item["content_html"], item["tags"], item["category"],
-                item["is_featured"], item["status"],
-            ),
-        )
+        content_repository.create_article(item)
         return redirect("/admin/articles")
     return render_template("admin/article_edit.html", article=None)
 
 
 @bp.route("/admin/cases")
 def admin_cases():
-    db = get_db()
-    cases = db.execute("SELECT * FROM cases ORDER BY sort_order").fetchall()
-    db.close()
-    return render_template("admin/cases.html", cases=cases)
+    return render_template("admin/cases.html", cases=content_repository.list_cases())
 
 
 @bp.route("/admin/case/new", methods=["GET", "POST"])
 def admin_case_new():
     if request.method == "POST":
         item = case_payload(request.form)
-        execute_write(
-            "INSERT INTO cases (title,industry,scale,pain_point,solution,result,tags,"
-            "logo_text) VALUES (?,?,?,?,?,?,?,?)",
-            tuple(item.values()),
-        )
+        content_repository.create_case(item)
         return redirect("/admin/cases")
     return render_template("admin/case_edit.html", case=None)
 
@@ -153,15 +115,9 @@ def admin_case_new():
 def admin_case_edit(case_id):
     if request.method == "POST":
         item = case_payload(request.form)
-        execute_write(
-            "UPDATE cases SET title=?,industry=?,scale=?,pain_point=?,solution=?,"
-            "result=?,tags=?,logo_text=? WHERE id=?",
-            (*item.values(), case_id),
-        )
+        content_repository.update_case(case_id, item)
         return redirect("/admin/cases")
-    db = get_db()
-    case = db.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
-    db.close()
+    case = content_repository.get_case(case_id)
     if case is None:
         abort(404)
     return render_template("admin/case_edit.html", case=case)
@@ -169,12 +125,9 @@ def admin_case_edit(case_id):
 
 @bp.route("/admin/assessments")
 def admin_assessments():
-    db = get_db()
-    assessments = db.execute(
-        "SELECT * FROM assessments ORDER BY created_at DESC LIMIT 50"
-    ).fetchall()
-    db.close()
-    return render_template("admin/assessments.html", assessments=assessments)
+    return render_template(
+        "admin/assessments.html", assessments=content_repository.list_assessments()
+    )
 
 
 @bp.route("/admin/scrape", methods=["POST"])
@@ -190,23 +143,17 @@ def admin_scrape():
 
 @bp.route("/admin/announcements")
 def admin_announcements():
-    db = get_db()
-    announcements = db.execute(
-        "SELECT * FROM announcements ORDER BY created_at DESC"
-    ).fetchall()
-    db.close()
-    return render_template("admin/announcements.html", announcements=announcements)
+    return render_template(
+        "admin/announcements.html",
+        announcements=content_repository.list_announcements(),
+    )
 
 
 @bp.route("/admin/announcement/new", methods=["GET", "POST"])
 def admin_announcement_new():
     if request.method == "POST":
         item = announcement_payload(request.form)
-        execute_write(
-            "INSERT INTO announcements (title,content_html,is_pinned,status) "
-            "VALUES (?,?,?,?)",
-            tuple(item.values()),
-        )
+        content_repository.create_announcement(item)
         return redirect("/admin/announcements")
     return render_template("admin/announcement_edit.html", announcement=None)
 
@@ -215,17 +162,9 @@ def admin_announcement_new():
 def admin_announcement_edit(aid):
     if request.method == "POST":
         item = announcement_payload(request.form)
-        execute_write(
-            "UPDATE announcements SET title=?,content_html=?,is_pinned=?,status=? "
-            "WHERE id=?",
-            (*item.values(), aid),
-        )
+        content_repository.update_announcement(aid, item)
         return redirect("/admin/announcements")
-    db = get_db()
-    announcement = db.execute(
-        "SELECT * FROM announcements WHERE id=?", (aid,)
-    ).fetchone()
-    db.close()
+    announcement = content_repository.get_announcement(aid)
     if announcement is None:
         abort(404)
     return render_template("admin/announcement_edit.html", announcement=announcement)
