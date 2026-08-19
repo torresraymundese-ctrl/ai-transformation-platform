@@ -7,14 +7,16 @@ import sys                              # 系统操作：路径管理
 import os                               # 文件系统：路径拼接
 import json                             # JSON 数据：序列化/反序列化
 import sqlite3                          # SQLite 数据库驱动（备用）
+import hashlib
 import re
 import secrets
+import time
 from datetime import timedelta
 from hmac import compare_digest
 
 # === 第三方库导入 ===
 import bleach
-from flask import (Flask, abort, jsonify, redirect, render_template, request,
+from flask import (Flask, abort, g, jsonify, redirect, render_template, request,
                    session, url_for)
 from markupsafe import Markup
 from werkzeug.security import check_password_hash
@@ -36,6 +38,12 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=1024 * 1024,
+    LOGIN_RATE_LIMIT=10,
+    LOGIN_RATE_WINDOW=15 * 60,
+    ASSESSMENT_RATE_LIMIT=30,
+    ASSESSMENT_RATE_WINDOW=60 * 60,
+    SCRAPE_RATE_LIMIT=3,
+    SCRAPE_RATE_WINDOW=60 * 60,
 )
 
 ALLOWED_HTML_TAGS = {
@@ -86,6 +94,53 @@ def check_admin_auth():
     )
 
 
+def request_identity_hash():
+    """Hash the network identifier so raw client addresses are not persisted."""
+    identifier = request.remote_addr or "unknown"
+    return hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]
+
+
+def consume_rate_limit(bucket, limit, window_seconds):
+    """Atomically consume one fixed-window allowance in the shared SQLite DB."""
+    limit = int(limit)
+    window_seconds = int(window_seconds)
+    if limit < 1 or window_seconds < 1:
+        return False
+
+    now = int(time.time())
+    window_start = now - (now % window_seconds)
+    identity_hash = request_identity_hash()
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO request_rate_limits "
+            "(bucket, identity_hash, window_start, request_count) VALUES (?,?,?,1) "
+            "ON CONFLICT(bucket, identity_hash, window_start) "
+            "DO UPDATE SET request_count=request_count+1",
+            (bucket, identity_hash, window_start),
+        )
+        count = db.execute(
+            "SELECT request_count FROM request_rate_limits "
+            "WHERE bucket=? AND identity_hash=? AND window_start=?",
+            (bucket, identity_hash, window_start),
+        ).fetchone()[0]
+        db.execute(
+            "DELETE FROM request_rate_limits WHERE window_start < ?",
+            (window_start - window_seconds,),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return count <= limit
+
+
+def rate_limit_response(window_seconds):
+    response = jsonify({"error": "rate limit exceeded"})
+    response.status_code = 429
+    response.headers["Retry-After"] = str(int(window_seconds))
+    return response
+
+
 def sanitize_html(value):
     """Clean stored rich text using a small content-oriented allowlist."""
     without_active_blocks = re.sub(
@@ -117,6 +172,12 @@ def protect_admin_routes():
     if request.path == "/admin/login":
         if request.method == "POST" and not csrf_is_valid():
             abort(403)
+        if request.method == "POST" and not consume_rate_limit(
+            "admin_login",
+            app.config["LOGIN_RATE_LIMIT"],
+            app.config["LOGIN_RATE_WINDOW"],
+        ):
+            return rate_limit_response(app.config["LOGIN_RATE_WINDOW"])
         return None
 
     if not check_admin_auth():
@@ -124,6 +185,13 @@ def protect_admin_routes():
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not csrf_is_valid():
         abort(403)
+    if request.path == "/admin/scrape" and request.method == "POST":
+        if not consume_rate_limit(
+            "admin_scrape",
+            app.config["SCRAPE_RATE_LIMIT"],
+            app.config["SCRAPE_RATE_WINDOW"],
+        ):
+            return rate_limit_response(app.config["SCRAPE_RATE_WINDOW"])
     return None
 
 
@@ -136,6 +204,33 @@ def add_security_headers(response):
     response.headers.setdefault(
         "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
     )
+    return response
+
+
+@app.after_request
+def audit_admin_actions(response):
+    """Record minimal metadata for admin state changes, including rejections."""
+    if request.path.startswith("/admin") and request.method in {
+        "POST", "PUT", "PATCH", "DELETE"
+    }:
+        actor = getattr(g, "audit_actor", None) or session.get(
+            "admin_username"
+        ) or request.form.get("username", "anonymous")[:80]
+        action = request.endpoint or "unmatched_admin_request"
+        db = None
+        try:
+            db = get_db()
+            db.execute(
+                "INSERT INTO admin_audit_logs "
+                "(actor, action, status_code, ip_hash) VALUES (?,?,?,?)",
+                (actor, action, response.status_code, request_identity_hash()),
+            )
+            db.commit()
+        except sqlite3.Error:
+            app.logger.exception("Failed to write admin audit event")
+        finally:
+            if db is not None:
+                db.close()
     return response
 
 
@@ -164,6 +259,7 @@ def admin_login():
 @app.route("/admin/logout", methods=["POST"])
 def admin_logout():
     """Revoke the current administrator session."""
+    g.audit_actor = session.get("admin_username", "anonymous")
     session.clear()
     return redirect(url_for("admin_login"))
 
@@ -277,6 +373,12 @@ def assessment_page():
 @app.route("/api/assessment", methods=["POST"])  # 📡 评估数据提交接口（仅接收 POST）
 def api_assessment():
     """接收前端提交的评估结果，存储到数据库"""
+    if not consume_rate_limit(
+        "assessment",
+        app.config["ASSESSMENT_RATE_LIMIT"],
+        app.config["ASSESSMENT_RATE_WINDOW"],
+    ):
+        return rate_limit_response(app.config["ASSESSMENT_RATE_WINDOW"])
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "invalid assessment payload"}), 400

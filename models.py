@@ -86,6 +86,25 @@ def init_db():                          # 🏗️ 初始化数据库
             value TEXT                               -- 配置值
         );
 
+        -- 🚦 跨 Gunicorn worker 的固定窗口限流计数
+        CREATE TABLE IF NOT EXISTS request_rate_limits (
+            bucket TEXT NOT NULL,
+            identity_hash TEXT NOT NULL,
+            window_start INTEGER NOT NULL,
+            request_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (bucket, identity_hash, window_start)
+        );
+
+        -- 🧾 后台关键操作审计；不记录表单正文、密码或 Cookie
+        CREATE TABLE IF NOT EXISTS admin_audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor TEXT NOT NULL,
+            action TEXT NOT NULL,
+            status_code INTEGER NOT NULL,
+            ip_hash TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+
         -- 📢 公告表：平台公告内容
         CREATE TABLE IF NOT EXISTS announcements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
