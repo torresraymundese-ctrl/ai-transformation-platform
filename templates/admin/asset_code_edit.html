@@ -1,16 +1,11 @@
 {% extends "admin/base_admin.html" %}
+{% from "components/ui.html" import form_field %}
 {% block admin_content %}
 <h2>{% if code %}编辑编码 #{{ code.id }}{% else %}新增编码{% endif %}</h2>
 <form method="POST" style="max-width:500px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <div class="form-group">
-    <label>编码 *</label>
-    <input name="code" value="{{ code.code if code else '' }}" required placeholder="如 Z001, Y001">
-  </div>
-  <div class="form-group">
-    <label>名称 *</label>
-    <input name="name" value="{{ code.name if code else '' }}" required placeholder="如 办公桌-标准型">
-  </div>
+  {{ form_field("code", "编码", code.code if code else "", required=true, placeholder="如 Z001, Y001") }}
+  {{ form_field("name", "名称", code.name if code else "", required=true, placeholder="如 办公桌-标准型") }}
   <div class="form-group">
     <label>类别 *</label>
     <select name="category" required>
@@ -18,10 +13,7 @@
       <option value="chair" {% if code and code.category == 'chair' %}selected{% endif %}>椅子</option>
     </select>
   </div>
-  <div class="form-group">
-    <label>排序</label>
-    <input name="sort_order" type="number" value="{{ code.sort_order if code else 0 }}">
-  </div>
+  {{ form_field("sort_order", "排序", code.sort_order if code else 0, type="number") }}
   <div style="display:flex;gap:12px;">
     <button type="submit" class="btn btn-primary">保存</button>
     <a href="/admin/assets/codes" class="btn btn-outline">返回</a>

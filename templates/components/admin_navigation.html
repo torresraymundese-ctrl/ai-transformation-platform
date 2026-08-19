@@ -1,0 +1,14 @@
+<nav class="admin-nav">
+  <a href="/admin" class="brand">CMS 后台管理</a>
+  <a href="/admin" class="{% if request.path == '/admin' %}active{% endif %}">控制台</a>
+  <a href="/admin/articles" class="{% if '/admin/article' in request.path or '/admin/articles' in request.path %}active{% endif %}">文章管理</a>
+  <a href="/admin/cases" class="{% if '/admin/case' in request.path or '/admin/cases' in request.path %}active{% endif %}">案例管理</a>
+  <a href="/admin/announcements" class="{% if '/admin/announcement' in request.path or '/admin/announcements' in request.path %}active{% endif %}">公告管理</a>
+  <a href="/admin/assessments" class="{% if '/admin/assessments' in request.path %}active{% endif %}">评估记录</a>
+  <a href="/admin/assets" class="{% if '/admin/assets' in request.path %}active{% endif %}">资产管理</a>
+  <a href="/" target="_blank" rel="noopener">查看网站 →</a>
+  <form method="POST" action="/admin/logout" style="margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" style="border:0;background:transparent;color:#9CA3AF;cursor:pointer;font:inherit;">退出</button>
+  </form>
+</nav>

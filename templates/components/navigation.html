@@ -1,0 +1,17 @@
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" onerror="this.style.display='none'">
+      企业<span>AI转型</span>平台
+    </a>
+    <ul class="nav-links">
+      <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">首页</a></li>
+      <li><a href="/services" class="{% if request.path.startswith('/services') %}active{% endif %}">服务方案</a></li>
+      <li><a href="/cases" class="{% if request.path.startswith('/cases') %}active{% endif %}">案例库</a></li>
+      <li><a href="/insights" class="{% if request.path.startswith('/insights') or request.path.startswith('/article') %}active{% endif %}">资讯</a></li>
+      <li><a href="/assessment">免费评估</a></li>
+      <li><a href="/about">关于我们</a></li>
+    </ul>
+    <a href="/assessment" class="nav-cta">免费评估</a>
+  </div>
+</nav>

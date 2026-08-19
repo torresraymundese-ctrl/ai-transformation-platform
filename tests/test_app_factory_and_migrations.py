@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from bs4 import BeautifulSoup
+from flask import render_template_string
 from werkzeug.security import generate_password_hash
 
 import app as app_module
@@ -145,3 +146,44 @@ def test_page_specific_css_block_still_renders_after_base_extraction(client):
 
     assert response.status_code == 200
     assert b".service-hero" in response.data
+
+
+def test_shared_shells_are_composed_from_named_template_components():
+    public_shell = (PROJECT_ROOT / "templates" / "base.html").read_text(
+        encoding="utf-8"
+    )
+    admin_shell = (
+        PROJECT_ROOT / "templates" / "admin" / "base_admin.html"
+    ).read_text(encoding="utf-8")
+    expected_files = {
+        "navigation.html",
+        "footer.html",
+        "sticky_cta.html",
+        "admin_navigation.html",
+        "ui.html",
+    }
+
+    component_dir = PROJECT_ROOT / "templates" / "components"
+    assert {path.name for path in component_dir.glob("*.html")} >= expected_files
+    assert 'include "components/navigation.html"' in public_shell
+    assert 'include "components/footer.html"' in public_shell
+    assert 'include "components/sticky_cta.html"' in public_shell
+    assert 'include "components/admin_navigation.html"' in admin_shell
+
+
+def test_ui_component_macros_escape_values_and_expose_accessible_state(client):
+    with client.application.test_request_context("/component-test"):
+        rendered = render_template_string(
+            """
+            {% from "components/ui.html" import alert, form_field, pagination %}
+            {{ alert("<unsafe>", "error") }}
+            {{ form_field("company", "企业", "<script>", required=true) }}
+            {{ pagination(2, 3, "public.index") }}
+            """
+        )
+    page = BeautifulSoup(rendered, "html.parser")
+
+    assert page.select_one('[role="alert"]').get_text(strip=True) == "<unsafe>"
+    assert page.select_one('input[name="company"]')["value"] == "<script>"
+    assert page.select_one('input[name="company"]').has_attr("required")
+    assert page.select_one('[aria-current="page"]').get_text(strip=True) == "2"

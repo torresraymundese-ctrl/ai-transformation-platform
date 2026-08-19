@@ -10,59 +10,13 @@
 </head>
 <body>
 
-<nav class="nav">
-  <div class="nav-inner">
-    <a href="/" class="nav-logo">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" onerror="this.style.display='none'">
-      企业<span>AI转型</span>平台
-    </a>
-    <ul class="nav-links">
-      <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">首页</a></li>
-      <li><a href="/services" class="{% if request.path.startswith('/services') %}active{% endif %}">服务方案</a></li>
-      <li><a href="/cases" class="{% if request.path.startswith('/cases') %}active{% endif %}">案例库</a></li>
-      <li><a href="/insights" class="{% if request.path.startswith('/insights') or request.path.startswith('/article') %}active{% endif %}">资讯</a></li>
-      <li><a href="/assessment">免费评估</a></li>
-      <li><a href="/about">关于我们</a></li>
-    </ul>
-    <a href="/assessment" class="nav-cta">免费评估</a>
-  </div>
-</nav>
+{% include "components/navigation.html" %}
 
 {% block content %}{% endblock %}
 
-<footer class="footer">
-  <div class="footer-inner">
-    <div>
-      <h4>企业AI转型平台</h4>
-      <p style="font-size:12px;line-height:1.8;color:var(--text-tertiary);">苏州苏采易购信息技术有限公司<br>帮企业低成本、私有化、可落地完成 AI 转型。<br>服务热线：400-180-3358</p>
-    </div>
-    <div>
-      <h4>服务方案</h4>
-      <a href="/services">启航包</a>
-      <a href="/services">加速包</a>
-      <a href="/services">旗舰包</a>
-      <a href="/assessment">免费评估</a>
-    </div>
-    <div>
-      <h4>资源中心</h4>
-      <a href="/cases">案例库</a>
-      <a href="/insights">资讯</a>
-      <a href="/insights?category=announcement">平台公告</a>
-      <a href="/insights?category=whitepaper">行业白皮书</a>
-    </div>
-    <div>
-      <h4>关于</h4>
-      <a href="/about">关于我们</a>
-      <a href="/assessment">联系我们</a>
-    </div>
-  </div>
-  <div class="footer-bottom">&copy; 2026 企业AI转型平台. All rights reserved. &nbsp;|&nbsp; <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">苏ICP备2025156618号-1</a></div>
-</footer>
+{% include "components/footer.html" %}
 
-<div class="sticky-cta" id="stickyCta">
-  <span class="cta-text">🚀 <strong>5 分钟</strong> 完成行业定制化 AI 就绪度评估，获取专属转型方案</span>
-  <a href="/assessment" class="btn btn-primary btn-sm" style="padding:8px 22px;">免费评估 →</a>
-</div>
+{% include "components/sticky_cta.html" %}
 
 {% block scripts %}{% endblock %}
 <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+{% from "components/ui.html" import alert, form_field %}
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,11 +15,11 @@
   <main class="login-card">
     <h1>后台安全登录</h1>
     <p class="hint">请输入服务器环境中配置的管理员凭据。</p>
-    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+    {% if error %}{{ alert(error, "error", "error") }}{% endif %}
     <form method="POST" action="/admin/login">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="field"><label for="username">账号</label><input id="username" name="username" autocomplete="username" required autofocus></div>
-      <div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      {{ form_field("username", "账号", required=true, autocomplete="username", autofocus=true, class_name="field") }}
+      {{ form_field("password", "密码", type="password", required=true, autocomplete="current-password", class_name="field") }}
       <button class="submit" type="submit">登录</button>
     </form>
   </main>
