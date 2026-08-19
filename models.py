@@ -18,6 +18,7 @@ def get_db():                           # 🔌 获取数据库连接
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # 自动创建 data/ 目录
     conn = sqlite3.connect(DB_PATH)     # 连接 SQLite 数据库
     conn.row_factory = sqlite3.Row      # 启用行工厂（查询结果可通过字段名访问）
+    conn.execute("PRAGMA foreign_keys=ON")  # 强制执行资产引用完整性
     conn.execute("PRAGMA journal_mode=WAL")  # 启用 WAL 写入模式（提升并发性能）
     return conn
 

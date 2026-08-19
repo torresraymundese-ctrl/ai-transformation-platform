@@ -1,3 +1,6 @@
+import sqlite3
+
+import pytest
 from bs4 import BeautifulSoup
 from werkzeug.security import generate_password_hash
 
@@ -90,3 +93,18 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
 
     assert versions == ["001_initial", "002_security"]
     assert sentinel == "keep-me"
+
+
+def test_database_enforces_asset_foreign_keys(tmp_path, monkeypatch):
+    """Database integrity must still hold if a future caller bypasses HTTP validation."""
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO unit_b_assets (asset_code_id, quantity) VALUES (?, ?)",
+                (999999, 1),
+            )
+    finally:
+        db.close()

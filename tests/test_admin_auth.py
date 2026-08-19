@@ -103,6 +103,15 @@ def test_admin_fails_closed_when_security_configuration_is_missing(client):
     assert response.status_code == 503
 
 
+def test_admin_fails_closed_when_password_hash_format_is_invalid(client):
+    """A malformed non-empty hash must not be treated as valid security config."""
+    client.application.config["ADMIN_PASSWORD_HASH"] = "not-a-password-hash"
+
+    response = client.get("/admin/login")
+
+    assert response.status_code == 503
+
+
 def test_security_headers_are_added_to_public_responses(client):
     """Public responses must carry the baseline browser security policy."""
     response = client.get("/health")

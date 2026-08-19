@@ -69,10 +69,12 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 def security_configured():
     """Return whether the admin can authenticate without unsafe defaults."""
+    password_hash = current_app.config.get("ADMIN_PASSWORD_HASH")
     return bool(
         current_app.config.get("SECRET_KEY")
         and current_app.config.get("ADMIN_USERNAME")
-        and current_app.config.get("ADMIN_PASSWORD_HASH")
+        and isinstance(password_hash, str)
+        and password_hash.startswith(("scrypt:", "pbkdf2:"))
     )
 
 
