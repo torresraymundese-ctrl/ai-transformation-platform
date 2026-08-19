@@ -3,33 +3,33 @@
     {
       "code": "manufacturing",
       "name": "制造业",
-      "subbranches": ["discrete_manufacturing", "process_manufacturing", "equipment_manufacturing", "consumer_goods_manufacturing"],
-      "departments": ["production", "quality", "equipment", "supply_chain", "sales_service", "finance_hr"],
-      "pain_codes": ["knowledge_search", "quality_inspection", "equipment_maintenance", "production_reporting", "scheduling", "inventory_supply", "quotation_service", "office_documents"]
+      "subbranches": {"discrete_manufacturing": "离散制造", "process_manufacturing": "流程制造", "equipment_manufacturing": "装备制造", "consumer_goods_manufacturing": "消费品制造"},
+      "departments": {"production": "生产", "quality": "质量", "equipment": "设备", "supply_chain": "供应链", "sales_service": "销售与服务", "finance_hr": "财务与人力"},
+      "pain_codes": {"knowledge_search": "知识与资料检索", "quality_inspection": "质量检测", "equipment_maintenance": "设备维护", "production_reporting": "生产报表", "scheduling": "生产排程", "inventory_supply": "库存与供应", "quotation_service": "报价与客户服务", "office_documents": "办公文档处理"}
     },
     {
       "code": "retail",
       "name": "零售电商",
-      "subbranches": ["ecommerce", "chain_retail", "brand_direct", "wholesale_distribution"],
-      "departments": ["merchandising", "store_operations", "supply_chain", "marketing", "customer_service", "finance_hr"],
-      "pain_codes": ["customer_service", "marketing_content", "member_operations", "inventory_replenishment", "sales_analysis", "pricing_selection", "supply_reconciliation", "office_knowledge"]
+      "subbranches": {"ecommerce": "电子商务", "chain_retail": "连锁零售", "brand_direct": "品牌直营", "wholesale_distribution": "批发分销"},
+      "departments": {"merchandising": "商品运营", "store_operations": "门店运营", "supply_chain": "供应链", "marketing": "市场营销", "customer_service": "客户服务", "finance_hr": "财务与人力"},
+      "pain_codes": {"customer_service": "客户服务", "marketing_content": "营销内容", "member_operations": "会员运营", "inventory_replenishment": "库存补货", "sales_analysis": "销售分析", "pricing_selection": "选品与定价", "supply_reconciliation": "供应链对账", "office_knowledge": "办公知识管理"}
     },
     {
       "code": "professional_knowledge",
       "name": "知识型专业服务",
-      "subbranches": ["consulting", "tax_accounting", "legal", "human_resources"],
-      "departments": ["delivery", "knowledge_research", "client_growth", "contracts_risk", "operations", "people"],
-      "pain_codes": ["document_search", "proposal_drafting", "project_delivery", "contract_review", "client_service", "lead_followup", "billing_reconciliation", "talent_knowledge"]
+      "subbranches": {"consulting": "咨询服务", "tax_accounting": "财税服务", "legal": "法律服务", "human_resources": "人力资源服务"},
+      "departments": {"delivery": "项目交付", "knowledge_research": "知识研究", "client_growth": "客户增长", "contracts_risk": "合同与风险", "operations": "运营管理", "people": "人才管理"},
+      "pain_codes": {"document_search": "文档检索", "proposal_drafting": "方案撰写", "project_delivery": "项目交付", "contract_review": "合同审查", "client_service": "客户服务", "lead_followup": "商机跟进", "billing_reconciliation": "账单与对账", "talent_knowledge": "人才与知识管理"}
     },
     {
       "code": "software_creative",
       "name": "软件与创意服务",
-      "subbranches": ["software", "design", "advertising", "marketing_services"],
-      "departments": ["product_delivery", "design_content", "engineering", "marketing_sales", "customer_success", "operations"],
-      "pain_codes": ["requirements", "content_creation", "project_delivery", "quality_review", "customer_support", "marketing_sales", "knowledge_docs", "operations_analysis"]
+      "subbranches": {"software": "软件服务", "design": "设计服务", "advertising": "广告服务", "marketing_services": "营销服务"},
+      "departments": {"product_delivery": "产品与交付", "design_content": "设计与内容", "engineering": "工程研发", "marketing_sales": "市场与销售", "customer_success": "客户成功", "operations": "运营管理"},
+      "pain_codes": {"requirements": "需求管理", "content_creation": "内容创作", "project_delivery": "项目交付", "quality_review": "质量审查", "customer_support": "客户支持", "marketing_sales": "市场与销售", "knowledge_docs": "知识文档", "operations_analysis": "运营分析"}
     }
   ],
-  "company_sizes": ["under_50", "50_200", "200_500", "500_plus"],
+  "company_sizes": {"under_50": "50 人以下", "50_200": "50—200 人", "200_500": "200—500 人", "500_plus": "500 人以上"},
   "scenarios": [
     {
       "code": "mfg_knowledge_assistant",

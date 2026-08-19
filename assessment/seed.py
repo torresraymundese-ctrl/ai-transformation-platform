@@ -62,33 +62,39 @@ def _seed_industries(connection, industries):
             "SELECT id FROM industries WHERE code=?", (industry["code"],)
         ).fetchone()[0]
         industry_ids[industry["code"]] = industry_id
-        for sort_order, code in enumerate(industry["subbranches"], 1):
+        for sort_order, (code, name) in enumerate(
+            industry["subbranches"].items(), 1
+        ):
             connection.execute(
                 "INSERT OR IGNORE INTO industry_branches "
                 "(industry_id,code,name,status,sort_order) VALUES (?,?,?,?,?)",
-                (industry_id, code, code, "published", sort_order),
+                (industry_id, code, name, "published", sort_order),
             )
-        for sort_order, code in enumerate(industry["departments"], 1):
+        for sort_order, (code, name) in enumerate(
+            industry["departments"].items(), 1
+        ):
             connection.execute(
                 "INSERT OR IGNORE INTO departments "
                 "(industry_id,code,name,status,sort_order) VALUES (?,?,?,?,?)",
-                (industry_id, code, code, "published", sort_order),
+                (industry_id, code, name, "published", sort_order),
             )
-        for sort_order, code in enumerate(industry["pain_codes"], 1):
+        for sort_order, (code, name) in enumerate(
+            industry["pain_codes"].items(), 1
+        ):
             connection.execute(
                 "INSERT OR IGNORE INTO pain_points "
                 "(industry_id,code,name,status,sort_order) VALUES (?,?,?,?,?)",
-                (industry_id, code, code, "published", sort_order),
+                (industry_id, code, name, "published", sort_order),
             )
     return industry_ids
 
 
 def _seed_company_sizes(connection, company_sizes):
-    for sort_order, code in enumerate(company_sizes, 1):
+    for sort_order, (code, name) in enumerate(company_sizes.items(), 1):
         connection.execute(
             "INSERT OR IGNORE INTO company_sizes (code,name,status,sort_order) "
             "VALUES (?,?,?,?)",
-            (code, code, "published", sort_order),
+            (code, name, "published", sort_order),
         )
 
 

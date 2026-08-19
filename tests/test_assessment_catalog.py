@@ -161,6 +161,168 @@ def test_published_catalog_has_exact_questions_weights_reference_and_branch_choi
         catalog.questions[0].prompt = "changed"
 
 
+def test_published_choice_codes_have_exact_chinese_labels(catalog_db):
+    expected = {
+        "manufacturing": {
+            "subbranches": {
+                "discrete_manufacturing": "离散制造",
+                "process_manufacturing": "流程制造",
+                "equipment_manufacturing": "装备制造",
+                "consumer_goods_manufacturing": "消费品制造",
+            },
+            "departments": {
+                "production": "生产",
+                "quality": "质量",
+                "equipment": "设备",
+                "supply_chain": "供应链",
+                "sales_service": "销售与服务",
+                "finance_hr": "财务与人力",
+            },
+            "pains": {
+                "knowledge_search": "知识与资料检索",
+                "quality_inspection": "质量检测",
+                "equipment_maintenance": "设备维护",
+                "production_reporting": "生产报表",
+                "scheduling": "生产排程",
+                "inventory_supply": "库存与供应",
+                "quotation_service": "报价与客户服务",
+                "office_documents": "办公文档处理",
+            },
+        },
+        "retail": {
+            "subbranches": {
+                "ecommerce": "电子商务",
+                "chain_retail": "连锁零售",
+                "brand_direct": "品牌直营",
+                "wholesale_distribution": "批发分销",
+            },
+            "departments": {
+                "merchandising": "商品运营",
+                "store_operations": "门店运营",
+                "supply_chain": "供应链",
+                "marketing": "市场营销",
+                "customer_service": "客户服务",
+                "finance_hr": "财务与人力",
+            },
+            "pains": {
+                "customer_service": "客户服务",
+                "marketing_content": "营销内容",
+                "member_operations": "会员运营",
+                "inventory_replenishment": "库存补货",
+                "sales_analysis": "销售分析",
+                "pricing_selection": "选品与定价",
+                "supply_reconciliation": "供应链对账",
+                "office_knowledge": "办公知识管理",
+            },
+        },
+        "professional_knowledge": {
+            "subbranches": {
+                "consulting": "咨询服务",
+                "tax_accounting": "财税服务",
+                "legal": "法律服务",
+                "human_resources": "人力资源服务",
+            },
+            "departments": {
+                "delivery": "项目交付",
+                "knowledge_research": "知识研究",
+                "client_growth": "客户增长",
+                "contracts_risk": "合同与风险",
+                "operations": "运营管理",
+                "people": "人才管理",
+            },
+            "pains": {
+                "document_search": "文档检索",
+                "proposal_drafting": "方案撰写",
+                "project_delivery": "项目交付",
+                "contract_review": "合同审查",
+                "client_service": "客户服务",
+                "lead_followup": "商机跟进",
+                "billing_reconciliation": "账单与对账",
+                "talent_knowledge": "人才与知识管理",
+            },
+        },
+        "software_creative": {
+            "subbranches": {
+                "software": "软件服务",
+                "design": "设计服务",
+                "advertising": "广告服务",
+                "marketing_services": "营销服务",
+            },
+            "departments": {
+                "product_delivery": "产品与交付",
+                "design_content": "设计与内容",
+                "engineering": "工程研发",
+                "marketing_sales": "市场与销售",
+                "customer_success": "客户成功",
+                "operations": "运营管理",
+            },
+            "pains": {
+                "requirements": "需求管理",
+                "content_creation": "内容创作",
+                "project_delivery": "项目交付",
+                "quality_review": "质量审查",
+                "customer_support": "客户支持",
+                "marketing_sales": "市场与销售",
+                "knowledge_docs": "知识文档",
+                "operations_analysis": "运营分析",
+            },
+        },
+    }
+    expected_company_sizes = {
+        "under_50": "50 人以下",
+        "50_200": "50—200 人",
+        "200_500": "200—500 人",
+        "500_plus": "500 人以上",
+    }
+
+    for branch_code, labels in expected.items():
+        catalog = repository().load_published_catalog(branch_code)
+        industry_id = catalog_db.execute(
+            "SELECT id FROM industries WHERE code=?", (branch_code,)
+        ).fetchone()[0]
+        actual = {
+            "subbranches": dict(
+                catalog_db.execute(
+                    "SELECT code,name FROM industry_branches "
+                    "WHERE industry_id=? ORDER BY sort_order",
+                    (industry_id,),
+                )
+            ),
+            "departments": dict(
+                catalog_db.execute(
+                    "SELECT code,name FROM departments "
+                    "WHERE industry_id=? ORDER BY sort_order",
+                    (industry_id,),
+                )
+            ),
+            "pains": dict(
+                catalog_db.execute(
+                    "SELECT code,name FROM pain_points "
+                    "WHERE industry_id=? ORDER BY sort_order",
+                    (industry_id,),
+                )
+            ),
+        }
+
+        assert tuple(labels["subbranches"]) == catalog.subbranch_codes
+        assert tuple(labels["departments"]) == catalog.department_codes
+        assert tuple(labels["pains"]) == catalog.pain_codes
+        assert actual == labels
+        assert all(
+            code != name
+            for choice_labels in actual.values()
+            for code, name in choice_labels.items()
+        )
+
+    company_sizes = dict(
+        catalog_db.execute(
+            "SELECT code,name FROM company_sizes ORDER BY sort_order"
+        )
+    )
+    assert company_sizes == expected_company_sizes
+    assert all(code != name for code, name in company_sizes.items())
+
+
 def test_seeded_choices_and_roi_ranges_are_exact_and_ordered(catalog_db):
     company_sizes = tuple(
         row[0]
