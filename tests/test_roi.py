@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from assessment.contracts import Scenario, ServicePackage
 from assessment.roi import calculate_roi
@@ -72,14 +72,19 @@ def test_midpoint_roi_uses_174_hour_loaded_cost_and_three_year_formula():
     result = calculate_roi(MID_CHOICES, RANGES, scenario_profile(), SERVICE)
     expected_hourly = Decimal("11500") / Decimal("174")
     expected_current = Decimal("13") * Decimal("50") * Decimal("12") * expected_hourly
+    expected_annual_savings = expected_current * Decimal("0.20") + (
+        expected_current * Decimal("0.10") * Decimal("0.20")
+    )
+    expected_support = Decimal("125000") * Decimal("0.10")
+    expected_three_year_net = (
+        expected_annual_savings * Decimal("3")
+        - Decimal("125000")
+        - expected_support * Decimal("3")
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     assert result.midpoint.current_annual_cost == expected_current.quantize(Decimal("0.01"))
     assert result.midpoint.payback_months > 0
-    assert result.midpoint.three_year_net == (
-        result.midpoint.annual_savings * Decimal("3")
-        - result.midpoint.initial_investment
-        - result.midpoint.three_year_support
-    )
+    assert result.midpoint.three_year_net == expected_three_year_net
 
 
 def test_roi_uses_three_exact_bands_and_finite_upper_bound_for_open_range():
@@ -120,7 +125,7 @@ def test_zero_savings_has_no_payback():
     assert result.ideal.payback_months is None
 
 
-def test_negative_savings_are_clamped_for_display():
+def test_negative_savings_keep_signed_components_and_clamp_aggregate():
     profile = scenario_profile(
         efficiency=("-0.10", "-0.20", "-0.30"),
         loss_improvement=("-0.10", "-0.20", "-0.30"),
@@ -129,10 +134,26 @@ def test_negative_savings_are_clamped_for_display():
     result = calculate_roi(MID_CHOICES, RANGES, profile, SERVICE)
 
     for band in (result.conservative, result.midpoint, result.ideal):
-        assert band.labor_savings == Decimal("0.00")
-        assert band.loss_savings == Decimal("0.00")
+        assert band.labor_savings < Decimal("0")
+        assert band.loss_savings < Decimal("0")
         assert band.annual_savings == Decimal("0.00")
         assert band.payback_months is None
+
+
+def test_mixed_signed_savings_components_reconcile_with_positive_aggregate():
+    profile = scenario_profile(
+        efficiency=("-0.01", "-0.01", "-0.01"),
+        loss_improvement=("1.00", "1.00", "1.00"),
+    )
+
+    result = calculate_roi(MID_CHOICES, RANGES, profile, SERVICE)
+
+    assert result.midpoint.labor_savings < Decimal("0")
+    assert result.midpoint.loss_savings > Decimal("0")
+    assert result.midpoint.annual_savings > Decimal("0")
+    assert result.midpoint.annual_savings == (
+        result.midpoint.labor_savings + result.midpoint.loss_savings
+    )
 
 
 def test_roi_values_are_decimals_and_money_is_rounded_half_up():

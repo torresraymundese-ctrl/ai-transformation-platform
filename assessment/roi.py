@@ -43,24 +43,17 @@ def calculate_band(
         else (investment / annual_savings * Decimal(12)).quantize(PAYBACK_MONTH)
     )
     annual_support = investment * support_rate
-    displayed_savings = money(annual_savings)
-    displayed_investment = money(investment)
-    displayed_three_year_support = money(annual_support * Decimal(3))
-    net = (
-        displayed_savings * Decimal(3)
-        - displayed_investment
-        - displayed_three_year_support
-    )
+    net = annual_savings * Decimal(3) - investment - annual_support * Decimal(3)
     return RoiBand(
         band_code=band_code,
         current_annual_cost=money(current),
-        labor_savings=money(max(ZERO, labor_savings)),
-        loss_savings=money(max(ZERO, loss_savings)),
-        annual_savings=displayed_savings,
-        initial_investment=displayed_investment,
+        labor_savings=money(labor_savings),
+        loss_savings=money(loss_savings),
+        annual_savings=money(annual_savings),
+        initial_investment=money(investment),
         annual_support=money(annual_support),
         payback_months=payback,
-        three_year_support=displayed_three_year_support,
+        three_year_support=money(annual_support * Decimal(3)),
         three_year_net=money(net),
     )
 
