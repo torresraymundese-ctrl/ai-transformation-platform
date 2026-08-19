@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - 企业AI转型平台{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-inner" style="max-width:720px;text-align:center;padding-top:72px;padding-bottom:96px;">
+    <div style="font-size:52px;margin-bottom:18px;" aria-hidden="true">⚠️</div>
+    <h1 style="font-size:32px;margin-bottom:14px;">{{ title }}</h1>
+    <p style="color:var(--text-secondary);line-height:1.8;margin-bottom:28px;">{{ message }}</p>
+    <a class="btn btn-primary" href="/">返回首页</a>
+  </div>
+</section>
+{% endblock %}

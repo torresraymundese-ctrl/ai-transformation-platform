@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ article.title }} - 企业AI转型平台{% endblock %}
 {% block content %}
+{% set safe_source_url = article.source_url | safe_url %}
 <section class="section"><div class="section-inner" style="max-width:800px;">
   <div style="margin-bottom:24px;">
     <div style="font-size:13px;color:var(--text-tertiary);margin-bottom:8px;">
@@ -9,7 +10,7 @@
     <h1 style="font-size:28px;font-weight:700;line-height:1.4;">{{ article.title }}</h1>
     <div style="margin-top:12px;color:var(--text-secondary);font-size:13px;">
       来源：<strong>{{ article.source }}</strong> · {{ article.publish_date or '' }}
-      {% if article.source_url %}· <span style="color:var(--text-tertiary);font-size:12px;">原文: {{ article.source_url }}</span>{% endif %}
+      {% if safe_source_url %}· <span style="color:var(--text-tertiary);font-size:12px;">原文: {{ safe_source_url }}</span>{% endif %}
     </div>
     <div style="margin-top:12px;">
       {% for tag in (article.tags or '').split(',') %}<span class="tag">{{ tag.strip() }}</span>{% endfor %}
@@ -31,9 +32,9 @@
     <div style="font-size:48px;margin-bottom:16px;">📄</div>
     <p style="font-size:17px;font-weight:600;margin-bottom:8px;">平台内仅展示摘要信息</p>
     <p style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">完整文章请通过下方按钮跳转原文查看</p>
-    {% if article.source_url %}
-    <a href="{{ article.source_url }}" target="_blank" rel="noopener" class="btn btn-primary" style="font-size:16px;padding:14px 36px;">🔗 前往原文阅读全文 →</a>
-    <p style="margin-top:12px;font-size:11px;color:var(--text-tertiary);">原文来源：{{ article.source_url }}</p>
+    {% if safe_source_url %}
+    <a href="{{ safe_source_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="font-size:16px;padding:14px 36px;">🔗 前往原文阅读全文 →</a>
+    <p style="margin-top:12px;font-size:11px;color:var(--text-tertiary);">原文来源：{{ safe_source_url }}</p>
     {% endif %}
   </div>
   <div style="line-height:1.9;font-size:15px;color:var(--text-secondary);">

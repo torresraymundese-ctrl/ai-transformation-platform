@@ -21,11 +21,16 @@ from flask import (Flask, abort, g, jsonify, redirect, render_template, request,
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 # 上述导入: Flask(核心) render_template(模板) request(请求) jsonify(JSON响应) redirect(重定向) url_for(路由URL)
 
 # === 本地模块导入 ===
 sys.path.insert(0, os.path.dirname(__file__))  # 将当前目录加入 Python 搜索路径
 from models import get_db, init_db              # 导入数据库连接和初始化函数
+from validation import (ValidationError, choice as valid_choice,
+                        external_url as valid_external_url,
+                        integer as valid_integer, safe_external_url,
+                        text as valid_text)
 
 app = Flask(__name__)                   # ✅ 创建 Flask 应用实例
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -160,6 +165,61 @@ def sanitize_html(value):
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 app.jinja_env.filters["safe_html"] = sanitize_html
+app.jinja_env.filters["safe_url"] = safe_external_url
+
+
+@app.errorhandler(ValidationError)
+def invalid_form(error):
+    return render_template(
+        "error.html",
+        title="提交内容无效",
+        message=str(error),
+    ), 400
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    return render_template(
+        "error.html",
+        title="操作被拒绝",
+        message="请求缺少有效授权或安全校验，请返回后重试。",
+    ), 403
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return render_template(
+        "error.html",
+        title="页面未找到",
+        message="你访问的页面不存在或已被移动。",
+    ), 404
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def request_too_large(error):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "request too large"}), 413
+    return render_template(
+        "error.html",
+        title="提交内容过大",
+        message="请缩小内容或附件后重试。",
+    ), 413
+
+
+@app.errorhandler(Exception)
+def unexpected_error(error):
+    if isinstance(error, HTTPException):
+        return error
+    app.logger.error(
+        "Unhandled application error error_type=%s endpoint=%s",
+        type(error).__name__,
+        request.endpoint or "unknown",
+    )
+    return render_template(
+        "error.html",
+        title="系统暂时无法处理请求",
+        message="请稍后重试；如果问题持续存在，请联系平台管理员。",
+    ), 500
 
 
 @app.before_request
@@ -342,8 +402,8 @@ def cases_page():
     """案例库页：按行业筛选 + 关键词搜索，展示 27 个真实企业案例"""
     db = get_db()
     # === URL 参数获取 ===
-    industry = request.args.get("industry", "")   # 行业筛选参数
-    search = request.args.get("search", "")       # 关键词搜索参数
+    industry = valid_text(request.args, "industry", maximum=100)
+    search = valid_text(request.args, "search", maximum=100)
     # === 动态构建 SQL 查询 ===
     query = "SELECT * FROM cases WHERE 1=1"       # 基础查询（1=1 方便动态拼接 AND）
     params = []                                    # SQL 参数列表
@@ -424,9 +484,11 @@ def insights_page():
     """资讯页：支持分类筛选 + 标签筛选 + 全文搜索"""
     db = get_db()
     # === URL 参数获取 ===
-    category = request.args.get("category", "")   # 分类筛选
-    tag = request.args.get("tag", "")              # 标签筛选
-    search = request.args.get("search", "")        # 全文搜索
+    category = valid_text(request.args, "category", maximum=32)
+    if category and category not in {"insight", "whitepaper", "tech", "announcement"}:
+        raise ValidationError("category has an invalid value")
+    tag = valid_text(request.args, "tag", maximum=100)
+    search = valid_text(request.args, "search", maximum=100)
     # === 公告专区处理 ===
     if category == "announcement":                 # 如果用户点"公告"标签
         query = "SELECT * FROM articles WHERE status='published' AND category='announcement'"
@@ -468,7 +530,7 @@ def article_page(article_id):
     ).fetchone()
     if not article:                     # 文章不存在时
         db.close()
-        return "Article not found", 404 # 返回 404 错误
+        abort(404)
     # 查询 4 篇相关文章（发表时间最近的，排除当前文章）
     related = db.execute(
         "SELECT * FROM articles WHERE status='published' AND id!=? ORDER BY created_at DESC LIMIT 4",
@@ -514,53 +576,80 @@ def admin_articles():
 @app.route("/admin/article/<int:article_id>", methods=["GET","POST"])  # ✏️ 编辑文章
 def admin_article_edit(article_id):
     """后台编辑文章：GET 展示表单，POST 保存更新"""
-    db = get_db()
     if request.method == "POST":        # POST 请求 = 保存修改
         data = request.form             # 获取表单数据
+        title = valid_text(data, "title", maximum=200, required=True)
+        source = valid_text(data, "source", maximum=120)
+        source_url = valid_external_url(data, "source_url")
+        summary = valid_text(data, "summary", maximum=2000)
+        content_html = valid_text(data, "content_html", maximum=100000)
+        tags = valid_text(data, "tags", maximum=500)
+        category = valid_choice(
+            data, "category", {"insight", "whitepaper", "tech", "announcement"}
+        )
+        is_featured = valid_integer(
+            data, "is_featured", minimum=0, maximum=1, default=0
+        )
+        status = valid_choice(data, "status", {"published", "draft"})
+        db = get_db()
         # 更新文章所有字段
         db.execute(
             "UPDATE articles SET title=?,source=?,source_url=?,summary=?,content_html=?,tags=?,category=?,is_featured=?,status=? WHERE id=?",
-            (data.get("title"),           # 标题
-             data.get("source"),          # 来源
-             data.get("source_url"),      # 来源链接
-             data.get("summary"),         # 摘要
-             str(sanitize_html(data.get("content_html"))),  # 已清洗正文 HTML
-             data.get("tags"),            # 标签
-             data.get("category"),        # 分类
-             int(data.get("is_featured",0)),  # 是否精选
-             data.get("status"),          # 状态
+            (title,
+             source,
+             source_url,
+             summary,
+             str(sanitize_html(content_html)),
+             tags,
+             category,
+             is_featured,
+             status,
              article_id))
         db.commit()
         db.close()
         return redirect(url_for("admin_articles"))  # 重定向回文章列表
     # GET 请求 = 展示编辑表单
+    db = get_db()
     article = db.execute(
         "SELECT * FROM articles WHERE id=?", (article_id,)
     ).fetchone()
     db.close()
+    if article is None:
+        abort(404)
     return render_template("admin/article_edit.html", article=article)
 
 @app.route("/admin/article/new", methods=["GET","POST"])  # ➕ 新建文章
 def admin_article_new():
     """后台新建文章：GET 展示空表单，POST 插入新记录"""
     if request.method == "POST":
-        db = get_db()
         data = request.form
-        import hashlib
-        # 用标题 MD5 生成唯一标识（防止重复抓取同一篇文章）
-        title_hash = hashlib.md5(data.get("title","").encode()).hexdigest()[:16]
+        title = valid_text(data, "title", maximum=200, required=True)
+        source = valid_text(data, "source", maximum=120)
+        source_url = valid_external_url(data, "source_url")
+        summary = valid_text(data, "summary", maximum=2000)
+        content_html = valid_text(data, "content_html", maximum=100000)
+        tags = valid_text(data, "tags", maximum=500)
+        category = valid_choice(
+            data, "category", {"insight", "whitepaper", "tech", "announcement"}
+        )
+        is_featured = valid_integer(
+            data, "is_featured", minimum=0, maximum=1, default=0
+        )
+        status = valid_choice(data, "status", {"published", "draft"})
+        title_hash = hashlib.sha256(title.casefold().encode("utf-8")).hexdigest()[:32]
+        db = get_db()
         db.execute(
             "INSERT INTO articles (title_hash,title,source,source_url,summary,content_html,tags,category,is_featured,status) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (title_hash,
-             data.get("title"),
-             data.get("source"),
-             data.get("source_url"),
-             data.get("summary"),
-             str(sanitize_html(data.get("content_html"))),
-             data.get("tags"),
-             data.get("category"),
-             int(data.get("is_featured",0)),
-             data.get("status")))
+             title,
+             source,
+             source_url,
+             summary,
+             str(sanitize_html(content_html)),
+             tags,
+             category,
+             is_featured,
+             status))
         db.commit(); db.close()
         return redirect("/admin/articles")
     return render_template("admin/article_edit.html", article=None)  # article=None 表示新建模式
@@ -579,18 +668,19 @@ def admin_cases():
 def admin_case_new():
     """后台新建案例"""
     if request.method == "POST":
-        db = get_db()
         data = request.form
+        title = valid_text(data, "title", maximum=200, required=True)
+        industry = valid_text(data, "industry", maximum=100, required=True)
+        scale = valid_text(data, "scale", maximum=100)
+        pain_point = valid_text(data, "pain_point", maximum=4000)
+        solution = valid_text(data, "solution", maximum=4000)
+        result = valid_text(data, "result", maximum=4000)
+        tags = valid_text(data, "tags", maximum=500)
+        logo_text = valid_text(data, "logo_text", maximum=8, default="E") or "E"
+        db = get_db()
         db.execute(
             "INSERT INTO cases (title,industry,scale,pain_point,solution,result,tags,logo_text) VALUES (?,?,?,?,?,?,?,?)",
-            (data.get("title"),
-             data.get("industry"),
-             data.get("scale"),
-             data.get("pain_point"),
-             data.get("solution"),
-             data.get("result"),
-             data.get("tags"),
-             data.get("logo_text","E")))
+            (title, industry, scale, pain_point, solution, result, tags, logo_text))
         db.commit(); db.close()
         return redirect("/admin/cases")
     return render_template("admin/case_edit.html", case=None)
@@ -598,23 +688,27 @@ def admin_case_new():
 @app.route("/admin/case/<int:case_id>", methods=["GET","POST"])  # ✏️ 编辑案例
 def admin_case_edit(case_id):
     """后台编辑案例"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        title = valid_text(data, "title", maximum=200, required=True)
+        industry = valid_text(data, "industry", maximum=100, required=True)
+        scale = valid_text(data, "scale", maximum=100)
+        pain_point = valid_text(data, "pain_point", maximum=4000)
+        solution = valid_text(data, "solution", maximum=4000)
+        result = valid_text(data, "result", maximum=4000)
+        tags = valid_text(data, "tags", maximum=500)
+        logo_text = valid_text(data, "logo_text", maximum=8, default="E") or "E"
+        db = get_db()
         db.execute(
             "UPDATE cases SET title=?,industry=?,scale=?,pain_point=?,solution=?,result=?,tags=?,logo_text=? WHERE id=?",
-            (data.get("title"),
-             data.get("industry"),
-             data.get("scale"),
-             data.get("pain_point"),
-             data.get("solution"),
-             data.get("result"),
-             data.get("tags"),
-             data.get("logo_text"), case_id))
+            (title, industry, scale, pain_point, solution, result, tags, logo_text, case_id))
         db.commit(); db.close()
         return redirect("/admin/cases")
+    db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
     db.close()
+    if case is None:
+        abort(404)
     return render_template("admin/case_edit.html", case=case)
 
 # === 评估记录 ===
@@ -638,8 +732,9 @@ def admin_scrape():
         from scraper import run_scraper
         count = run_scraper()           # 执行抓取流程
         return jsonify({"success": True, "count": count})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    except Exception as error:
+        app.logger.error("Admin scrape failed error_type=%s", type(error).__name__)
+        return jsonify({"success": False, "error": "scrape failed"}), 502
 
 # === 公告管理 ===
 
@@ -657,14 +752,19 @@ def admin_announcements():
 def admin_announcement_new():
     """后台新建公告"""
     if request.method == "POST":
-        db = get_db()
         data = request.form
+        title = valid_text(data, "title", maximum=200, required=True)
+        content_html = valid_text(data, "content_html", maximum=50000)
+        is_pinned = valid_integer(
+            data, "is_pinned", minimum=0, maximum=1, default=0
+        )
+        status = valid_choice(
+            data, "status", {"published", "draft"}, default="published"
+        )
+        db = get_db()
         db.execute(
             "INSERT INTO announcements (title, content_html, is_pinned, status) VALUES (?,?,?,?)",
-            (data.get("title"),
-             str(sanitize_html(data.get("content_html"))),
-             int(data.get("is_pinned",0)),
-             data.get("status","published")))
+            (title, str(sanitize_html(content_html)), is_pinned, status))
         db.commit(); db.close()
         return redirect("/admin/announcements")
     return render_template("admin/announcement_edit.html", announcement=None)
@@ -672,21 +772,27 @@ def admin_announcement_new():
 @app.route("/admin/announcement/<int:aid>", methods=["GET","POST"])  # ✏️ 编辑公告
 def admin_announcement_edit(aid):
     """后台编辑公告"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        title = valid_text(data, "title", maximum=200, required=True)
+        content_html = valid_text(data, "content_html", maximum=50000)
+        is_pinned = valid_integer(
+            data, "is_pinned", minimum=0, maximum=1, default=0
+        )
+        status = valid_choice(data, "status", {"published", "draft"})
+        db = get_db()
         db.execute(
             "UPDATE announcements SET title=?, content_html=?, is_pinned=?, status=? WHERE id=?",
-            (data.get("title"),
-             str(sanitize_html(data.get("content_html"))),
-             int(data.get("is_pinned",0)),
-             data.get("status"), aid))
+            (title, str(sanitize_html(content_html)), is_pinned, status, aid))
         db.commit(); db.close()
         return redirect("/admin/announcements")
+    db = get_db()
     announcement = db.execute(
         "SELECT * FROM announcements WHERE id=?", (aid,)
     ).fetchone()
     db.close()
+    if announcement is None:
+        abort(404)
     return render_template("admin/announcement_edit.html", announcement=announcement)
 
 # ========== 资产管理后台路由 ==========
@@ -751,12 +857,19 @@ def admin_asset_codes_list():
 def admin_asset_code_new():
     """新建资产编码"""
     if request.method == "POST":
-        db = get_db()
         data = request.form
+        code = valid_text(data, "code", maximum=32, required=True).upper()
+        if not re.fullmatch(r"[A-Z0-9_-]+", code):
+            raise ValidationError("code contains unsupported characters")
+        name = valid_text(data, "name", maximum=120, required=True)
+        category = valid_choice(data, "category", {"table", "chair"})
+        sort_order = valid_integer(
+            data, "sort_order", minimum=-10000, maximum=10000, default=0
+        )
+        db = get_db()
         db.execute(
             "INSERT INTO asset_codes (code, name, category, sort_order) VALUES (?,?,?,?)",
-            (data.get("code"), data.get("name"), data.get("category"),
-             int(data.get("sort_order", 0))))
+            (code, name, category, sort_order))
         db.commit(); db.close()
         return redirect("/admin/assets/codes")
     return render_template("admin/asset_code_edit.html", code=None)
@@ -764,17 +877,27 @@ def admin_asset_code_new():
 @app.route("/admin/assets/code/<int:code_id>", methods=["GET","POST"])
 def admin_asset_code_edit(code_id):
     """编辑资产编码"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        code_value = valid_text(data, "code", maximum=32, required=True).upper()
+        if not re.fullmatch(r"[A-Z0-9_-]+", code_value):
+            raise ValidationError("code contains unsupported characters")
+        name = valid_text(data, "name", maximum=120, required=True)
+        category = valid_choice(data, "category", {"table", "chair"})
+        sort_order = valid_integer(
+            data, "sort_order", minimum=-10000, maximum=10000, default=0
+        )
+        db = get_db()
         db.execute(
             "UPDATE asset_codes SET code=?, name=?, category=?, sort_order=? WHERE id=?",
-            (data.get("code"), data.get("name"), data.get("category"),
-             int(data.get("sort_order", 0)), code_id))
+            (code_value, name, category, sort_order, code_id))
         db.commit(); db.close()
         return redirect("/admin/assets/codes")
+    db = get_db()
     code = db.execute("SELECT * FROM asset_codes WHERE id=?", (code_id,)).fetchone()
     db.close()
+    if code is None:
+        abort(404)
     return render_template("admin/asset_code_edit.html", code=code)
 
 # === 科室管理 ===
@@ -793,11 +916,15 @@ def admin_departments_list():
 def admin_department_new():
     """新建科室"""
     if request.method == "POST":
-        db = get_db()
         data = request.form
+        name = valid_text(data, "name", maximum=120, required=True)
+        sort_order = valid_integer(
+            data, "sort_order", minimum=-10000, maximum=10000, default=0
+        )
+        db = get_db()
         db.execute(
             "INSERT INTO asset_departments (name, sort_order) VALUES (?,?)",
-            (data.get("name"), int(data.get("sort_order", 0))))
+            (name, sort_order))
         db.commit(); db.close()
         return redirect("/admin/assets/departments")
     return render_template("admin/department_edit.html", department=None)
@@ -805,18 +932,25 @@ def admin_department_new():
 @app.route("/admin/assets/departments/<int:dept_id>", methods=["GET","POST"])
 def admin_department_edit(dept_id):
     """编辑科室"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        name = valid_text(data, "name", maximum=120, required=True)
+        sort_order = valid_integer(
+            data, "sort_order", minimum=-10000, maximum=10000, default=0
+        )
+        db = get_db()
         db.execute(
             "UPDATE asset_departments SET name=?, sort_order=? WHERE id=?",
-            (data.get("name"), int(data.get("sort_order", 0)), dept_id))
+            (name, sort_order, dept_id))
         db.commit(); db.close()
         return redirect("/admin/assets/departments")
+    db = get_db()
     department = db.execute(
         "SELECT * FROM asset_departments WHERE id=?", (dept_id,)
     ).fetchone()
     db.close()
+    if department is None:
+        abort(404)
     return render_template("admin/department_edit.html", department=department)
 
 # === 单位A资产管理 ===
@@ -825,7 +959,7 @@ def admin_department_edit(dept_id):
 def admin_unit_a_list():
     """单位A资产列表（支持按科室筛选）"""
     db = get_db()
-    department = request.args.get("department", "")
+    department = valid_text(request.args, "department", maximum=120)
     if department:
         assets = db.execute(
             "SELECT ua.*, ac.code, ac.name as code_name, ac.category "
@@ -851,15 +985,31 @@ def admin_unit_a_list():
 @app.route("/admin/assets/unit-a/new", methods=["GET","POST"])
 def admin_unit_a_new():
     """新建单位A资产"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        department = valid_text(data, "department", maximum=120, required=True)
+        asset_code_id = valid_integer(
+            data, "asset_code_id", minimum=1, maximum=2147483647
+        )
+        quantity = valid_integer(data, "quantity", minimum=1, maximum=100000, default=1)
+        remark = valid_text(data, "remark", maximum=500)
+        db = get_db()
+        if db.execute(
+            "SELECT 1 FROM asset_codes WHERE id=?", (asset_code_id,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("asset_code_id does not exist")
+        if db.execute(
+            "SELECT 1 FROM asset_departments WHERE name=?", (department,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("department does not exist")
         db.execute(
             "INSERT INTO unit_a_assets (department, asset_code_id, quantity, remark) VALUES (?,?,?,?)",
-            (data.get("department"), int(data.get("asset_code_id")),
-             int(data.get("quantity", 1)), data.get("remark", "")))
+            (department, asset_code_id, quantity, remark))
         db.commit(); db.close()
         return redirect("/admin/assets/unit-a")
+    db = get_db()
     codes = db.execute("SELECT * FROM asset_codes ORDER BY category, sort_order").fetchall()
     departments = db.execute("SELECT * FROM asset_departments ORDER BY sort_order").fetchall()
     db.close()
@@ -868,21 +1018,39 @@ def admin_unit_a_new():
 @app.route("/admin/assets/unit-a/<int:asset_id>", methods=["GET","POST"])
 def admin_unit_a_edit(asset_id):
     """编辑单位A资产"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        department = valid_text(data, "department", maximum=120, required=True)
+        asset_code_id = valid_integer(
+            data, "asset_code_id", minimum=1, maximum=2147483647
+        )
+        quantity = valid_integer(data, "quantity", minimum=1, maximum=100000, default=1)
+        remark = valid_text(data, "remark", maximum=500)
+        db = get_db()
+        if db.execute(
+            "SELECT 1 FROM asset_codes WHERE id=?", (asset_code_id,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("asset_code_id does not exist")
+        if db.execute(
+            "SELECT 1 FROM asset_departments WHERE name=?", (department,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("department does not exist")
         db.execute(
             "UPDATE unit_a_assets SET department=?, asset_code_id=?, quantity=?, remark=? WHERE id=?",
-            (data.get("department"), int(data.get("asset_code_id")),
-             int(data.get("quantity", 1)), data.get("remark", ""), asset_id))
+            (department, asset_code_id, quantity, remark, asset_id))
         db.commit(); db.close()
         return redirect("/admin/assets/unit-a")
+    db = get_db()
     asset = db.execute(
         "SELECT * FROM unit_a_assets WHERE id=?", (asset_id,)
     ).fetchone()
     codes = db.execute("SELECT * FROM asset_codes ORDER BY category, sort_order").fetchall()
     departments = db.execute("SELECT * FROM asset_departments ORDER BY sort_order").fetchall()
     db.close()
+    if asset is None:
+        abort(404)
     return render_template("admin/unit_a_edit.html", asset=asset, codes=codes, departments=departments)
 
 @app.route("/admin/assets/unit-a/delete/<int:asset_id>", methods=["POST"])
@@ -910,14 +1078,25 @@ def admin_unit_b_list():
 @app.route("/admin/assets/unit-b/new", methods=["GET","POST"])
 def admin_unit_b_new():
     """新建单位B资产"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        asset_code_id = valid_integer(
+            data, "asset_code_id", minimum=1, maximum=2147483647
+        )
+        quantity = valid_integer(data, "quantity", minimum=1, maximum=100000, default=1)
+        remark = valid_text(data, "remark", maximum=500)
+        db = get_db()
+        if db.execute(
+            "SELECT 1 FROM asset_codes WHERE id=?", (asset_code_id,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("asset_code_id does not exist")
         db.execute(
             "INSERT INTO unit_b_assets (asset_code_id, quantity, remark) VALUES (?,?,?)",
-            (int(data.get("asset_code_id")), int(data.get("quantity", 1)), data.get("remark", "")))
+            (asset_code_id, quantity, remark))
         db.commit(); db.close()
         return redirect("/admin/assets/unit-b")
+    db = get_db()
     codes = db.execute("SELECT * FROM asset_codes ORDER BY category, sort_order").fetchall()
     db.close()
     return render_template("admin/unit_b_edit.html", asset=None, codes=codes)
@@ -925,20 +1104,32 @@ def admin_unit_b_new():
 @app.route("/admin/assets/unit-b/<int:asset_id>", methods=["GET","POST"])
 def admin_unit_b_edit(asset_id):
     """编辑单位B资产"""
-    db = get_db()
     if request.method == "POST":
         data = request.form
+        asset_code_id = valid_integer(
+            data, "asset_code_id", minimum=1, maximum=2147483647
+        )
+        quantity = valid_integer(data, "quantity", minimum=1, maximum=100000, default=1)
+        remark = valid_text(data, "remark", maximum=500)
+        db = get_db()
+        if db.execute(
+            "SELECT 1 FROM asset_codes WHERE id=?", (asset_code_id,)
+        ).fetchone() is None:
+            db.close()
+            raise ValidationError("asset_code_id does not exist")
         db.execute(
             "UPDATE unit_b_assets SET asset_code_id=?, quantity=?, remark=? WHERE id=?",
-            (int(data.get("asset_code_id")), int(data.get("quantity", 1)),
-             data.get("remark", ""), asset_id))
+            (asset_code_id, quantity, remark, asset_id))
         db.commit(); db.close()
         return redirect("/admin/assets/unit-b")
+    db = get_db()
     asset = db.execute(
         "SELECT * FROM unit_b_assets WHERE id=?", (asset_id,)
     ).fetchone()
     codes = db.execute("SELECT * FROM asset_codes ORDER BY category, sort_order").fetchall()
     db.close()
+    if asset is None:
+        abort(404)
     return render_template("admin/unit_b_edit.html", asset=asset, codes=codes)
 
 @app.route("/admin/assets/unit-b/delete/<int:asset_id>", methods=["POST"])
@@ -954,7 +1145,9 @@ def admin_unit_b_delete(asset_id):
 @app.route("/admin/assets/labels")
 def admin_labels():
     """标签打印页"""
-    unit = request.args.get("unit", "A").upper()
+    unit = valid_text(request.args, "unit", maximum=1, default="A").upper() or "A"
+    if unit not in {"A", "B"}:
+        raise ValidationError("unit has an invalid value")
     db = get_db()
     if unit == "B":
         labels = db.execute(
