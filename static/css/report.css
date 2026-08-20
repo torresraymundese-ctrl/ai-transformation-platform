@@ -519,10 +519,27 @@
     margin: 0;
   }
 
-  .report-section,
   .report-disclaimer,
-  .service-package {
+  .score-layout,
+  .diagnosis-card,
+  .roi-band,
+  .recommendation-card,
+  .calculation-basis,
+  .roadmap-grid > div,
+  .package-details > section,
+  .risk-list li {
     break-inside: avoid;
     box-shadow: none;
+  }
+
+  .report-section,
+  .service-package {
+    box-shadow: none;
+  }
+
+  .report-section-heading,
+  .service-package header {
+    break-after: avoid;
+    break-inside: avoid;
   }
 }

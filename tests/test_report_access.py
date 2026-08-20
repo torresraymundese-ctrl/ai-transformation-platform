@@ -3,6 +3,7 @@ from copy import deepcopy
 import importlib
 from itertools import product
 import json
+import re
 import uuid
 
 from bs4 import BeautifulSoup
@@ -692,6 +693,112 @@ def test_pdf_uses_the_same_snapshot_and_a_trusted_local_base_url(
     ) == browser_page.select_one("#readiness-scores").get_text(" ", strip=True)
     assert _roi_basis_rows(pdf_page) == EXPECTED_ROI_BASIS_ROWS
     assert _roi_basis_rows(pdf_page) == _roi_basis_rows(browser_page)
+
+
+def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
+    completed_assessment, client, monkeypatch
+):
+    snapshot = _snapshot(completed_assessment)
+    snapshot["roi"]["conservative"]["annual_savings"] = "1234567.8"
+    snapshot["roi"]["conservative"]["three_year_net"] = "-89779.31"
+    _replace_snapshot(completed_assessment, snapshot)
+    captured = {}
+
+    def render(html, base_url):
+        captured["html"] = html
+        return b"%PDF-test"
+
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    html = client.get(f"/assessment/report/{completed_assessment}")
+    pdf = client.get(f"/assessment/report/{completed_assessment}/pdf")
+
+    assert html.status_code == 200
+    assert pdf.status_code == 200
+    browser_page = BeautifulSoup(html.data, "html.parser")
+    pdf_page = BeautifulSoup(captured["html"], "html.parser")
+    expected_integrations = {"low": "低", "medium": "中", "high": "高"}
+    expected_categories = {
+        "foundation": "基础准备",
+        "pilot": "试点验证",
+        "standard": "标准交付",
+        "integration": "集成交付",
+    }
+    english_exclusions = (
+        "software development",
+        "system integration",
+        "data cleansing execution",
+        "source-document creation",
+        "unrestricted internet answers",
+        "custom core-system integration",
+        "media spend",
+        "guaranteed conversion results",
+        "unapproved automated outreach",
+        "unstable processes",
+        "unlisted system interfaces",
+        "removal of manual fallback",
+        "source-system repair",
+        "historical data reconstruction",
+        "unagreed predictive models",
+        "unlisted connectors",
+        "production infrastructure procurement",
+        "guaranteed business outcomes",
+    )
+
+    for page in (browser_page, pdf_page):
+        visible = page.get_text(" ", strip=True)
+        assert "¥1,234,567.80" in visible
+        assert "-¥89,779.31" in visible
+        assert "¥-89,779.31" not in visible
+        budgets = [
+            node.get_text(" ", strip=True)
+            for node in page.select(".package-budget")
+        ]
+        assert any("¥100,000—¥250,000" in budget for budget in budgets)
+        assert all(".0" not in budget for budget in budgets)
+        for recommendation in snapshot["recommendations"]:
+            scenario = recommendation["scenario"]
+            package = recommendation["package"]
+            assert (
+                f"集成级别：{expected_integrations[scenario['integration_level']]}"
+                in visible
+            )
+            assert expected_categories[package["category"]] in visible
+            assert scenario["code"] not in visible
+            assert scenario["integration_level"] not in visible
+            assert package["category"] not in visible
+            for risk in recommendation["risks"]:
+                assert risk["code"] not in visible
+        assert all(item not in visible for item in english_exclusions)
+        risk_labels = [
+            node.get_text(" ", strip=True) for node in page.select("#risks strong")
+        ]
+        assert risk_labels
+        assert all(re.fullmatch(r"[\u4e00-\u9fff]+", label) for label in risk_labels)
+
+    pdf_css = pdf_page.select_one("style").get_text(" ", strip=True)
+    assert "@bottom-center" in pdf_css
+    assert "counter(page)" in pdf_css
+    assert "counter(pages)" in pdf_css
+    section_rule = re.search(r"\.report-section\s*\{([^}]*)\}", pdf_css)
+    assert section_rule is not None
+    assert "break-inside" not in section_rule.group(1)
+    assert re.search(
+        r"\.report-section-heading\s*\{[^}]*break-after:\s*avoid", pdf_css
+    )
+    assert re.search(
+        r"[^{}]*\.package-details\s*>\s*section[^{}]*"
+        r"\{[^}]*break-inside:\s*avoid",
+        pdf_css,
+    )
+    assert re.search(
+        r"[^{}]*\.score-layout[^{}]*\{[^}]*break-inside:\s*avoid",
+        pdf_css,
+    )
+    assert re.search(
+        r"\.service-package\s+header\s*\{[^}]*break-after:\s*avoid",
+        pdf_css,
+    )
+    assert _snapshot(completed_assessment) == snapshot
 
 
 def test_renderer_failure_is_safe_and_keeps_report_and_session(

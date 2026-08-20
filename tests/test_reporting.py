@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+import assessment.reporting as reporting
 from assessment.contracts import (
     AssessmentCatalog,
     AssessmentProfile,
@@ -24,6 +25,42 @@ DIMENSIONS = (
     "organization",
     "delivery",
 )
+
+EXPECTED_RISK_LABELS = {
+    "source_quality": "资料来源与质量",
+    "access_control": "访问权限控制",
+    "adoption": "用户采用",
+    "sample_quality": "样本质量",
+    "false_positive": "误报风险",
+    "equipment_integration": "设备集成",
+    "metric_definition": "指标口径",
+    "source_consistency": "数据源一致性",
+    "data_refresh": "数据刷新",
+    "response_accuracy": "回答准确性",
+    "escalation": "人工升级",
+    "brand_consistency": "品牌一致性",
+    "approval_flow": "审批流程",
+    "content_compliance": "内容合规",
+    "forecast_error": "预测偏差",
+    "system_integration": "系统集成",
+    "confidentiality": "保密管理",
+    "answer_scope": "回答范围",
+    "template_quality": "模板质量",
+    "human_review": "人工复核",
+    "exception_handling": "异常处理",
+    "legal_scope": "法律适用边界",
+    "intellectual_property": "知识产权",
+    "source_freshness": "知识时效",
+    "process_variance": "流程差异",
+    "integration": "集成边界",
+    "change_management": "变更管理",
+    "owner_availability": "负责人投入",
+    "data_inventory": "数据清单",
+}
+
+
+def test_every_frozen_risk_has_an_exact_chinese_public_label():
+    assert getattr(reporting, "RISK_LABELS", None) == EXPECTED_RISK_LABELS
 
 
 @pytest.fixture()

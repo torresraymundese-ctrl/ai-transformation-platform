@@ -251,7 +251,7 @@
       "deliverables": ["流程现状基线", "数据清单", "场景优先级矩阵", "90 天计划", "工作坊报告"],
       "implementation_steps": ["资料准备", "两次业务工作坊", "基线与优先级整理", "90 天计划评审"],
       "prerequisites": ["明确负责人", "参加两次 90 分钟工作坊", "提供脱敏样例文件"],
-      "not_included": ["software development", "system integration", "data cleansing execution"],
+      "not_included": ["定制软件开发", "业务系统集成", "数据清洗实施"],
       "acceptance": ["负责人书面确认现状基线、优先级和下一步计划"],
       "support_days": 15,
       "support_description": "15 天内一次复盘会"
@@ -265,7 +265,7 @@
       "deliverables": ["资料清单", "权限方案", "可检索知识库", "30 题评测集", "管理员培训"],
       "implementation_steps": ["范围与权限确认", "资料接入", "检索与回答配置", "30 题评测", "培训与试运行"],
       "prerequisites": ["明确负责人", "批准资料来源和访问规则"],
-      "not_included": ["source-document creation", "unrestricted internet answers", "custom core-system integration"],
+      "not_included": ["源文档编写与补录", "不受限制的互联网问答", "核心业务系统定制集成"],
       "acceptance": ["约定评测集通过率 ≥80%，且不回答未授权资料内容"],
       "support_days": 30,
       "support_description": "30 天"
@@ -279,7 +279,7 @@
       "deliverables": ["服务或营销流程图", "审核话术模板", "配置助手", "转化看板", "用户培训"],
       "implementation_steps": ["流程与目标确认", "话术审批", "助手和事件配置", "UAT", "培训与试运行"],
       "prerequisites": ["明确负责人", "批准文案", "提供脱敏对话或活动数据"],
-      "not_included": ["media spend", "guaranteed conversion results", "unapproved automated outreach"],
+      "not_included": ["媒体投放费用", "转化效果承诺", "未经审批的自动外呼或触达"],
       "acceptance": ["约定的前三项流程通过 UAT，且看板记录约定漏斗事件"],
       "support_days": 30,
       "support_description": "30 天"
@@ -293,7 +293,7 @@
       "deliverables": ["流程图", "自动化流程", "异常队列", "执行日志", "人工兜底", "验收用例", "培训"],
       "implementation_steps": ["流程冻结", "接口与异常设计", "流程配置", "用例测试", "培训和上线"],
       "prerequisites": ["稳定 SOP", "脱敏样例", "系统访问负责人"],
-      "not_included": ["unstable processes", "unlisted system interfaces", "removal of manual fallback"],
+      "not_included": ["尚未稳定的业务流程改造", "未列明的系统接口", "取消人工兜底机制"],
       "acceptance": ["约定正常用例通过率 ≥95%，全部异常进入人工队列"],
       "support_days": 30,
       "support_description": "30 天"
@@ -307,7 +307,7 @@
       "deliverables": ["KPI 字典", "数据源映射", "治理数据集", "看板", "预警规则", "培训", "验收报告"],
       "implementation_steps": ["KPI 确认", "数据映射", "数据集与看板配置", "对账", "培训和验收"],
       "prerequisites": ["KPI 负责人", "可导出源数据", "对账样例"],
-      "not_included": ["source-system repair", "historical data reconstruction", "unagreed predictive models"],
+      "not_included": ["源系统修复", "历史数据补建", "未约定的预测模型"],
       "acceptance": ["看板 KPI 与签字确认样例在约定误差内一致"],
       "support_days": 30,
       "support_description": "30 天"
@@ -321,7 +321,7 @@
       "deliverables": ["方案架构", "约定接口", "配置场景", "安全审查", "UAT", "培训"],
       "implementation_steps": ["架构与范围确认", "接口联调", "场景配置", "安全检查", "UAT", "培训上线"],
       "prerequisites": ["业务发起人", "系统负责人", "测试环境和接口权限"],
-      "not_included": ["unlisted connectors", "production infrastructure procurement", "guaranteed business outcomes"],
+      "not_included": ["未列明的系统连接器", "生产环境基础设施采购", "业务结果承诺"],
       "acceptance": ["签署 UAT 无严重缺陷，约定接口通过重试、审计和权限测试"],
       "support_days": 60,
       "support_description": "60 天"

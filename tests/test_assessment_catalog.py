@@ -486,11 +486,38 @@ def test_service_packages_have_exact_scope_delivery_and_support(catalog_db):
         "基线与优先级整理",
         "90 天计划评审",
     )
-    assert foundation.not_included == (
-        "software development",
-        "system integration",
-        "data cleansing execution",
-    )
+    assert {code: package.not_included for code, package in by_code.items()} == {
+        "foundation_workshop": (
+            "定制软件开发",
+            "业务系统集成",
+            "数据清洗实施",
+        ),
+        "knowledge_assistant_pilot": (
+            "源文档编写与补录",
+            "不受限制的互联网问答",
+            "核心业务系统定制集成",
+        ),
+        "customer_growth_pilot": (
+            "媒体投放费用",
+            "转化效果承诺",
+            "未经审批的自动外呼或触达",
+        ),
+        "workflow_automation": (
+            "尚未稳定的业务流程改造",
+            "未列明的系统接口",
+            "取消人工兜底机制",
+        ),
+        "data_insight": (
+            "源系统修复",
+            "历史数据补建",
+            "未约定的预测模型",
+        ),
+        "industry_integration": (
+            "未列明的系统连接器",
+            "生产环境基础设施采购",
+            "业务结果承诺",
+        ),
+    }
     assert foundation.support_days == 15
     assert by_code["industry_integration"].support_days == 60
     assert all(

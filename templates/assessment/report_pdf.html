@@ -4,13 +4,21 @@
   <meta charset="UTF-8">
   <title>AI 转型评估报告</title>
   <style>
-    @page { size: A4; margin: 14mm 13mm 16mm; }
+    @page {
+      size: A4;
+      margin: 14mm 13mm 18mm;
+      @bottom-center {
+        content: "AI 转型评估报告 · 第 " counter(page) " 页 / 共 " counter(pages) " 页";
+        color: #6e6e73;
+        font-size: 8pt;
+      }
+    }
     * { box-sizing: border-box; }
     body { margin: 0; color: #1d1d1f; font: 10pt/1.55 "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
     h1 { margin: 0 0 4mm; font-size: 25pt; line-height: 1.15; }
-    h2 { margin: 0; font-size: 16pt; }
-    h3 { margin: 0 0 2mm; font-size: 12pt; }
-    h4 { margin: 0 0 1mm; font-size: 10pt; }
+    h2 { margin: 0; font-size: 16pt; break-after: avoid; }
+    h3 { margin: 0 0 2mm; font-size: 12pt; break-after: avoid; }
+    h4 { margin: 0 0 1mm; font-size: 10pt; break-after: avoid; }
     p { margin: 0 0 2mm; }
     ul, ol { margin: 1.5mm 0 0; padding-left: 5mm; }
     li { margin-bottom: 1mm; }
@@ -21,8 +29,8 @@
     .report-summary div { min-width: 45mm; padding: 4mm; background: rgba(255,255,255,.12); border-radius: 3mm; }
     .report-summary span, .report-summary small { display: block; }
     .report-summary strong { font-size: 20pt; }
-    .report-section { margin-top: 9mm; break-inside: avoid; }
-    .report-section-heading { display: flex; gap: 4mm; padding-bottom: 3mm; border-bottom: .4mm solid #d2d2d7; }
+    .report-section { margin-top: 9mm; }
+    .report-section-heading { display: flex; gap: 4mm; padding-bottom: 3mm; border-bottom: .4mm solid #d2d2d7; break-after: avoid; break-inside: avoid; }
     .report-section-number { color: #0071e3; font-weight: 700; }
     .score-layout, .diagnosis-grid, .roi-grid, .roadmap-grid { display: flex; gap: 5mm; margin-top: 5mm; }
     .radar-chart { width: 85mm; height: 85mm; }
@@ -48,7 +56,9 @@
     .timeline-list { list-style: none; padding: 0; }
     .timeline-list li, .risk-list li { display: flex; gap: 4mm; padding: 2mm 0; border-bottom: .2mm solid #e8e8ed; }
     .timeline-list strong, .risk-list strong { min-width: 24mm; color: #0071e3; }
-    .service-package { margin-top: 4mm; break-inside: avoid; }
+    .score-layout, .diagnosis-card, .roi-band, .recommendation-card, .calculation-basis, .roadmap-grid > div, .package-details > section, .risk-list li { break-inside: avoid; }
+    .service-package { margin-top: 4mm; }
+    .service-package header { break-after: avoid; break-inside: avoid; }
     .package-details { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 6mm; margin-top: 4mm; }
     .package-note, .report-disclaimer { padding: 4mm; background: #fef4ee; border-radius: 3mm; }
     .report-disclaimer { margin-top: 9mm; break-inside: avoid; }

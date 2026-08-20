@@ -106,8 +106,8 @@
         <div class="recommendation-rank">{{ "%02d" | format(loop.index) }}</div>
         <div>
           <p class="card-label">匹配分 {{ recommendation.match_score }}</p>
-          <h3>{{ scenario_labels.get(recommendation.scenario.code, recommendation.scenario.code) }}</h3>
-          <p class="recommendation-meta">集成级别：{{ recommendation.scenario.integration_level }} · 建议周期：{{ recommendation.scenario.delivery_weeks.min }}—{{ recommendation.scenario.delivery_weeks.max }} 周</p>
+          <h3>{{ scenario_labels[recommendation.scenario.code] }}</h3>
+          <p class="recommendation-meta">集成级别：{{ integration_labels[recommendation.scenario.integration_level] }} · 建议周期：{{ recommendation.scenario.delivery_weeks.min }}—{{ recommendation.scenario.delivery_weeks.max }} 周</p>
           <ul>
             {% for reason in recommendation.reasons %}<li>{{ reason }}</li>{% endfor %}
           </ul>
@@ -131,18 +131,18 @@
       <article class="roi-band">
         <h3>{{ label }}档</h3>
         <dl>
-          <div><dt>年度总节省</dt><dd>¥{{ band.annual_savings }}</dd></div>
-          <div><dt>初始投入</dt><dd>¥{{ band.initial_investment }}</dd></div>
-          <div><dt>年度持续服务</dt><dd>¥{{ band.annual_support }}</dd></div>
+          <div><dt>年度总节省</dt><dd>{{ format_roi_currency(band.annual_savings) }}</dd></div>
+          <div><dt>初始投入</dt><dd>{{ format_roi_currency(band.initial_investment) }}</dd></div>
+          <div><dt>年度持续服务</dt><dd>{{ format_roi_currency(band.annual_support) }}</dd></div>
           <div><dt>预计回收月数</dt><dd>{% if band.payback_months is none %}暂无法估算{% else %}{{ band.payback_months }} 个月{% endif %}</dd></div>
-          <div><dt>三年净收益</dt><dd>¥{{ band.three_year_net }}</dd></div>
+          <div><dt>三年净收益</dt><dd>{{ format_roi_currency(band.three_year_net) }}</dd></div>
         </dl>
       </article>
       {% endfor %}
     </div>
     <div id="calculation-basis" class="calculation-basis">
       <h3>测算依据</h3>
-      <p>主场景：{{ scenario_labels.get(snapshot.calculation_basis.selected_scenario, snapshot.calculation_basis.selected_scenario) }}</p>
+      <p>主场景：{{ scenario_labels[snapshot.calculation_basis.selected_scenario] }}</p>
       <div class="roi-basis-table-wrap">
         <table>
           <caption>所选 ROI 输入区间与三档数值依据</caption>
@@ -212,9 +212,9 @@
     {% set package = recommendation.package %}
     <article class="service-package">
       <header>
-        <p class="card-label">{{ package.category }}</p>
+        <p class="card-label">{{ service_category_labels[package.category] }}</p>
         <h3>{{ package.public_name }}</h3>
-        <p class="package-budget"><strong>参考预算：</strong>¥{{ package.budget_range.min }}—¥{{ package.budget_range.max }}</p>
+        <p class="package-budget"><strong>参考预算：</strong>{{ format_budget_currency(package.budget_range.min) }}—{{ format_budget_currency(package.budget_range.max) }}</p>
         <p class="package-timeline"><strong>交付周期：</strong>{{ package.delivery_weeks.min }}—{{ package.delivery_weeks.max }} 周</p>
       </header>
       <div class="package-details">
@@ -241,7 +241,7 @@
     <ul class="risk-list">
       {% for recommendation in snapshot.recommendations %}
       {% for risk in recommendation.risks %}
-      <li><strong>{{ risk.code }}</strong><span>{{ risk.explanation }}</span></li>
+      <li><strong>{{ risk_labels[risk.code] }}</strong><span>{{ risk.explanation }}</span></li>
       {% endfor %}
       {% endfor %}
     </ul>

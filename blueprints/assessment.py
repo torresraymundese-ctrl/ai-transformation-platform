@@ -23,6 +23,7 @@ from flask import (
 import assessment_repository
 import report_pdf
 from assessment.contracts import AssessmentInputError
+from assessment.reporting import RISK_LABELS
 from assessment.scoring import score_assessment
 from assessment_completion_service import complete_assessment
 from assessment_validation import (
@@ -93,6 +94,19 @@ ROI_BANDS = (
     ("midpoint", "中位"),
     ("ideal", "理想"),
 )
+
+INTEGRATION_LABELS = {
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+}
+
+SERVICE_CATEGORY_LABELS = {
+    "foundation": "基础准备",
+    "pilot": "试点验证",
+    "standard": "标准交付",
+    "integration": "集成交付",
+}
 
 ROI_INPUT_FIELDS = (
     (
@@ -371,8 +385,13 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
         "radar": _radar_context(dimension_rows),
         "maturity_label": MATURITY_LABELS[scores["maturity_code"]],
         "scenario_labels": SCENARIO_LABELS,
+        "integration_labels": INTEGRATION_LABELS,
+        "service_category_labels": SERVICE_CATEGORY_LABELS,
+        "risk_labels": RISK_LABELS,
         "roi_bands": ROI_BANDS,
         "roi_choice_rows": _roi_choice_rows(snapshot["calculation_basis"]),
+        "format_roi_currency": _format_roi_currency,
+        "format_budget_currency": _format_budget_currency,
         "pdf_mode": pdf_mode,
     }
 
@@ -402,6 +421,20 @@ def _format_roi_input(group, value):
     if group == "monthly_hours":
         return f"{formatted} 小时"
     return f"¥{formatted}"
+
+
+def _format_roi_currency(value):
+    return _format_currency(value, decimal_places=2)
+
+
+def _format_budget_currency(value):
+    return _format_currency(value, decimal_places=0)
+
+
+def _format_currency(value, decimal_places):
+    number = Decimal(value)
+    sign = "-" if number < 0 else ""
+    return f"{sign}¥{abs(number):,.{decimal_places}f}"
 
 
 def _radar_context(dimension_rows):
