@@ -313,6 +313,9 @@ def test_completion_rejects_attribution_contact_fields_and_overlong_values(clien
         ("utm_source", "referral/138/0013/8000"),
         ("utm_medium", "partner lead @ example.com campaign"),
         ("utm_campaign", "ｌｅａｄ＠ｅｘａｍｐｌｅ．ｃｏｍ"),
+        ("source", "١٣٨٠٠١٣٨٠٠٠"),
+        ("utm_source", "१३८००१३८०००"),
+        ("utm_medium", "用户@例子.公司"),
     ),
 )
 def test_completion_rejects_contact_values_embedded_in_attribution(

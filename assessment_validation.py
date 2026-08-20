@@ -112,12 +112,6 @@ EXPECTED_BRANCH_COLLECTION_LENGTHS = {
     "pain_points": 8,
 }
 CODE_PATTERN = re.compile(r"^[a-z0-9_]+$")
-EMBEDDED_EMAIL_PATTERN = re.compile(
-    r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
-    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
-    re.I,
-)
 EMBEDDED_MAINLAND_MOBILE_DIGITS = re.compile(r"(?:86)?1[3-9]\d{9}")
 
 
@@ -507,10 +501,18 @@ def _attribution_text(value, *, maximum, required=False):
         required=required,
     )
     email_candidate = re.sub(r"\s+", "", value)
-    digit_candidate = re.sub(r"\D", "", value)
+    digit_candidate = re.sub(r"\D", "", _ascii_decimal_digits(value))
     if (
-        EMBEDDED_EMAIL_PATTERN.search(email_candidate)
+        "@" in email_candidate
         or EMBEDDED_MAINLAND_MOBILE_DIGITS.search(digit_candidate)
     ):
         raise ValidationError("invalid assessment payload")
     return value
+
+
+def _ascii_decimal_digits(value):
+    normalized = []
+    for character in value:
+        digit = unicodedata.decimal(character, None)
+        normalized.append(str(digit) if digit is not None else character)
+    return "".join(normalized)
