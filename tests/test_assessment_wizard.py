@@ -115,7 +115,7 @@ def test_storage_snapshot_is_non_contact_and_restores_one_submission_key():
     assert "const restoredState = readStoredState();" in source
     assert "restoredState.submissionKey" in source
     assert 'sessionStorage.setItem(STORAGE_KEY, JSON.stringify(storedStateSnapshot()))' in source
-    assert "storage.removeItem(storageKey)" in source
+    assert "browser.sessionStorage.removeItem(storageKey)" in source
     assert "privacySafeAttribution(params.get(key))" in source
     assert 'const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign"]' in source
 

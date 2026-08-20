@@ -15,21 +15,45 @@ const wizard = require("../../static/js/assessment.js");
 
 test("successful completion redirects when storage cleanup throws", function () {
   const assigned = [];
-  const storage = {
-    removeItem: function () { throw new Error("storage blocked"); },
-  };
-  const location = {
-    assign: function (url) { assigned.push(url); },
+  const browser = {
+    sessionStorage: {
+      removeItem: function () { throw new Error("storage blocked"); },
+    },
+    location: {
+      assign: function (url) { assigned.push(url); },
+    },
   };
 
   wizard.clearStoredStateAndRedirect(
-    storage,
-    location,
+    browser,
     "assessment-v2-state",
     "/assessment/report/41"
   );
 
   assert.deepEqual(assigned, ["/assessment/report/41"]);
+});
+
+
+test("successful completion redirects when sessionStorage acquisition throws", function () {
+  const assigned = [];
+  const browser = {
+    location: {
+      assign: function (url) { assigned.push(url); },
+    },
+  };
+  Object.defineProperty(browser, "sessionStorage", {
+    get: function () { throw new Error("storage getter blocked"); },
+  });
+
+  assert.doesNotThrow(function () {
+    wizard.clearStoredStateAndRedirect(
+      browser,
+      "assessment-v2-state",
+      "/assessment/report/42"
+    );
+  });
+
+  assert.deepEqual(assigned, ["/assessment/report/42"]);
 });
 
 

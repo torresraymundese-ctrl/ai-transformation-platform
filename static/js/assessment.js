@@ -705,8 +705,7 @@
         throw new Error("invalid report destination");
       }
       clearStoredStateAndRedirect(
-        sessionStorage,
-        window.location,
+        window,
         STORAGE_KEY,
         result.report_url
       );
@@ -729,13 +728,13 @@
     return payload;
   }
 
-  function clearStoredStateAndRedirect(storage, location, storageKey, reportUrl) {
+  function clearStoredStateAndRedirect(browser, storageKey, reportUrl) {
     try {
-      storage.removeItem(storageKey);
+      browser.sessionStorage.removeItem(storageKey);
     } catch (error) {
       // Storage cleanup is best-effort after the server has completed the flow.
     }
-    location.assign(reportUrl);
+    browser.location.assign(reportUrl);
   }
 
   function validateContactValues(rawValues) {
