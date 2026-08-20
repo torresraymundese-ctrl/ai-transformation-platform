@@ -11,11 +11,13 @@ from assessment.contracts import (
     Consent,
     Contact,
 )
+from assessment.reporting import RISK_EXPLANATIONS
 from assessment.scoring import DIMENSION_ORDER
 from validation import ValidationError, validated_submission_key
 
 
 SCHEMA_VERSION = "2.0"
+CONSENT_POLICY_VERSION = "2026-08-19"
 BRANCH_CODES = frozenset(
     {
         "manufacturing",
@@ -100,12 +102,45 @@ SERVICE_CODES = frozenset(
         "industry_integration",
     }
 )
+SERVICE_CATEGORIES = {
+    "foundation_workshop": "foundation",
+    "knowledge_assistant_pilot": "pilot",
+    "customer_growth_pilot": "pilot",
+    "workflow_automation": "standard",
+    "data_insight": "standard",
+    "industry_integration": "integration",
+}
+SCENARIO_SERVICE_CODES = {
+    "mfg_knowledge_assistant": "knowledge_assistant_pilot",
+    "mfg_quality_inspection": "industry_integration",
+    "mfg_operations_reporting": "data_insight",
+    "retail_ai_service": "customer_growth_pilot",
+    "retail_marketing_content": "customer_growth_pilot",
+    "retail_inventory_insight": "data_insight",
+    "pro_document_knowledge": "knowledge_assistant_pilot",
+    "pro_delivery_drafting": "workflow_automation",
+    "pro_contract_review": "workflow_automation",
+    "creative_content_workflow": "customer_growth_pilot",
+    "software_support_knowledge": "knowledge_assistant_pilot",
+    "project_delivery_automation": "industry_integration",
+    "data_process_foundation": "foundation_workshop",
+}
 EXPECTED_BRANCH_COLLECTION_LENGTHS = {
     "subbranches": 4,
     "departments": 6,
     "pain_points": 8,
 }
 CODE_PATTERN = re.compile(r"^[a-z0-9_]+$")
+EMBEDDED_EMAIL_PATTERN = re.compile(
+    r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
+    re.I,
+)
+EMBEDDED_MAINLAND_MOBILE_PATTERN = re.compile(
+    r"(?<!\d)(?:(?:\+?86|0086)[\s.-]*)?"
+    r"1[3-9](?:[\s.-]*\d){9}(?!\d)"
+)
 
 
 class AssessmentRulesUnavailable(RuntimeError):
@@ -192,12 +227,12 @@ def parse_completion_payload(data) -> CompletionRequest:
     _exact_keys(consent, {"accepted", "policy_version"})
     if consent["accepted"] is not True:
         raise ValidationError("invalid assessment payload")
-    consent_value = Consent(
-        accepted=True,
-        policy_version=_text(
-            consent["policy_version"], maximum=50, required=True
-        ),
+    policy_version = _text(
+        consent["policy_version"], maximum=50, required=True
     )
+    if policy_version != CONSENT_POLICY_VERSION:
+        raise ValidationError("invalid assessment payload")
+    consent_value = Consent(accepted=True, policy_version=policy_version)
 
     attribution = _object(payload["attribution"])
     _allowed_keys(
@@ -206,10 +241,18 @@ def parse_completion_payload(data) -> CompletionRequest:
         allowed={"source", "utm_source", "utm_medium", "utm_campaign"},
     )
     attribution_value = Attribution(
-        source=_text(attribution["source"], maximum=100, required=True),
-        utm_source=_text(attribution.get("utm_source", ""), maximum=100),
-        utm_medium=_text(attribution.get("utm_medium", ""), maximum=100),
-        utm_campaign=_text(attribution.get("utm_campaign", ""), maximum=100),
+        source=_attribution_text(
+            attribution["source"], maximum=100, required=True
+        ),
+        utm_source=_attribution_text(
+            attribution.get("utm_source", ""), maximum=100
+        ),
+        utm_medium=_attribution_text(
+            attribution.get("utm_medium", ""), maximum=100
+        ),
+        utm_campaign=_attribution_text(
+            attribution.get("utm_campaign", ""), maximum=100
+        ),
     )
     return CompletionRequest(
         submission_key=submission_key,
@@ -343,11 +386,13 @@ def _validate_completion_dependencies(scenarios, services, ranges):
                 not isinstance(value, int) or not 0 <= value <= 100
                 for value in scenario.minimum_scores.values()
             )
-            or scenario.service_code not in service_by_code
+            or scenario.service_code != SCENARIO_SERVICE_CODES.get(scenario.code)
             or scenario.integration_level not in {"low", "medium", "high"}
-            or scenario.min_weeks < 1
-            or scenario.max_weeks < scenario.min_weeks
+            or not _positive_integer_range(
+                scenario.min_weeks, scenario.max_weeks
+            )
             or not scenario.budget_codes
+            or not set(scenario.budget_codes) <= set(ROI_OPTION_CODES["budget"])
             or len(scenario.efficiency) != 3
             or len(scenario.loss_improvement) != 3
             or len(scenario.annual_support_rate) != 3
@@ -355,6 +400,7 @@ def _validate_completion_dependencies(scenarios, services, ranges):
             or not _ordered_unit_triple(scenario.loss_improvement)
             or not _ordered_unit_triple(scenario.annual_support_rate)
             or not scenario.risk_codes
+            or not set(scenario.risk_codes) <= set(RISK_EXPLANATIONS)
         ):
             raise AssessmentRulesUnavailable("scenario")
         if not scenario.fallback_only and (
@@ -366,8 +412,11 @@ def _validate_completion_dependencies(scenarios, services, ranges):
     for service in services:
         if (
             not service.public_name
-            or service.min_budget > service.max_budget
-            or service.min_weeks > service.max_weeks
+            or service.category != SERVICE_CATEGORIES.get(service.code)
+            or not _ordered_nonnegative_pair(
+                service.min_budget, service.max_budget
+            )
+            or not _positive_integer_range(service.min_weeks, service.max_weeks)
             or not service.deliverables
             or not service.implementation_steps
             or not service.prerequisites
@@ -382,14 +431,43 @@ def _validate_completion_dependencies(scenarios, services, ranges):
         if tuple(ranges[group]) != expected_codes:
             raise AssessmentRulesUnavailable("roi_codes")
         if any(
-            len(values) != 3 or not values[0] <= values[1] <= values[2]
+            not _ordered_nonnegative_triple(values)
             for values in ranges[group].values()
         ):
             raise AssessmentRulesUnavailable("roi_ranges")
 
 
 def _ordered_unit_triple(values):
-    return 0 <= values[0] <= values[1] <= values[2] <= 1
+    return (
+        _ordered_nonnegative_triple(values)
+        and values[2] <= 1
+    )
+
+
+def _ordered_nonnegative_triple(values):
+    return (
+        len(values) == 3
+        and all(getattr(value, "is_finite", lambda: False)() for value in values)
+        and 0 <= values[0] <= values[1] <= values[2]
+    )
+
+
+def _ordered_nonnegative_pair(low, high):
+    return (
+        getattr(low, "is_finite", lambda: False)()
+        and getattr(high, "is_finite", lambda: False)()
+        and 0 <= low <= high
+    )
+
+
+def _positive_integer_range(low, high):
+    return (
+        isinstance(low, int)
+        and not isinstance(low, bool)
+        and isinstance(high, int)
+        and not isinstance(high, bool)
+        and 1 <= low <= high
+    )
 
 
 def _object(value):
@@ -430,5 +508,15 @@ def _text(value, *, maximum, required=False):
         raise ValidationError("invalid assessment payload")
     value = value.strip()
     if (required and not value) or len(value) > maximum:
+        raise ValidationError("invalid assessment payload")
+    return value
+
+
+def _attribution_text(value, *, maximum, required=False):
+    value = _text(value, maximum=maximum, required=required)
+    if (
+        EMBEDDED_EMAIL_PATTERN.search(value)
+        or EMBEDDED_MAINLAND_MOBILE_PATTERN.search(value)
+    ):
         raise ValidationError("invalid assessment payload")
     return value

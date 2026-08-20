@@ -12,6 +12,7 @@ from assessment.scoring import score_assessment
 from assessment_completion_service import complete_assessment
 from assessment_validation import (
     AssessmentRulesUnavailable,
+    CONSENT_POLICY_VERSION,
     parse_completion_payload,
     parse_preview_payload,
     validate_profile_membership,
@@ -56,6 +57,7 @@ def assessment_config(branch_code):
         {
             "schema_version": "2.0",
             "rule_version": catalog.version_code,
+            "consent_policy_version": CONSENT_POLICY_VERSION,
             "branch": public_config["branch"],
             "subbranches": public_config["subbranches"],
             "departments": public_config["departments"],
@@ -159,8 +161,12 @@ def assessment_complete():
         return _unavailable_response(error)
 
     report_ids = list(session.get("assessment_report_ids", ()))
-    report_ids.append(result.assessment_id)
-    session["assessment_report_ids"] = report_ids[-5:]
+    if not result.created:
+        if result.assessment_id not in report_ids:
+            return jsonify({"error": "assessment conflict"}), 409
+    else:
+        report_ids.append(result.assessment_id)
+        session["assessment_report_ids"] = report_ids[-5:]
     return jsonify(
         {
             "success": True,

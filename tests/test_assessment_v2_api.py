@@ -135,6 +135,7 @@ def test_config_exposes_only_published_branch_rules_and_required_disclosure(clie
     serialized = json.dumps(body, ensure_ascii=False)
     assert body["schema_version"] == "2.0"
     assert body["rule_version"] == "v2.0-2026-08-19"
+    assert body["consent_policy_version"] == "2026-08-19"
     assert body["branch"] == {"code": "manufacturing", "label": "制造业"}
     assert len(body["subbranches"]) == 4
     assert len(body["departments"]) == 6
@@ -255,6 +256,28 @@ def test_completion_requires_public_csrf_and_accepted_consent_before_writes(clie
     }
 
 
+def test_completion_requires_the_configured_frozen_consent_policy_version(client):
+    token = enable_v2(client)
+    payload = valid_completion()
+    payload["consent"]["policy_version"] = "2026-08-18"
+
+    response = client.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "invalid assessment payload"}
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
+    assert rate_limit_row_count() == 0
+
+
 def test_completion_rejects_attribution_contact_fields_and_overlong_values(client):
     token = enable_v2(client)
     with_contact = valid_completion()
@@ -277,6 +300,58 @@ def test_completion_rejects_attribution_contact_fields_and_overlong_values(clien
         for response in responses
     )
     assert domain_counts()["assessments"] == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source", "partner user+lead@example.invalid campaign"),
+        ("utm_source", "referral-13800138000"),
+        ("utm_medium", "referral 138 0013 8000"),
+        ("utm_campaign", "referral +86 138-0013-8000"),
+    ),
+)
+def test_completion_rejects_contact_values_embedded_in_attribution(
+    client, field, value
+):
+    token = enable_v2(client)
+    payload = valid_completion()
+    payload["attribution"][field] = value
+
+    response = client.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "invalid assessment payload"}
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
+    assert rate_limit_row_count() == 0
+
+
+def test_legacy_assessment_submission_does_not_change_report_session_access(client):
+    with client.session_transaction() as session:
+        session["assessment_report_ids"] = [91, 92]
+
+    response = client.post(
+        "/api/assessment",
+        json={
+            "company": "兼容性测试企业",
+            "email": "legacy@example.invalid",
+            "scores": {"strategy": 60},
+            "result": "starter",
+        },
+    )
+
+    assert response.status_code == 200
+    with client.session_transaction() as session:
+        assert session["assessment_report_ids"] == [91, 92]
 
 
 def test_completion_returns_private_urls_and_bounds_session_to_last_five_ids(client):
@@ -312,6 +387,65 @@ def test_completion_returns_private_urls_and_bounds_session_to_last_five_ids(cli
     with client.session_transaction() as session:
         assert session["assessment_report_ids"] == assessment_ids[-5:]
     assert domain_counts()["assessments"] == 6
+
+
+def test_same_session_completion_retry_keeps_report_authorization(client):
+    token = enable_v2(client)
+    payload = valid_completion(
+        submission_key="550e8400-e29b-41d4-a716-446655440000"
+    )
+
+    first = client.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": token},
+    )
+    retry = client.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    assert retry.get_json() == first.get_json()
+    with client.session_transaction() as session:
+        assert session["assessment_report_ids"] == [
+            first.get_json()["assessment_id"]
+        ]
+    assert domain_counts()["assessments"] == 1
+
+
+def test_other_session_cannot_replay_submission_key_into_report_access(client):
+    first_token = enable_v2(client)
+    payload = valid_completion(
+        submission_key="550e8400-e29b-41d4-a716-446655440000"
+    )
+    first = client.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": first_token},
+    )
+    assessment_id = first.get_json()["assessment_id"]
+
+    other = client.application.test_client()
+    other_token = enable_v2(other)
+    replay = other.post(
+        "/api/v2/assessment/complete",
+        json=payload,
+        headers={"X-CSRF-Token": other_token},
+    )
+
+    assert replay.status_code == 409
+    assert replay.get_json() == {"error": "assessment conflict"}
+    assert str(assessment_id).encode() not in replay.data
+    assert b"report_url" not in replay.data
+    assert b"pdf_url" not in replay.data
+    with other.session_transaction() as session:
+        assert "assessment_report_ids" not in session
+    with client.session_transaction() as session:
+        assert session["assessment_report_ids"] == [assessment_id]
+    assert domain_counts()["assessments"] == 1
 
 
 def test_missing_published_rules_return_recoverable_503_without_domain_writes(client):
@@ -391,11 +525,29 @@ def test_inconsistent_published_rules_return_503_instead_of_partial_results(clie
         "process_weight=41 WHERE assessment_version_id=(SELECT id FROM "
         "assessment_versions WHERE code='v2.0-2026-08-19') AND industry_id=("
         "SELECT id FROM industries WHERE code='manufacturing')",
+        "UPDATE roi_option_ranges SET low_value=-3,mid_value=-2,high_value=-1 "
+        "WHERE option_group='headcount' AND code='1_5'",
+        "UPDATE services SET min_budget=-100,max_budget=-1 "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET min_budget=100,max_budget=10 "
+        "WHERE code='foundation_workshop'",
+        "UPDATE scenarios SET min_weeks=1.5 "
+        "WHERE code='mfg_operations_reporting'",
+        "UPDATE scenario_budget_options SET budget_code='unsupported_budget' "
+        "WHERE scenario_id=(SELECT id FROM scenarios "
+        "WHERE code='mfg_operations_reporting') AND budget_code='50000_200000'",
+        "UPDATE scenarios SET risk_codes_json='[\"unsupported_risk\"]' "
+        "WHERE code='mfg_operations_reporting'",
         "UPDATE scenario_roi_profiles SET efficiency_mid=-1 WHERE id=("
         "SELECT MIN(id) FROM scenario_roi_profiles)",
+        "UPDATE scenario_roi_profiles SET efficiency_low=.3,efficiency_mid=.2,"
+        "efficiency_high=.1 WHERE id=(SELECT MIN(id) "
+        "FROM scenario_roi_profiles)",
         "UPDATE scenario_roi_profiles SET efficiency_mid='not-a-number' WHERE id=("
         "SELECT MIN(id) FROM scenario_roi_profiles)",
         "DELETE FROM scenario_roi_profiles WHERE scenario_id=("
+        "SELECT id FROM scenarios WHERE code='mfg_operations_reporting')",
+        "DELETE FROM scenario_services WHERE scenario_id=("
         "SELECT id FROM scenarios WHERE code='mfg_operations_reporting')",
         "INSERT INTO scenario_services (scenario_id,service_id) SELECT "
         "(SELECT id FROM scenarios WHERE code='mfg_operations_reporting'),"
