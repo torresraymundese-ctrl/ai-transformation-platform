@@ -16,6 +16,11 @@ def load_core_catalog_manifest():
     return _load_json("core_catalog_v2.json")
 
 
+def load_assessment_manifest():
+    """Load the frozen V2.0 assessment rules used to verify report snapshots."""
+    return _load_json("assessment_v2.json")
+
+
 def _json_tuple(values):
     return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
 
@@ -27,7 +32,7 @@ def seed_v2_defaults(connection):
         "WHERE type='table' AND name='assessment_versions'"
     ).fetchone() is None:
         return
-    assessment = _load_json("assessment_v2.json")
+    assessment = load_assessment_manifest()
     version = assessment["version"]
     if connection.execute(
         "SELECT 1 FROM assessment_versions WHERE code=?", (version["code"],)

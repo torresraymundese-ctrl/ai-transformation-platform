@@ -40,8 +40,7 @@ PRIVATE_VALUES = (
 )
 
 
-@pytest.fixture()
-def completed_assessment(client):
+def _complete_assessment(client):
     client.application.config.update(PRIVACY_CONFIG)
     config = client.get("/api/v2/assessment/config/manufacturing")
     assert config.status_code == 200
@@ -87,6 +86,11 @@ def completed_assessment(client):
     )
     assert response.status_code == 200
     return response.get_json()["assessment_id"]
+
+
+@pytest.fixture()
+def completed_assessment(client):
+    return _complete_assessment(client)
 
 
 def _snapshot(assessment_id):
@@ -140,6 +144,23 @@ def _assert_private_cache_headers(response):
     }
     assert {"private", "no-store"} <= directives
     assert response.headers["Pragma"].lower() == "no-cache"
+    assert response.headers["Expires"] == "0"
+
+
+def _roi_basis_rows(page):
+    return [
+        [cell.get_text(" ", strip=True) for cell in row.select("th,td")]
+        for row in page.select("#calculation-basis tbody tr")
+    ]
+
+
+EXPECTED_ROI_BASIS_ROWS = [
+    ["参与人数", "6—20 人", "6 人", "13 人", "20 人"],
+    ["每人每月耗时", "20—80 小时", "20 小时", "50 小时", "80 小时"],
+    ["人均月综合成本", "8,000—15,000 元", "¥8,000", "¥11,500", "¥15,000"],
+    ["返工或损耗程度", "一般", "5%", "10%", "15%"],
+    ["可接受投入", "5—20 万元", "¥50,000", "¥125,000", "¥200,000"],
+]
 
 
 def test_pdf_adapter_loads_weasyprint_only_when_rendering(monkeypatch):
@@ -159,19 +180,46 @@ def test_pdf_adapter_loads_weasyprint_only_when_rendering(monkeypatch):
 
 def test_report_requires_the_current_session(completed_assessment, client):
     allowed = client.get(f"/assessment/report/{completed_assessment}")
-    other = client.application.test_client().get(
+    other_client = client.application.test_client()
+    other = other_client.get(
         f"/assessment/report/{completed_assessment}"
     )
+    other_pdf = other_client.get(f"/assessment/report/{completed_assessment}/pdf")
     with client.session_transaction() as session:
         session.clear()
     cleared = client.get(f"/assessment/report/{completed_assessment}")
+    cleared_pdf = client.get(f"/assessment/report/{completed_assessment}/pdf")
 
     assert allowed.status_code == 200
     assert other.status_code == 404
+    assert other_pdf.status_code == 404
     assert cleared.status_code == 404
+    assert cleared_pdf.status_code == 404
     _assert_private_cache_headers(allowed)
     _assert_private_cache_headers(other)
+    _assert_private_cache_headers(other_pdf)
     _assert_private_cache_headers(cleared)
+    _assert_private_cache_headers(cleared_pdf)
+
+
+def test_sixth_oldest_report_is_evicted_for_html_and_pdf(
+    completed_assessment, client, monkeypatch
+):
+    assessment_ids = [completed_assessment]
+    assessment_ids.extend(_complete_assessment(client) for _ in range(5))
+    monkeypatch.setattr(report_pdf, "render_pdf", lambda *args, **kwargs: b"%PDF-test")
+
+    oldest_html = client.get(f"/assessment/report/{assessment_ids[0]}")
+    oldest_pdf = client.get(f"/assessment/report/{assessment_ids[0]}/pdf")
+    newest_html = client.get(f"/assessment/report/{assessment_ids[-1]}")
+    newest_pdf = client.get(f"/assessment/report/{assessment_ids[-1]}/pdf")
+
+    assert oldest_html.status_code == 404
+    assert oldest_pdf.status_code == 404
+    assert newest_html.status_code == 200
+    assert newest_pdf.status_code == 200
+    for response in (oldest_html, oldest_pdf, newest_html, newest_pdf):
+        _assert_private_cache_headers(response)
 
 
 def test_legacy_incomplete_and_invalid_snapshots_return_404(
@@ -242,6 +290,134 @@ def test_legacy_incomplete_and_invalid_snapshots_return_404(
     assert rendered["called"] is False
 
 
+@pytest.mark.parametrize(
+    "corruption",
+    ("oversized_snapshot", "oversized_integer", "excessive_nesting"),
+)
+def test_resource_abusive_snapshot_json_returns_private_404_without_rendering(
+    completed_assessment, client, monkeypatch, caplog, corruption
+):
+    snapshot = _snapshot(completed_assessment)
+    raw = json.dumps(snapshot, ensure_ascii=False)
+    if corruption == "oversized_snapshot":
+        snapshot["scores"]["strongest"]["explanation"] = "x" * 200_000
+        raw = json.dumps(snapshot, ensure_ascii=False)
+    elif corruption == "oversized_integer":
+        raw = raw.replace(
+            '"overall_score": 100',
+            f'"overall_score": {"9" * 5_000}',
+            1,
+        )
+    else:
+        raw = "[" * 1_200 + "0" + "]" * 1_200
+    assessment_id = _clone_assessment(completed_assessment, raw)
+    with client.session_transaction() as session:
+        session["assessment_report_ids"] = [assessment_id]
+
+    def unexpected_render(*args, **kwargs):
+        pytest.fail("invalid snapshot reached the PDF renderer")
+
+    monkeypatch.setattr(report_pdf, "render_pdf", unexpected_render)
+
+    html = client.get(f"/assessment/report/{assessment_id}")
+    pdf = client.get(f"/assessment/report/{assessment_id}/pdf")
+
+    assert html.status_code == 404
+    assert pdf.status_code == 404
+    _assert_private_cache_headers(html)
+    _assert_private_cache_headers(pdf)
+    assert "5000" not in caplog.text
+    assert "Unhandled application error" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    (
+        "extra_top_level_section",
+        "extra_nested_score_key",
+        "missing_answer",
+        "empty_answers",
+        "missing_roi_choice",
+        "empty_roi_choices",
+        "extra_roi_choice",
+        "invalid_answer_option",
+        "invalid_roi_option",
+        "empty_recommendations",
+        "extra_recommendation_key",
+        "missing_package_key",
+        "empty_package_deliverables",
+        "negative_roi_savings",
+        "nonfinite_roi_savings",
+        "component_over_domain_max",
+        "missing_selected_roi_band",
+        "extra_selected_roi_band",
+        "extra_roadmap_key",
+    ),
+)
+def test_frozen_v2_snapshot_rejects_schema_cardinality_and_domain_corruption(
+    completed_assessment, client, monkeypatch, corruption
+):
+    snapshot = _snapshot(completed_assessment)
+    if corruption == "extra_top_level_section":
+        snapshot["future_section"] = {}
+    elif corruption == "extra_nested_score_key":
+        snapshot["scores"]["future_score"] = 1
+    elif corruption == "missing_answer":
+        snapshot["assessment"]["answers"].pop(QUESTION_CODES[-1])
+    elif corruption == "empty_answers":
+        snapshot["assessment"]["answers"] = {}
+    elif corruption == "missing_roi_choice":
+        snapshot["assessment"]["roi_choices"].pop("budget")
+    elif corruption == "empty_roi_choices":
+        snapshot["assessment"]["roi_choices"] = {}
+    elif corruption == "extra_roi_choice":
+        snapshot["assessment"]["roi_choices"]["future_input"] = "future_band"
+    elif corruption == "invalid_answer_option":
+        snapshot["assessment"]["answers"][QUESTION_CODES[0]] = "level_9"
+    elif corruption == "invalid_roi_option":
+        snapshot["assessment"]["roi_choices"]["headcount"] = "not_a_band"
+    elif corruption == "empty_recommendations":
+        snapshot["recommendations"] = []
+    elif corruption == "extra_recommendation_key":
+        snapshot["recommendations"][0]["future_detail"] = "not frozen"
+    elif corruption == "missing_package_key":
+        snapshot["recommendations"][0]["package"].pop("acceptance")
+    elif corruption == "empty_package_deliverables":
+        snapshot["recommendations"][0]["package"]["deliverables"] = []
+    elif corruption == "negative_roi_savings":
+        snapshot["roi"]["midpoint"]["annual_savings"] = "-1"
+    elif corruption == "nonfinite_roi_savings":
+        snapshot["roi"]["midpoint"]["annual_savings"] = "NaN"
+    elif corruption == "component_over_domain_max":
+        snapshot["recommendations"][0]["components"]["pain"] = 36
+    elif corruption == "missing_selected_roi_band":
+        snapshot["calculation_basis"]["selected_roi_bands"].pop("budget")
+    elif corruption == "extra_selected_roi_band":
+        snapshot["calculation_basis"]["selected_roi_bands"]["future_input"] = {
+            "low": "1",
+            "mid": "2",
+            "high": "3",
+        }
+    else:
+        snapshot["roadmap_90_days"][0]["future_detail"] = "not frozen"
+
+    assessment_id = _clone_assessment(
+        completed_assessment, json.dumps(snapshot, ensure_ascii=False)
+    )
+    with client.session_transaction() as session:
+        session["assessment_report_ids"] = [assessment_id]
+
+    def unexpected_render(*args, **kwargs):
+        pytest.fail("corrupt snapshot reached the PDF renderer")
+
+    monkeypatch.setattr(report_pdf, "render_pdf", unexpected_render)
+
+    for suffix in ("", "/pdf"):
+        response = client.get(f"/assessment/report/{assessment_id}{suffix}")
+        assert response.status_code == 404
+        _assert_private_cache_headers(response)
+
+
 def test_html_report_renders_every_required_snapshot_section(
     completed_assessment, client
 ):
@@ -285,6 +461,7 @@ def test_html_report_renders_every_required_snapshot_section(
     assert page.select_one("#weaknesses")
     assert page.select_one("#recommendations .recommendation-card")
     assert len(page.select("#roi .roi-band")) == 3
+    assert _roi_basis_rows(page) == EXPECTED_ROI_BASIS_ROWS
     assert len(page.select("#roadmap-90-days li")) == 4
     assert len(page.select("#roadmap-years li")) == 3
     assert page.select_one("#risks li")
@@ -351,6 +528,8 @@ def test_pdf_uses_the_same_snapshot_and_a_trusted_local_base_url(
     assert pdf_page.select_one("#readiness-scores").get_text(
         " ", strip=True
     ) == browser_page.select_one("#readiness-scores").get_text(" ", strip=True)
+    assert _roi_basis_rows(pdf_page) == EXPECTED_ROI_BASIS_ROWS
+    assert _roi_basis_rows(pdf_page) == _roi_basis_rows(browser_page)
 
 
 def test_renderer_failure_is_safe_and_keeps_report_and_session(

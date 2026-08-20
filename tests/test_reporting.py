@@ -73,6 +73,33 @@ def scores():
 
 
 @pytest.fixture()
+def roi_option_ranges():
+    return {
+        "headcount": {"6_20": (Decimal("6"), Decimal("13"), Decimal("20"))},
+        "monthly_hours": {
+            "20_80": (Decimal("20"), Decimal("50"), Decimal("80"))
+        },
+        "monthly_cost": {
+            "8000_15000": (
+                Decimal("8000"),
+                Decimal("11500"),
+                Decimal("15000"),
+            )
+        },
+        "loss_factor": {
+            "normal": (Decimal("0.05"), Decimal("0.10"), Decimal("0.15"))
+        },
+        "budget": {
+            "200000_500000": (
+                Decimal("200000"),
+                Decimal("350000"),
+                Decimal("500000"),
+            )
+        },
+    }
+
+
+@pytest.fixture()
 def match():
     scenario = Scenario(
         code="mfg_operations_reporting",
@@ -141,9 +168,11 @@ def roi():
 
 
 def test_report_snapshot_contains_required_sections_and_no_contact_pii(
-    catalog, profile, scores, match, roi
+    catalog, profile, scores, match, roi, roi_option_ranges
 ):
-    snapshot = build_report_snapshot(profile, scores, (match,), roi, catalog)
+    snapshot = build_report_snapshot(
+        profile, scores, (match,), roi, catalog, roi_option_ranges
+    )
 
     assert snapshot["schema_version"] == "2.0"
     assert snapshot["rule_version"] == "v2.0-2026-08-19"
@@ -170,9 +199,11 @@ def test_report_snapshot_contains_required_sections_and_no_contact_pii(
 
 
 def test_report_snapshot_captures_controlled_reasons_risks_packages_and_calculation_basis(
-    catalog, profile, scores, match, roi
+    catalog, profile, scores, match, roi, roi_option_ranges
 ):
-    snapshot = build_report_snapshot(profile, scores, (match,), roi, catalog)
+    snapshot = build_report_snapshot(
+        profile, scores, (match,), roi, catalog, roi_option_ranges
+    )
 
     assert snapshot["scores"]["strongest"] == {
         "dimension": "business_value",
@@ -216,7 +247,19 @@ def test_report_snapshot_captures_controlled_reasons_risks_packages_and_calculat
             "loss_improvement": ["0.05", "0.12", "0.20"],
             "annual_support_rate": ["0.10", "0.12", "0.15"],
         },
-        "selected_roi_bands": ["conservative", "midpoint", "ideal"],
+        "selected_roi_bands": {
+            "headcount": {"low": "6", "mid": "13", "high": "20"},
+            "monthly_hours": {"low": "20", "mid": "50", "high": "80"},
+            "monthly_cost": {
+                "low": "8000", "mid": "11500", "high": "15000",
+            },
+            "loss_factor": {
+                "low": "0.05", "mid": "0.10", "high": "0.15",
+            },
+            "budget": {
+                "low": "200000", "mid": "350000", "high": "500000",
+            },
+        },
     }
     assert snapshot["roi"]["midpoint"]["annual_savings"] == "50000.00"
     assert snapshot["roi"]["midpoint"]["payback_months"] == "57.6"
@@ -232,7 +275,7 @@ def test_report_snapshot_captures_controlled_reasons_risks_packages_and_calculat
     ],
 )
 def test_report_snapshot_uses_exact_maturity_specific_year_one_roadmap(
-    catalog, profile, scores, match, roi, maturity, year_one
+    catalog, profile, scores, match, roi, roi_option_ranges, maturity, year_one
 ):
     maturity_scores = ScoreResult(
         dimension_scores=scores.dimension_scores,
@@ -242,7 +285,9 @@ def test_report_snapshot_uses_exact_maturity_specific_year_one_roadmap(
         weakest_dimension=scores.weakest_dimension,
     )
 
-    snapshot = build_report_snapshot(profile, maturity_scores, (match,), roi, catalog)
+    snapshot = build_report_snapshot(
+        profile, maturity_scores, (match,), roi, catalog, roi_option_ranges
+    )
 
     assert snapshot["roadmap_years_1_3"] == [
         {"year": 1, "action": year_one},
@@ -256,10 +301,14 @@ def test_report_snapshot_uses_exact_maturity_specific_year_one_roadmap(
 
 
 def test_report_snapshot_is_deterministic_and_not_affected_by_later_input_mutation(
-    catalog, profile, scores, match, roi
+    catalog, profile, scores, match, roi, roi_option_ranges
 ):
-    first = build_report_snapshot(profile, scores, (match,), roi, catalog)
-    second = build_report_snapshot(profile, scores, (match,), roi, catalog)
+    first = build_report_snapshot(
+        profile, scores, (match,), roi, catalog, roi_option_ranges
+    )
+    second = build_report_snapshot(
+        profile, scores, (match,), roi, catalog, roi_option_ranges
+    )
     profile.roi_choices["budget"] = "under_50000"
     match.components["pain"] = 0
 

@@ -59,7 +59,7 @@ def complete_assessment(request, identity_hash):
                 primary.service,
             )
             report_snapshot = build_report_snapshot(
-                request.profile, scores, matches, roi, catalog
+                request.profile, scores, matches, roi, catalog, ranges
             )
             _assert_private_report(report_snapshot)
         except ValidationError:

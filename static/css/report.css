@@ -347,6 +347,38 @@
   font-size: 13px;
 }
 
+.roi-basis-table-wrap {
+  margin: 18px 0;
+  overflow-x: auto;
+}
+
+.roi-basis-table-wrap table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.roi-basis-table-wrap caption {
+  margin-bottom: 10px;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+}
+
+.roi-basis-table-wrap th,
+.roi-basis-table-wrap td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-light);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.roi-basis-table-wrap thead th {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .roadmap-grid > div {
   padding: 24px;
   background: var(--bg-gray);

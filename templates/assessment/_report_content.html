@@ -140,9 +140,34 @@
       </article>
       {% endfor %}
     </div>
-    <div class="calculation-basis">
+    <div id="calculation-basis" class="calculation-basis">
       <h3>测算依据</h3>
       <p>主场景：{{ scenario_labels.get(snapshot.calculation_basis.selected_scenario, snapshot.calculation_basis.selected_scenario) }}</p>
+      <div class="roi-basis-table-wrap">
+        <table>
+          <caption>所选 ROI 输入区间与三档数值依据</caption>
+          <thead>
+            <tr>
+              <th scope="col">输入项</th>
+              <th scope="col">所选区间</th>
+              <th scope="col">下限</th>
+              <th scope="col">中位数</th>
+              <th scope="col">上限</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in roi_choice_rows %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              <td>{{ row.selection }}</td>
+              <td>{{ row.low }}</td>
+              <td>{{ row.mid }}</td>
+              <td>{{ row.high }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       <p>效率系数：{{ snapshot.calculation_basis.coefficients.efficiency | join(' / ') }}；损耗改善系数：{{ snapshot.calculation_basis.coefficients.loss_improvement | join(' / ') }}；持续服务系数：{{ snapshot.calculation_basis.coefficients.annual_support_rate | join(' / ') }}</p>
     </div>
   </section>

@@ -1,6 +1,6 @@
 """Public V2 assessment configuration, preview, and completion APIs."""
 
-from decimal import DecimalException
+from decimal import Decimal, DecimalException
 import hashlib
 import json
 from math import cos, pi, sin
@@ -92,6 +92,54 @@ ROI_BANDS = (
     ("conservative", "保守"),
     ("midpoint", "中位"),
     ("ideal", "理想"),
+)
+
+ROI_INPUT_FIELDS = (
+    (
+        "headcount",
+        "参与人数",
+        {
+            "1_5": "1—5 人",
+            "6_20": "6—20 人",
+            "21_50": "21—50 人",
+            "50_plus": "50 人以上",
+        },
+    ),
+    (
+        "monthly_hours",
+        "每人每月耗时",
+        {
+            "under_20": "20 小时内",
+            "20_80": "20—80 小时",
+            "80_160": "80—160 小时",
+            "160_plus": "160 小时以上",
+        },
+    ),
+    (
+        "monthly_cost",
+        "人均月综合成本",
+        {
+            "under_8000": "8,000 元内",
+            "8000_15000": "8,000—15,000 元",
+            "15000_30000": "15,000—30,000 元",
+            "30000_plus": "30,000 元以上",
+        },
+    ),
+    (
+        "loss_factor",
+        "返工或损耗程度",
+        {"rare": "很少", "normal": "一般", "high": "较高", "severe": "严重"},
+    ),
+    (
+        "budget",
+        "可接受投入",
+        {
+            "under_50000": "5 万元内",
+            "50000_200000": "5—20 万元",
+            "200000_500000": "20—50 万元",
+            "500000_plus": "50 万元以上",
+        },
+    ),
 )
 
 
@@ -324,8 +372,36 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
         "maturity_label": MATURITY_LABELS[scores["maturity_code"]],
         "scenario_labels": SCENARIO_LABELS,
         "roi_bands": ROI_BANDS,
+        "roi_choice_rows": _roi_choice_rows(snapshot["calculation_basis"]),
         "pdf_mode": pdf_mode,
     }
+
+
+def _roi_choice_rows(calculation_basis):
+    choices = calculation_basis["selected_roi_choices"]
+    bands = calculation_basis["selected_roi_bands"]
+    return [
+        {
+            "label": label,
+            "selection": descriptions[choices[group]],
+            "low": _format_roi_input(group, bands[group]["low"]),
+            "mid": _format_roi_input(group, bands[group]["mid"]),
+            "high": _format_roi_input(group, bands[group]["high"]),
+        }
+        for group, label, descriptions in ROI_INPUT_FIELDS
+    ]
+
+
+def _format_roi_input(group, value):
+    number = Decimal(value)
+    if group == "loss_factor":
+        return f"{format((number * 100).normalize(), 'f')}%"
+    formatted = f"{number:,.0f}"
+    if group == "headcount":
+        return f"{formatted} 人"
+    if group == "monthly_hours":
+        return f"{formatted} 小时"
+    return f"¥{formatted}"
 
 
 def _radar_context(dimension_rows):

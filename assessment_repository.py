@@ -10,6 +10,19 @@ from assessment.contracts import (
     Scenario,
     ServicePackage,
 )
+from assessment.matching import COMPONENT_MAX, REASON_TEMPLATES
+from assessment.reporting import DISCLAIMER, RISK_EXPLANATIONS, ROI_CHOICE_ORDER
+from assessment.scoring import maturity_for_score
+from assessment.seed import load_assessment_manifest, load_core_catalog_manifest
+from assessment_validation import (
+    BRANCH_CODES,
+    COMPANY_SIZE_CODES,
+    FROZEN_SCENARIO_RULES,
+    QUESTION_CODES,
+    REFERENCE_LINES,
+    ROI_OPTION_CODES,
+    SCENARIO_CODES,
+)
 from models import get_db
 
 
@@ -22,7 +35,7 @@ DIMENSIONS = (
     "delivery",
 )
 DEFAULT_VERSION_CODE = "v2.0-2026-08-19"
-REPORT_MATURITY_CODES = frozenset({"explore", "pilot", "scale", "collaborate"})
+MAX_REPORT_SNAPSHOT_BYTES = 128 * 1024
 PRIVATE_REPORT_KEYS = frozenset(
     {
         "company",
@@ -37,6 +50,46 @@ PRIVATE_REPORT_KEYS = frozenset(
         "wechat",
     }
 )
+ANSWER_OPTION_CODES = frozenset({"level_0", "level_1", "level_2", "level_3"})
+REPORT_SNAPSHOT_KEYS = frozenset(
+    {
+        "schema_version",
+        "rule_version",
+        "assessment",
+        "scores",
+        "recommendations",
+        "roi",
+        "calculation_basis",
+        "roadmap_90_days",
+        "roadmap_years_1_3",
+        "disclaimer",
+    }
+)
+ROI_BAND_KEYS = frozenset(
+    {
+        "current_annual_cost",
+        "labor_savings",
+        "loss_savings",
+        "annual_savings",
+        "initial_investment",
+        "annual_support",
+        "payback_months",
+        "three_year_support",
+        "three_year_net",
+    }
+)
+_CORE_CATALOG_MANIFEST = load_core_catalog_manifest()
+_ASSESSMENT_MANIFEST = load_assessment_manifest()
+FROZEN_INDUSTRIES = {
+    industry["code"]: industry for industry in _CORE_CATALOG_MANIFEST["industries"]
+}
+FROZEN_SERVICES = {
+    service["code"]: service for service in _CORE_CATALOG_MANIFEST["services"]
+}
+FROZEN_SCENARIOS = {
+    scenario["code"]: scenario for scenario in _CORE_CATALOG_MANIFEST["scenarios"]
+}
+FROZEN_ROI_RANGES = _ASSESSMENT_MANIFEST["roi_ranges"]
 
 
 def load_published_catalog(branch_code: str) -> AssessmentCatalog:
@@ -356,45 +409,53 @@ def load_report_snapshot(assessment_id: int):
     db = get_db()
     try:
         row = db.execute(
-            "SELECT a.report_snapshot_json,a.branch_code,a.subbranch_code,"
+            "SELECT CASE WHEN length(CAST(a.report_snapshot_json AS BLOB))<=? "
+            "THEN a.report_snapshot_json END AS report_snapshot_json,"
+            "length(CAST(a.report_snapshot_json AS BLOB)) AS report_snapshot_bytes,"
+            "a.branch_code,a.subbranch_code,"
             "a.department_code,a.company_size_code,a.dimension_scores_json,"
             "a.overall_score,a.maturity_code,v.code AS rule_version_code "
             "FROM assessments a "
             "JOIN assessment_versions v ON v.id=a.rule_version_id "
             "WHERE a.id=? AND a.submission_key IS NOT NULL "
             "AND a.lead_id IS NOT NULL AND a.completed_at IS NOT NULL",
-            (assessment_id,),
+            (MAX_REPORT_SNAPSHOT_BYTES, assessment_id),
         ).fetchone()
-        if row is None or not isinstance(row["report_snapshot_json"], str):
+        if (
+            row is None
+            or row["report_snapshot_bytes"] is None
+            or row["report_snapshot_bytes"] > MAX_REPORT_SNAPSHOT_BYTES
+            or not isinstance(row["report_snapshot_json"], str)
+        ):
             return None
         try:
             snapshot = json.loads(row["report_snapshot_json"])
             stored_dimensions = json.loads(row["dimension_scores_json"])
-        except (json.JSONDecodeError, TypeError):
+            if not _valid_report_snapshot(snapshot):
+                return None
+            assessment = snapshot["assessment"]
+            scores = snapshot["scores"]
+            if snapshot["rule_version"] != row["rule_version_code"]:
+                return None
+            if any(
+                assessment[field] != row[field]
+                for field in (
+                    "branch_code",
+                    "subbranch_code",
+                    "department_code",
+                    "company_size_code",
+                )
+            ):
+                return None
+            if scores["dimension_scores"] != stored_dimensions:
+                return None
+            if scores["overall_score"] != row["overall_score"]:
+                return None
+            if scores["maturity_code"] != row["maturity_code"]:
+                return None
+            return snapshot
+        except (json.JSONDecodeError, ValueError, TypeError, RecursionError):
             return None
-        if not _valid_report_snapshot(snapshot):
-            return None
-        assessment = snapshot["assessment"]
-        scores = snapshot["scores"]
-        if snapshot["rule_version"] != row["rule_version_code"]:
-            return None
-        if any(
-            assessment[field] != row[field]
-            for field in (
-                "branch_code",
-                "subbranch_code",
-                "department_code",
-                "company_size_code",
-            )
-        ):
-            return None
-        if scores["dimension_scores"] != stored_dimensions:
-            return None
-        if scores["overall_score"] != row["overall_score"]:
-            return None
-        if scores["maturity_code"] != row["maturity_code"]:
-            return None
-        return snapshot
     finally:
         db.close()
 
@@ -517,68 +578,80 @@ def _json(value):
 def _valid_report_snapshot(snapshot) -> bool:
     if not isinstance(snapshot, dict) or _contains_private_report_key(snapshot):
         return False
-    required = {
-        "schema_version",
-        "rule_version",
-        "assessment",
-        "scores",
-        "recommendations",
-        "roi",
-        "calculation_basis",
-        "roadmap_90_days",
-        "roadmap_years_1_3",
-        "disclaimer",
-    }
-    if not required <= snapshot.keys():
+    if set(snapshot) != REPORT_SNAPSHOT_KEYS:
         return False
-    if snapshot["schema_version"] != "2.0":
+    if snapshot["schema_version"] != "2.0" or snapshot["rule_version"] != (
+        DEFAULT_VERSION_CODE
+    ):
         return False
-    if not _nonempty_text(snapshot["rule_version"]):
+    if snapshot["disclaimer"] != DISCLAIMER:
         return False
-    if not _nonempty_text(snapshot["disclaimer"]):
+    assessment = snapshot["assessment"]
+    scores = snapshot["scores"]
+    recommendations = snapshot["recommendations"]
+    if not _valid_report_assessment(assessment):
         return False
-    return all(
-        (
-            _valid_report_assessment(snapshot["assessment"]),
-            _valid_report_scores(snapshot["scores"]),
-            _valid_recommendations(snapshot["recommendations"]),
-            _valid_roi(snapshot["roi"]),
-            _valid_calculation_basis(snapshot["calculation_basis"]),
-            _valid_roadmap(snapshot["roadmap_90_days"], "days", 4),
-            _valid_roadmap(snapshot["roadmap_years_1_3"], "year", 3),
+    return (
+        _valid_report_scores(scores, assessment)
+        and _valid_recommendations(recommendations)
+        and _valid_roi(snapshot["roi"])
+        and _valid_calculation_basis(
+            snapshot["calculation_basis"], assessment, recommendations
         )
+        and _valid_roadmap(snapshot["roadmap_90_days"], "days", 4)
+        and _valid_roadmap(snapshot["roadmap_years_1_3"], "year", 3)
     )
 
 
 def _valid_report_assessment(value) -> bool:
-    if not isinstance(value, dict):
-        return False
-    required_text = (
+    if not isinstance(value, dict) or set(value) != {
         "branch_code",
         "subbranch_code",
         "department_code",
         "company_size_code",
-    )
+        "pain_codes",
+        "answers",
+        "roi_choices",
+    }:
+        return False
+    branch_code = value["branch_code"]
+    industry = FROZEN_INDUSTRIES.get(branch_code)
+    if industry is None:
+        return False
+    pain_codes = value["pain_codes"]
+    answers = value["answers"]
+    choices = value["roi_choices"]
     return (
-        all(_nonempty_text(value.get(field)) for field in required_text)
-        and isinstance(value.get("pain_codes"), list)
-        and 1 <= len(value["pain_codes"]) <= 3
-        and all(_nonempty_text(item) for item in value["pain_codes"])
-        and isinstance(value.get("answers"), dict)
+        branch_code in BRANCH_CODES
+        and value["subbranch_code"] in industry["subbranches"]
+        and value["department_code"] in industry["departments"]
+        and value["company_size_code"] in COMPANY_SIZE_CODES
+        and isinstance(pain_codes, list)
+        and 1 <= len(pain_codes) <= 3
+        and len(set(pain_codes)) == len(pain_codes)
+        and all(code in industry["pain_codes"] for code in pain_codes)
+        and isinstance(answers, dict)
+        and set(answers) == set(QUESTION_CODES)
+        and len(answers) == 12
+        and all(option in ANSWER_OPTION_CODES for option in answers.values())
+        and isinstance(choices, dict)
+        and set(choices) == set(ROI_OPTION_CODES)
+        and len(choices) == 5
         and all(
-            _nonempty_text(key) and _nonempty_text(item)
-            for key, item in value["answers"].items()
-        )
-        and isinstance(value.get("roi_choices"), dict)
-        and all(
-            _nonempty_text(key) and _nonempty_text(item)
-            for key, item in value["roi_choices"].items()
+            choices[group] in ROI_OPTION_CODES[group] for group in ROI_OPTION_CODES
         )
     )
 
 
-def _valid_report_scores(value) -> bool:
-    if not isinstance(value, dict):
+def _valid_report_scores(value, assessment) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "overall_score",
+        "maturity_code",
+        "dimension_scores",
+        "reference_line",
+        "strongest",
+        "weakest",
+    }:
         return False
     dimensions = value.get("dimension_scores")
     reference = value.get("reference_line")
@@ -589,10 +662,20 @@ def _valid_report_scores(value) -> bool:
     overall = value.get("overall_score")
     if type(overall) is not int or not 0 <= overall <= 100:
         return False
-    if value.get("maturity_code") not in REPORT_MATURITY_CODES:
+    if value.get("maturity_code") != maturity_for_score(overall):
         return False
-    return _valid_dimension_explanation(value.get("strongest")) and (
-        _valid_dimension_explanation(value.get("weakest"))
+    expected_reference = dict(
+        zip(DIMENSIONS, REFERENCE_LINES[assessment["branch_code"]])
+    )
+    if reference != expected_reference:
+        return False
+    strongest = value.get("strongest")
+    weakest = value.get("weakest")
+    return (
+        _valid_dimension_explanation(strongest)
+        and _valid_dimension_explanation(weakest)
+        and strongest["dimension"] == max(dimensions, key=dimensions.get)
+        and weakest["dimension"] == min(dimensions, key=dimensions.get)
     )
 
 
@@ -607,99 +690,129 @@ def _valid_dimension_values(value) -> bool:
 def _valid_dimension_explanation(value) -> bool:
     return (
         isinstance(value, dict)
-        and value.get("dimension") in DIMENSIONS
-        and _nonempty_text(value.get("explanation"))
+        and set(value) == {"dimension", "explanation"}
+        and value["dimension"] in DIMENSIONS
+        and _bounded_text(value["explanation"])
     )
 
 
 def _valid_recommendations(value) -> bool:
     if not isinstance(value, list) or not 1 <= len(value) <= 3:
         return False
-    return all(_valid_recommendation(item) for item in value)
+    if not all(_valid_recommendation(item) for item in value):
+        return False
+    scenario_codes = [item["scenario"]["code"] for item in value]
+    return len(set(scenario_codes)) == len(scenario_codes)
 
 
 def _valid_recommendation(value) -> bool:
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or set(value) != {
+        "scenario",
+        "match_score",
+        "components",
+        "reason_codes",
+        "reasons",
+        "risks",
+        "package",
+    }:
         return False
-    scenario = value.get("scenario")
-    package = value.get("package")
-    risks = value.get("risks")
-    match_score = value.get("match_score")
-    components = value.get("components")
-    reason_codes = value.get("reason_codes")
-    return (
-        isinstance(scenario, dict)
-        and _nonempty_text(scenario.get("code"))
-        and _nonempty_text(scenario.get("category_code"))
-        and scenario.get("integration_level") in {"low", "medium", "high"}
-        and _valid_week_range(scenario.get("delivery_weeks"))
-        and type(match_score) is int
+    scenario = value["scenario"]
+    package = value["package"]
+    risks = value["risks"]
+    match_score = value["match_score"]
+    components = value["components"]
+    reason_codes = value["reason_codes"]
+    if not isinstance(scenario, dict) or set(scenario) != {
+        "code",
+        "category_code",
+        "integration_level",
+        "delivery_weeks",
+    }:
+        return False
+    scenario_rule = FROZEN_SCENARIO_RULES.get(scenario["code"])
+    scenario_manifest = FROZEN_SCENARIOS.get(scenario["code"])
+    if scenario_rule is None or scenario_manifest is None:
+        return False
+    expected_weeks = {
+        "min": scenario_rule["weeks"][0],
+        "max": scenario_rule["weeks"][1],
+    }
+    if (
+        scenario["category_code"] != scenario_rule["category_code"]
+        or scenario["delivery_weeks"] != expected_weeks
+        or scenario["integration_level"] != scenario_manifest["integration_level"]
+    ):
+        return False
+    if not (
+        type(match_score) is int
         and 0 <= match_score <= 100
         and isinstance(components, dict)
-        and components
+        and set(components) == set(COMPONENT_MAX)
         and all(
-            _nonempty_text(key) and type(score) is int and score >= 0
-            for key, score in components.items()
+            type(components[name]) is int
+            and 0 <= components[name] <= maximum
+            for name, maximum in COMPONENT_MAX.items()
         )
-        and isinstance(reason_codes, list)
-        and reason_codes
-        and all(_nonempty_text(item) for item in reason_codes)
-        and isinstance(value.get("reasons"), list)
-        and value["reasons"]
-        and all(_nonempty_text(item) for item in value["reasons"])
-        and len(reason_codes) == len(value["reasons"])
-        and isinstance(risks, list)
-        and len(risks) >= 1
-        and all(
-            isinstance(item, dict)
-            and _nonempty_text(item.get("code"))
-            and _nonempty_text(item.get("explanation"))
-            for item in risks
-        )
-        and _valid_package(package)
+        and sum(components.values()) == match_score
+    ):
+        return False
+    if not (
+        isinstance(reason_codes, list)
+        and 1 <= len(reason_codes) <= len(REASON_TEMPLATES)
+        and len(set(reason_codes)) == len(reason_codes)
+        and all(code in REASON_TEMPLATES for code in reason_codes)
+        and value["reasons"] == [REASON_TEMPLATES[code] for code in reason_codes]
+    ):
+        return False
+    expected_risks = [
+        {"code": code, "explanation": RISK_EXPLANATIONS[code]}
+        for code in scenario_rule["risk_codes"]
+    ]
+    return (
+        isinstance(risks, list)
+        and risks == expected_risks
+        and _valid_package(package, scenario_rule["service_code"])
     )
 
 
-def _valid_package(value) -> bool:
-    if not isinstance(value, dict):
-        return False
-    list_fields = (
+def _valid_package(value, expected_service_code) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "code",
+        "category",
+        "public_name",
+        "budget_range",
+        "delivery_weeks",
         "deliverables",
         "implementation_steps",
         "prerequisites",
         "not_included",
         "acceptance",
-    )
-    budget = value.get("budget_range")
-    budget_min = _decimal(budget.get("min")) if isinstance(budget, dict) else None
-    budget_max = _decimal(budget.get("max")) if isinstance(budget, dict) else None
+        "support_days",
+    }:
+        return False
+    service = FROZEN_SERVICES.get(expected_service_code)
+    if service is None or value["code"] != expected_service_code:
+        return False
+    budget = value["budget_range"]
+    expected_budget = {
+        "min": _decimal(service["budget"][0]),
+        "max": _decimal(service["budget"][1]),
+    }
+    expected_weeks = {"min": service["weeks"][0], "max": service["weeks"][1]}
     return (
-        all(
-            _nonempty_text(value.get(field))
-            for field in ("code", "category", "public_name")
-        )
+        value["category"] == service["category"]
+        and value["public_name"] == service["public_name"]
         and isinstance(budget, dict)
-        and budget_min is not None
-        and budget_max is not None
-        and Decimal(0) <= budget_min <= budget_max
-        and _valid_week_range(value.get("delivery_weeks"))
-        and all(
-            isinstance(value.get(field), list)
-            and value[field]
-            and all(_nonempty_text(item) for item in value[field])
-            for field in list_fields
-        )
-        and type(value.get("support_days")) is int
-        and value["support_days"] >= 0
-    )
-
-
-def _valid_week_range(value) -> bool:
-    return (
-        isinstance(value, dict)
-        and type(value.get("min")) is int
-        and type(value.get("max")) is int
-        and 0 < value["min"] <= value["max"]
+        and set(budget) == {"min", "max"}
+        and {name: _decimal(amount) for name, amount in budget.items()}
+        == expected_budget
+        and value["delivery_weeks"] == expected_weeks
+        and value["deliverables"] == service["deliverables"]
+        and value["implementation_steps"] == service["implementation_steps"]
+        and value["prerequisites"] == service["prerequisites"]
+        and value["not_included"] == service["not_included"]
+        and value["acceptance"] == service["acceptance"]
+        and value["support_days"] == service["support_days"]
     )
 
 
@@ -710,7 +823,7 @@ def _valid_roi(value) -> bool:
         "ideal",
     }:
         return False
-    required_money = (
+    nonnegative_money = (
         "current_annual_cost",
         "labor_savings",
         "loss_savings",
@@ -718,15 +831,18 @@ def _valid_roi(value) -> bool:
         "initial_investment",
         "annual_support",
         "three_year_support",
-        "three_year_net",
     )
     for band in value.values():
-        if not isinstance(band, dict):
+        if not isinstance(band, dict) or set(band) != ROI_BAND_KEYS:
             return False
-        if not all(_finite_decimal(band.get(field)) for field in required_money):
+        if not all(
+            _nonnegative_decimal(band[field]) for field in nonnegative_money
+        ):
             return False
-        payback = band.get("payback_months")
-        if payback is not None and not _finite_decimal(payback):
+        if not _finite_decimal(band["three_year_net"]):
+            return False
+        payback = band["payback_months"]
+        if payback is not None and not _positive_decimal(payback):
             return False
     return True
 
@@ -737,7 +853,7 @@ def _valid_roadmap(value, position_key, expected_length) -> bool:
         and len(value) == expected_length
         and all(
             isinstance(item, dict)
-            and position_key in item
+            and set(item) == {position_key, "action"}
             and _nonempty_text(item.get("action"))
             for item in value
         )
@@ -753,38 +869,71 @@ def _valid_roadmap(value, position_key, expected_length) -> bool:
     return [item[position_key] for item in value] == [1, 2, 3]
 
 
-def _valid_calculation_basis(value) -> bool:
-    if not isinstance(value, dict):
+def _valid_calculation_basis(value, assessment, recommendations) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "selected_scenario",
+        "selected_roi_choices",
+        "coefficients",
+        "selected_roi_bands",
+    }:
         return False
     coefficients = value.get("coefficients")
     choices = value.get("selected_roi_choices")
+    selected_bands = value.get("selected_roi_bands")
     if not isinstance(coefficients, dict) or set(coefficients) != {
         "efficiency",
         "loss_improvement",
         "annual_support_rate",
     }:
         return False
-    return (
-        _nonempty_text(value.get("selected_scenario"))
-        and isinstance(choices, dict)
-        and choices
-        and all(
-            _nonempty_text(key) and _nonempty_text(item)
-            for key, item in choices.items()
-        )
-        and all(
-            isinstance(coefficients[name], list)
-            and len(coefficients[name]) == 3
-            and all(_finite_decimal(item) for item in coefficients[name])
-            for name in coefficients
-        )
-        and value.get("selected_roi_bands")
-        == ["conservative", "midpoint", "ideal"]
-    )
+    selected_scenario = value["selected_scenario"]
+    if (
+        selected_scenario not in SCENARIO_CODES
+        or selected_scenario != recommendations[0]["scenario"]["code"]
+        or choices != assessment["roi_choices"]
+        or set(choices) != set(ROI_CHOICE_ORDER)
+        or len(choices) != 5
+    ):
+        return False
+    scenario = FROZEN_SCENARIOS[selected_scenario]
+    for name in coefficients:
+        values = coefficients[name]
+        if not isinstance(values, list) or len(values) != 3:
+            return False
+        expected = [_decimal(item) for item in scenario[name]]
+        if any(_decimal(item) is None for item in values):
+            return False
+        if [_decimal(item) for item in values] != expected:
+            return False
+    if not isinstance(selected_bands, dict) or set(selected_bands) != set(
+        ROI_CHOICE_ORDER
+    ):
+        return False
+    for group in ROI_CHOICE_ORDER:
+        band = selected_bands[group]
+        if not isinstance(band, dict) or set(band) != {"low", "mid", "high"}:
+            return False
+        values = [_decimal(band[name]) for name in ("low", "mid", "high")]
+        expected = [
+            _decimal(item) for item in FROZEN_ROI_RANGES[group][choices[group]]
+        ]
+        if any(item is None for item in values) or values != expected:
+            return False
+    return True
 
 
 def _finite_decimal(value) -> bool:
     return _decimal(value) is not None
+
+
+def _nonnegative_decimal(value) -> bool:
+    parsed = _decimal(value)
+    return parsed is not None and parsed >= Decimal(0)
+
+
+def _positive_decimal(value) -> bool:
+    parsed = _decimal(value)
+    return parsed is not None and parsed > Decimal(0)
 
 
 def _decimal(value):
@@ -807,3 +956,7 @@ def _contains_private_report_key(value) -> bool:
 
 def _nonempty_text(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _bounded_text(value, maximum=4_000) -> bool:
+    return _nonempty_text(value) and len(value) <= maximum

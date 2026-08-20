@@ -23,6 +23,14 @@ DIMENSION_ORDER = (
     "delivery",
 )
 
+ROI_CHOICE_ORDER = (
+    "headcount",
+    "monthly_hours",
+    "monthly_cost",
+    "loss_factor",
+    "budget",
+)
+
 DIMENSION_EXPLANATIONS = {
     "business_value": "业务价值维度得分较高，建议将已识别痛点作为试点收益和验收指标的起点。",
     "process": "流程维度得分较高，建议以现有 SOP 和稳定环节界定试点范围。",
@@ -104,6 +112,7 @@ def build_report_snapshot(
     matches: tuple[ScenarioMatch, ...],
     roi: RoiResult,
     catalog: AssessmentCatalog,
+    roi_option_ranges,
 ) -> dict[str, object]:
     """Build the complete stored report record without persistence or generated prose."""
     reference_line = catalog.reference_lines.get(profile.branch_code)
@@ -150,7 +159,9 @@ def build_report_snapshot(
             band.band_code: _roi_band(band)
             for band in (roi.conservative, roi.midpoint, roi.ideal)
         },
-        "calculation_basis": _calculation_basis(profile, selected_matches, roi),
+        "calculation_basis": _calculation_basis(
+            profile, selected_matches, roi, roi_option_ranges
+        ),
         "roadmap_90_days": [
             {"days": days, "action": action} for days, action in ROADMAP_90
         ],
@@ -256,21 +267,35 @@ def _calculation_basis(
     profile: AssessmentProfile,
     matches: tuple[ScenarioMatch, ...],
     roi: RoiResult,
+    roi_option_ranges,
 ) -> dict[str, object]:
     primary = matches[0].scenario if matches else None
+    try:
+        selected_roi_bands = {
+            group: {
+                name: _decimal_string(value)
+                for name, value in zip(
+                    ("low", "mid", "high"),
+                    roi_option_ranges[group][profile.roi_choices[group]],
+                )
+            }
+            for group in ROI_CHOICE_ORDER
+        }
+    except (KeyError, TypeError):
+        raise AssessmentInputError("ROI calculation basis is incomplete") from None
+    if any(len(values) != 3 for values in selected_roi_bands.values()):
+        raise AssessmentInputError("ROI calculation basis is incomplete")
     return {
-        "selected_roi_choices": dict(profile.roi_choices),
+        "selected_roi_choices": {
+            group: profile.roi_choices[group] for group in ROI_CHOICE_ORDER
+        },
         "selected_scenario": None if primary is None else primary.code,
         "coefficients": {
             "efficiency": [] if primary is None else [_decimal_string(value) for value in primary.efficiency],
             "loss_improvement": [] if primary is None else [_decimal_string(value) for value in primary.loss_improvement],
             "annual_support_rate": [] if primary is None else [_decimal_string(value) for value in primary.annual_support_rate],
         },
-        "selected_roi_bands": [
-            roi.conservative.band_code,
-            roi.midpoint.band_code,
-            roi.ideal.band_code,
-        ],
+        "selected_roi_bands": selected_roi_bands,
     }
 
 
