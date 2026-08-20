@@ -23,7 +23,7 @@ from flask import (
 import assessment_repository
 import report_pdf
 from assessment.contracts import AssessmentInputError
-from assessment.reporting import RISK_LABELS
+from assessment.reporting import RISK_LABELS, public_service_not_included
 from assessment.scoring import score_assessment
 from assessment_completion_service import complete_assessment
 from assessment_validation import (
@@ -392,6 +392,7 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
         "roi_choice_rows": _roi_choice_rows(snapshot["calculation_basis"]),
         "format_roi_currency": _format_roi_currency,
         "format_budget_currency": _format_budget_currency,
+        "public_service_not_included": public_service_not_included,
         "pdf_mode": pdf_mode,
     }
 

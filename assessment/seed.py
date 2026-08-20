@@ -6,6 +6,39 @@ from pathlib import Path
 
 SEED_DATA_DIR = Path(__file__).resolve().parents[1] / "seed_data"
 
+LEGACY_SERVICE_NOT_INCLUDED = {
+    "foundation_workshop": (
+        "software development",
+        "system integration",
+        "data cleansing execution",
+    ),
+    "knowledge_assistant_pilot": (
+        "source-document creation",
+        "unrestricted internet answers",
+        "custom core-system integration",
+    ),
+    "customer_growth_pilot": (
+        "media spend",
+        "guaranteed conversion results",
+        "unapproved automated outreach",
+    ),
+    "workflow_automation": (
+        "unstable processes",
+        "unlisted system interfaces",
+        "removal of manual fallback",
+    ),
+    "data_insight": (
+        "source-system repair",
+        "historical data reconstruction",
+        "unagreed predictive models",
+    ),
+    "industry_integration": (
+        "unlisted connectors",
+        "production infrastructure procurement",
+        "guaranteed business outcomes",
+    ),
+}
+
 
 def _load_json(name):
     return json.loads((SEED_DATA_DIR / name).read_text(encoding="utf-8"))
@@ -26,20 +59,21 @@ def _json_tuple(values):
 
 
 def seed_v2_defaults(connection):
-    """Insert the one published catalog version, returning if it already exists."""
+    """Insert V2 defaults and reconcile its exact pre-launch exclusion copy."""
     if connection.execute(
         "SELECT 1 FROM sqlite_master "
         "WHERE type='table' AND name='assessment_versions'"
     ).fetchone() is None:
         return
     assessment = load_assessment_manifest()
+    core = load_core_catalog_manifest()
     version = assessment["version"]
     if connection.execute(
         "SELECT 1 FROM assessment_versions WHERE code=?", (version["code"],)
     ).fetchone():
+        _reconcile_legacy_service_exclusions(connection, core)
         return
 
-    core = load_core_catalog_manifest()
     industry_ids = _seed_industries(connection, core["industries"])
     _seed_company_sizes(connection, core["company_sizes"])
     version_id = connection.execute(
@@ -58,6 +92,35 @@ def seed_v2_defaults(connection):
     _seed_assessment_rules(connection, assessment, version_id, industry_ids)
     service_ids = _seed_services(connection, core)
     _seed_scenarios(connection, core["scenarios"], version_id, industry_ids, service_ids)
+
+
+def _reconcile_legacy_service_exclusions(connection, core):
+    current_by_code = {
+        service["code"]: service["not_included"] for service in core["services"]
+    }
+    for code, legacy_values in LEGACY_SERVICE_NOT_INCLUDED.items():
+        row = connection.execute(
+            "SELECT id,not_included_json FROM services "
+            "WHERE code=? AND status='published'",
+            (code,),
+        ).fetchone()
+        if row is None or not isinstance(row["not_included_json"], str):
+            continue
+        try:
+            stored_values = json.loads(row["not_included_json"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(stored_values, list) or tuple(stored_values) != legacy_values:
+            continue
+        connection.execute(
+            "UPDATE services SET not_included_json=? "
+            "WHERE id=? AND status='published' AND not_included_json=?",
+            (
+                _json_tuple(current_by_code[code]),
+                row["id"],
+                row["not_included_json"],
+            ),
+        )
 
 
 def _seed_industries(connection, industries):

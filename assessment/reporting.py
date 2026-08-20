@@ -12,6 +12,7 @@ from .contracts import (
     ScoreResult,
 )
 from .matching import REASON_TEMPLATES
+from .seed import LEGACY_SERVICE_NOT_INCLUDED, load_core_catalog_manifest
 
 
 DIMENSION_ORDER = (
@@ -136,6 +137,20 @@ DISCLAIMER = (
     "本报告由平台规则自动生成，仅用于初步评估和项目沟通，"
     "不构成收益、投资、法律或合规承诺。"
 )
+
+_PUBLIC_SERVICE_NOT_INCLUDED = {
+    service["code"]: tuple(service["not_included"])
+    for service in load_core_catalog_manifest()["services"]
+}
+
+
+def public_service_not_included(package):
+    """Return Chinese display copy without changing a persisted legacy snapshot."""
+    code = package["code"]
+    stored = tuple(package["not_included"])
+    if stored == LEGACY_SERVICE_NOT_INCLUDED.get(code):
+        return _PUBLIC_SERVICE_NOT_INCLUDED[code]
+    return stored
 
 
 def build_report_snapshot(

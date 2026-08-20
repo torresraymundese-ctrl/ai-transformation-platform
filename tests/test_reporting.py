@@ -4,6 +4,12 @@ from decimal import Decimal
 import pytest
 
 import assessment.reporting as reporting
+from assessment.seed import load_core_catalog_manifest
+from blueprints.assessment import (
+    INTEGRATION_LABELS,
+    SCENARIO_LABELS,
+    SERVICE_CATEGORY_LABELS,
+)
 from assessment.contracts import (
     AssessmentCatalog,
     AssessmentProfile,
@@ -60,7 +66,28 @@ EXPECTED_RISK_LABELS = {
 
 
 def test_every_frozen_risk_has_an_exact_chinese_public_label():
+    manifest = load_core_catalog_manifest()
+    frozen_risk_codes = {
+        code for scenario in manifest["scenarios"] for code in scenario["risk_codes"]
+    }
+    assert set(EXPECTED_RISK_LABELS) == frozen_risk_codes
     assert getattr(reporting, "RISK_LABELS", None) == EXPECTED_RISK_LABELS
+
+
+def test_every_frozen_public_code_family_has_complete_label_coverage():
+    manifest = load_core_catalog_manifest()
+
+    assert set(INTEGRATION_LABELS) == {
+        scenario["integration_level"] for scenario in manifest["scenarios"]
+    }
+    assert set(SERVICE_CATEGORY_LABELS) == {
+        service["category"] for service in manifest["services"]
+    }
+    assert set(SCENARIO_LABELS) == {
+        scenario["code"] for scenario in manifest["scenarios"]
+    }
+    for labels in (INTEGRATION_LABELS, SERVICE_CATEGORY_LABELS, SCENARIO_LABELS):
+        assert all(label and label != code for code, label in labels.items())
 
 
 @pytest.fixture()

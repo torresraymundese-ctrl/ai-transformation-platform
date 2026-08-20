@@ -1,5 +1,6 @@
 import builtins
 from copy import deepcopy
+import hashlib
 import importlib
 from itertools import product
 import json
@@ -16,6 +17,7 @@ from assessment.reporting import (
     YEAR_1_BY_MATURITY,
 )
 from assessment.scoring import DIMENSION_ORDER, score_assessment
+from assessment.seed import load_core_catalog_manifest
 import models
 import pytest
 import report_pdf
@@ -49,6 +51,39 @@ PRIVATE_VALUES = (
     "private@example.invalid",
     "private-wechat",
 )
+
+LEGACY_SERVICE_EXCLUSIONS = {
+    "foundation_workshop": (
+        "software development",
+        "system integration",
+        "data cleansing execution",
+    ),
+    "knowledge_assistant_pilot": (
+        "source-document creation",
+        "unrestricted internet answers",
+        "custom core-system integration",
+    ),
+    "customer_growth_pilot": (
+        "media spend",
+        "guaranteed conversion results",
+        "unapproved automated outreach",
+    ),
+    "workflow_automation": (
+        "unstable processes",
+        "unlisted system interfaces",
+        "removal of manual fallback",
+    ),
+    "data_insight": (
+        "source-system repair",
+        "historical data reconstruction",
+        "unagreed predictive models",
+    ),
+    "industry_integration": (
+        "unlisted connectors",
+        "production infrastructure procurement",
+        "guaranteed business outcomes",
+    ),
+}
 
 
 def _complete_assessment(client, answers=None):
@@ -695,6 +730,127 @@ def test_pdf_uses_the_same_snapshot_and_a_trusted_local_base_url(
     assert _roi_basis_rows(pdf_page) == _roi_basis_rows(browser_page)
 
 
+def test_reinit_reconciles_stale_catalog_and_preserves_legacy_snapshot_digest(
+    completed_assessment, client, monkeypatch
+):
+    manifest = load_core_catalog_manifest()
+    frozen_services = {service["code"]: service for service in manifest["services"]}
+    legacy_snapshot = _snapshot(completed_assessment)
+    for recommendation in legacy_snapshot["recommendations"]:
+        code = recommendation["package"]["code"]
+        recommendation["package"]["not_included"] = list(
+            LEGACY_SERVICE_EXCLUSIONS[code]
+        )
+    _replace_snapshot(completed_assessment, legacy_snapshot)
+    raw_legacy_snapshot = _raw_snapshot(completed_assessment)
+    legacy_digest = hashlib.sha256(
+        json.dumps(
+            legacy_snapshot,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    db = models.get_db()
+    try:
+        db.executemany(
+            "UPDATE services SET not_included_json=? "
+            "WHERE code=? AND status='published'",
+            [
+                (
+                    json.dumps(values, ensure_ascii=False, separators=(",", ":")),
+                    code,
+                )
+                for code, values in LEGACY_SERVICE_EXCLUSIONS.items()
+            ],
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    models.init_db()
+    config = client.get("/api/v2/assessment/config/manufacturing")
+    new_assessment = _complete_assessment(client)
+    captured = {}
+
+    def render(html, base_url):
+        captured["html"] = html
+        return b"%PDF-test"
+
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    html = client.get(f"/assessment/report/{completed_assessment}")
+    pdf = client.get(f"/assessment/report/{completed_assessment}/pdf")
+    fresh_html = client.get(f"/assessment/report/{new_assessment}")
+
+    assert config.status_code == 200
+    assert html.status_code == 200
+    assert pdf.status_code == 200
+    assert fresh_html.status_code == 200
+    pages = (
+        BeautifulSoup(html.data, "html.parser"),
+        BeautifulSoup(captured["html"], "html.parser"),
+        BeautifulSoup(fresh_html.data, "html.parser"),
+    )
+    legacy_phrases = {
+        phrase for values in LEGACY_SERVICE_EXCLUSIONS.values() for phrase in values
+    }
+    for page in pages:
+        visible = page.get_text(" ", strip=True)
+        assert all(phrase not in visible for phrase in legacy_phrases)
+    for recommendation in legacy_snapshot["recommendations"]:
+        code = recommendation["package"]["code"]
+        for page in pages[:2]:
+            visible = page.get_text(" ", strip=True)
+            assert all(
+                phrase in visible
+                for phrase in frozen_services[code]["not_included"]
+            )
+    for page in pages[:2]:
+        assert page.select_one("main.report-page")["data-snapshot-sha256"] == (
+            legacy_digest
+        )
+    assert _raw_snapshot(completed_assessment) == raw_legacy_snapshot
+
+    db = models.get_db()
+    try:
+        stored_exclusions = {
+            row["code"]: json.loads(row["not_included_json"])
+            for row in db.execute(
+                "SELECT code,not_included_json FROM services "
+                "WHERE code IN ({})".format(
+                    ",".join("?" for _ in frozen_services)
+                ),
+                tuple(frozen_services),
+            )
+        }
+    finally:
+        db.close()
+    assert stored_exclusions == {
+        code: service["not_included"] for code, service in frozen_services.items()
+    }
+
+
+def test_unknown_custom_service_snapshot_remains_private_404(
+    completed_assessment, client, monkeypatch
+):
+    snapshot = _snapshot(completed_assessment)
+    snapshot["recommendations"][0]["package"]["not_included"] = [
+        "客户自定义边界"
+    ]
+    _replace_snapshot(completed_assessment, snapshot)
+
+    def unexpected_render(*args, **kwargs):
+        pytest.fail("custom snapshot reached the PDF renderer")
+
+    monkeypatch.setattr(report_pdf, "render_pdf", unexpected_render)
+
+    for suffix in ("", "/pdf"):
+        response = client.get(f"/assessment/report/{completed_assessment}{suffix}")
+        assert response.status_code == 404
+        _assert_private_cache_headers(response)
+
+
 def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
     completed_assessment, client, monkeypatch
 ):
@@ -798,6 +954,9 @@ def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
         r"\.service-package\s+header\s*\{[^}]*break-after:\s*avoid",
         pdf_css,
     )
+    service_rule = re.search(r"\.service-package\s*\{([^}]*)\}", pdf_css)
+    assert service_rule is not None
+    assert "break-inside: avoid" in service_rule.group(1)
     assert _snapshot(completed_assessment) == snapshot
 
 

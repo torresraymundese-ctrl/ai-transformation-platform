@@ -13,7 +13,11 @@ from assessment.contracts import (
 from assessment.matching import COMPONENT_MAX, REASON_TEMPLATES
 from assessment.reporting import DISCLAIMER, RISK_EXPLANATIONS, ROI_CHOICE_ORDER
 from assessment.scoring import DIMENSION_ORDER, maturity_for_score
-from assessment.seed import load_assessment_manifest, load_core_catalog_manifest
+from assessment.seed import (
+    LEGACY_SERVICE_NOT_INCLUDED,
+    load_assessment_manifest,
+    load_core_catalog_manifest,
+)
 from assessment_validation import (
     BRANCH_CODES,
     COMPANY_SIZE_CODES,
@@ -795,6 +799,10 @@ def _valid_package(value, expected_service_code) -> bool:
         "max": _decimal(service["budget"][1]),
     }
     expected_weeks = {"min": service["weeks"][0], "max": service["weeks"][1]}
+    allowed_not_included = (
+        service["not_included"],
+        list(LEGACY_SERVICE_NOT_INCLUDED[expected_service_code]),
+    )
     return (
         value["category"] == service["category"]
         and value["public_name"] == service["public_name"]
@@ -806,7 +814,7 @@ def _valid_package(value, expected_service_code) -> bool:
         and value["deliverables"] == service["deliverables"]
         and value["implementation_steps"] == service["implementation_steps"]
         and value["prerequisites"] == service["prerequisites"]
-        and value["not_included"] == service["not_included"]
+        and value["not_included"] in allowed_not_included
         and value["acceptance"] == service["acceptance"]
         and type(value["support_days"]) is int
         and value["support_days"] == service["support_days"]

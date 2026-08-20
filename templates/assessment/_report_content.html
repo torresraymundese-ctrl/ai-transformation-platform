@@ -221,7 +221,7 @@
         <section class="package-deliverables"><h4>交付物</h4><ul>{% for item in package.deliverables %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-steps"><h4>实施步骤</h4><ol>{% for item in package.implementation_steps %}<li>{{ item }}</li>{% endfor %}</ol></section>
         <section class="package-cooperation"><h4>客户配合</h4><ul>{% for item in package.prerequisites %}<li>{{ item }}</li>{% endfor %}</ul></section>
-        <section class="package-exclusions"><h4>明确不包含</h4><ul>{% for item in package.not_included %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-exclusions"><h4>明确不包含</h4><ul>{% for item in public_service_not_included(package) %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-acceptance"><h4>验收标准</h4><ul>{% for item in package.acceptance %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-support"><h4>培训、质保与支持</h4><p>交付后支持 {{ package.support_days }} 天。</p></section>
       </div>

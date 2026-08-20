@@ -18,6 +18,72 @@ DIMENSIONS = (
     "delivery",
 )
 
+LEGACY_SERVICE_EXCLUSIONS = {
+    "foundation_workshop": (
+        "software development",
+        "system integration",
+        "data cleansing execution",
+    ),
+    "knowledge_assistant_pilot": (
+        "source-document creation",
+        "unrestricted internet answers",
+        "custom core-system integration",
+    ),
+    "customer_growth_pilot": (
+        "media spend",
+        "guaranteed conversion results",
+        "unapproved automated outreach",
+    ),
+    "workflow_automation": (
+        "unstable processes",
+        "unlisted system interfaces",
+        "removal of manual fallback",
+    ),
+    "data_insight": (
+        "source-system repair",
+        "historical data reconstruction",
+        "unagreed predictive models",
+    ),
+    "industry_integration": (
+        "unlisted connectors",
+        "production infrastructure procurement",
+        "guaranteed business outcomes",
+    ),
+}
+
+CHINESE_SERVICE_EXCLUSIONS = {
+    "foundation_workshop": (
+        "定制软件开发",
+        "业务系统集成",
+        "数据清洗实施",
+    ),
+    "knowledge_assistant_pilot": (
+        "源文档编写与补录",
+        "不受限制的互联网问答",
+        "核心业务系统定制集成",
+    ),
+    "customer_growth_pilot": (
+        "媒体投放费用",
+        "转化效果承诺",
+        "未经审批的自动外呼或触达",
+    ),
+    "workflow_automation": (
+        "尚未稳定的业务流程改造",
+        "未列明的系统接口",
+        "取消人工兜底机制",
+    ),
+    "data_insight": (
+        "源系统修复",
+        "历史数据补建",
+        "未约定的预测模型",
+    ),
+    "industry_integration": (
+        "未列明的系统连接器",
+        "生产环境基础设施采购",
+        "业务结果承诺",
+    ),
+}
+
 
 @pytest.fixture()
 def catalog_db(tmp_path, monkeypatch):
@@ -486,38 +552,9 @@ def test_service_packages_have_exact_scope_delivery_and_support(catalog_db):
         "基线与优先级整理",
         "90 天计划评审",
     )
-    assert {code: package.not_included for code, package in by_code.items()} == {
-        "foundation_workshop": (
-            "定制软件开发",
-            "业务系统集成",
-            "数据清洗实施",
-        ),
-        "knowledge_assistant_pilot": (
-            "源文档编写与补录",
-            "不受限制的互联网问答",
-            "核心业务系统定制集成",
-        ),
-        "customer_growth_pilot": (
-            "媒体投放费用",
-            "转化效果承诺",
-            "未经审批的自动外呼或触达",
-        ),
-        "workflow_automation": (
-            "尚未稳定的业务流程改造",
-            "未列明的系统接口",
-            "取消人工兜底机制",
-        ),
-        "data_insight": (
-            "源系统修复",
-            "历史数据补建",
-            "未约定的预测模型",
-        ),
-        "industry_integration": (
-            "未列明的系统连接器",
-            "生产环境基础设施采购",
-            "业务结果承诺",
-        ),
-    }
+    assert {
+        code: package.not_included for code, package in by_code.items()
+    } == CHINESE_SERVICE_EXCLUSIONS
     assert foundation.support_days == 15
     assert by_code["industry_integration"].support_days == 60
     assert all(
@@ -647,3 +684,79 @@ def test_repeated_init_never_overwrites_the_published_version(tmp_path, monkeypa
 
     assert version_count == 1
     assert prompt == "published sentinel"
+
+
+def test_repeated_init_reconciles_only_exact_legacy_service_exclusions(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        db.executemany(
+            "UPDATE services SET not_included_json=? "
+            "WHERE code=? AND status='published'",
+            [
+                (
+                    json.dumps(values, ensure_ascii=False, separators=(",", ":")),
+                    code,
+                )
+                for code, values in LEGACY_SERVICE_EXCLUSIONS.items()
+            ],
+        )
+        insert_later_version_and_unrelated_service(db)
+    finally:
+        db.close()
+
+    models.init_db()
+    db = models.get_db()
+    try:
+        reconciled = {
+            row["code"]: tuple(json.loads(row["not_included_json"]))
+            for row in db.execute(
+                "SELECT code,not_included_json FROM services "
+                "WHERE code IN ({})".format(
+                    ",".join("?" for _ in LEGACY_SERVICE_EXCLUSIONS)
+                ),
+                tuple(LEGACY_SERVICE_EXCLUSIONS),
+            )
+        }
+        unrelated = db.execute(
+            "SELECT not_included_json FROM services "
+            "WHERE code='unrelated_published_service'"
+        ).fetchone()[0]
+    finally:
+        db.close()
+
+    assert reconciled == CHINESE_SERVICE_EXCLUSIONS
+    assert json.loads(unrelated) == ["excluded"]
+
+
+def test_repeated_init_preserves_custom_frozen_service_exclusions(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    custom = '["客户已审批的定制边界"]'
+    db = models.get_db()
+    try:
+        db.execute(
+            "UPDATE services SET not_included_json=? "
+            "WHERE code='foundation_workshop' AND status='published'",
+            (custom,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    models.init_db()
+    db = models.get_db()
+    try:
+        stored = db.execute(
+            "SELECT not_included_json FROM services "
+            "WHERE code='foundation_workshop'"
+        ).fetchone()[0]
+    finally:
+        db.close()
+
+    assert stored == custom

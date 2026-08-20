@@ -655,6 +655,123 @@ def test_frozen_scenario_manifest_corruption_blocks_preview_and_completion(
     assert rate_limit_row_count() == 0
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "UPDATE services SET public_name='自定义名称' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET category='pilot' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET min_budget=21000,max_budget=50000 "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET min_weeks=3,max_weeks=4 "
+        "WHERE code='foundation_workshop'",
+        "UPDATE service_deliverables SET title='自定义交付物' WHERE id=("
+        "SELECT MIN(sd.id) FROM service_deliverables sd "
+        "JOIN services sv ON sv.id=sd.service_id "
+        "WHERE sv.code='foundation_workshop')",
+        "UPDATE services SET implementation_steps_json='[\"自定义步骤\"]' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET prerequisites_json='[\"自定义前提\"]' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET not_included_json='[\"自定义边界\"]' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET acceptance_json='[\"自定义验收\"]' "
+        "WHERE code='foundation_workshop'",
+        "UPDATE services SET support_days=16 "
+        "WHERE code='foundation_workshop'",
+    ),
+    ids=(
+        "public-name",
+        "category",
+        "budget",
+        "weeks",
+        "deliverables",
+        "implementation-steps",
+        "prerequisites",
+        "not-included",
+        "acceptance",
+        "support-days",
+    ),
+)
+def test_every_service_snapshot_field_must_match_the_frozen_manifest_before_writes(
+    client, mutation
+):
+    token = enable_v2(client)
+    before_domain = domain_counts()
+    before_quota = rate_limit_row_count()
+    db = models.get_db()
+    try:
+        db.execute(mutation)
+        db.commit()
+    finally:
+        db.close()
+
+    config = client.get("/api/v2/assessment/config/manufacturing")
+    complete = client.post(
+        "/api/v2/assessment/complete",
+        json=valid_completion(),
+        headers={"X-CSRF-Token": token},
+    )
+
+    for response in (config, complete):
+        assert response.status_code == 503
+        assert response.get_json() == {
+            "error": "assessment temporarily unavailable",
+            "recoverable": True,
+        }
+    assert domain_counts() == before_domain
+    assert rate_limit_row_count() == before_quota
+
+
+def test_reinit_preserves_custom_service_boundary_and_completion_fails_closed(
+    client
+):
+    token = enable_v2(client)
+    custom = '["客户已审批的定制边界"]'
+    db = models.get_db()
+    try:
+        db.execute(
+            "UPDATE services SET not_included_json=? "
+            "WHERE code='foundation_workshop' AND status='published'",
+            (custom,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    models.init_db()
+    db = models.get_db()
+    try:
+        stored = db.execute(
+            "SELECT not_included_json FROM services "
+            "WHERE code='foundation_workshop'"
+        ).fetchone()[0]
+    finally:
+        db.close()
+    before_domain = domain_counts()
+    before_quota = rate_limit_row_count()
+
+    responses = (
+        client.get("/api/v2/assessment/config/manufacturing"),
+        client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={"X-CSRF-Token": token},
+        ),
+    )
+
+    assert stored == custom
+    assert all(response.status_code == 503 for response in responses)
+    assert all(
+        response.get_json()
+        == {"error": "assessment temporarily unavailable", "recoverable": True}
+        for response in responses
+    )
+    assert domain_counts() == before_domain
+    assert rate_limit_row_count() == before_quota
+
+
 def test_default_preview_and_completion_rate_limits_are_60_and_10_per_hour(client):
     token = enable_v2(client)
 

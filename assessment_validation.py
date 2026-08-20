@@ -77,6 +77,7 @@ REFERENCE_LINES = {
     "professional_knowledge": (60, 60, 55, 50, 55, 55),
     "software_creative": (60, 55, 55, 60, 55, 55),
 }
+_CORE_CATALOG_MANIFEST = load_core_catalog_manifest()
 FROZEN_SCENARIO_RULES = {
     scenario["code"]: {
         "category_code": scenario["category_code"],
@@ -85,27 +86,13 @@ FROZEN_SCENARIO_RULES = {
         "risk_codes": tuple(scenario["risk_codes"]),
         "service_code": scenario["service_code"],
     }
-    for scenario in load_core_catalog_manifest()["scenarios"]
+    for scenario in _CORE_CATALOG_MANIFEST["scenarios"]
 }
 SCENARIO_CODES = frozenset(FROZEN_SCENARIO_RULES)
-SERVICE_CODES = frozenset(
-    {
-        "foundation_workshop",
-        "knowledge_assistant_pilot",
-        "customer_growth_pilot",
-        "workflow_automation",
-        "data_insight",
-        "industry_integration",
-    }
-)
-SERVICE_CATEGORIES = {
-    "foundation_workshop": "foundation",
-    "knowledge_assistant_pilot": "pilot",
-    "customer_growth_pilot": "pilot",
-    "workflow_automation": "standard",
-    "data_insight": "standard",
-    "industry_integration": "integration",
+FROZEN_SERVICE_RULES = {
+    service["code"]: service for service in _CORE_CATALOG_MANIFEST["services"]
 }
+SERVICE_CODES = frozenset(FROZEN_SERVICE_RULES)
 EXPECTED_BRANCH_COLLECTION_LENGTHS = {
     "subbranches": 4,
     "departments": 6,
@@ -388,19 +375,26 @@ def _validate_completion_dependencies(scenarios, services, ranges):
         ):
             raise AssessmentRulesUnavailable("scenario_links")
     for service in services:
+        frozen = FROZEN_SERVICE_RULES.get(service.code)
         if (
-            not service.public_name
-            or service.category != SERVICE_CATEGORIES.get(service.code)
+            frozen is None
+            or service.public_name != frozen["public_name"]
+            or service.category != frozen["category"]
             or not _ordered_nonnegative_pair(
                 service.min_budget, service.max_budget
             )
+            or (service.min_budget, service.max_budget)
+            != tuple(frozen["budget"])
             or not _positive_integer_range(service.min_weeks, service.max_weeks)
-            or not service.deliverables
-            or not service.implementation_steps
-            or not service.prerequisites
-            or not service.not_included
-            or not service.acceptance
-            or service.support_days < 1
+            or (service.min_weeks, service.max_weeks) != tuple(frozen["weeks"])
+            or service.deliverables != tuple(frozen["deliverables"])
+            or service.implementation_steps
+            != tuple(frozen["implementation_steps"])
+            or service.prerequisites != tuple(frozen["prerequisites"])
+            or service.not_included != tuple(frozen["not_included"])
+            or service.acceptance != tuple(frozen["acceptance"])
+            or type(service.support_days) is not int
+            or service.support_days != frozen["support_days"]
         ):
             raise AssessmentRulesUnavailable("service")
     if set(ranges) != set(ROI_OPTION_CODES):
