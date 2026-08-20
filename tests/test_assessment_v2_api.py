@@ -1,0 +1,486 @@
+import copy
+import json
+import uuid
+
+import models
+import pytest
+
+
+PRIVACY_CONFIG = {
+    "PRIVACY_PROCESSOR_NAME": "测试处理者",
+    "PRIVACY_CONTACT": "privacy@example.invalid",
+    "PRIVACY_POLICY_URL": "https://example.invalid/privacy",
+}
+
+QUESTION_CODES = (
+    "business_value_frequency",
+    "business_value_scope",
+    "process_documentation",
+    "process_stability",
+    "data_availability",
+    "data_quality",
+    "systems_foundation",
+    "systems_automation",
+    "organization_owner",
+    "organization_adoption",
+    "delivery_budget",
+    "delivery_timeline",
+)
+
+
+def valid_assessment():
+    return {
+        "schema_version": "2.0",
+        "profile": {
+            "branch_code": "manufacturing",
+            "subbranch_code": "discrete_manufacturing",
+            "department_code": "production",
+            "company_size_code": "50_200",
+            "pain_codes": ["production_reporting"],
+        },
+        "answers": {code: "level_3" for code in QUESTION_CODES},
+        "roi_choices": {
+            "headcount": "6_20",
+            "monthly_hours": "20_80",
+            "monthly_cost": "8000_15000",
+            "loss_factor": "normal",
+            "budget": "50000_200000",
+        },
+    }
+
+
+def valid_completion(*, submission_key=None):
+    return {
+        "submission_key": submission_key or str(uuid.uuid4()),
+        "assessment": valid_assessment(),
+        "contact": {
+            "company_name": "示例企业",
+            "contact_name": "张先生",
+            "phone": "13800138000",
+            "email": "private@example.invalid",
+            "wechat": "private-wechat",
+        },
+        "consent": {"accepted": True, "policy_version": "2026-08-19"},
+        "attribution": {
+            "source": "website_assessment",
+            "utm_source": "organic",
+            "utm_medium": "website",
+            "utm_campaign": "task-8",
+        },
+    }
+
+
+def enable_v2(client):
+    client.application.config.update(PRIVACY_CONFIG)
+    response = client.get("/api/v2/assessment/config/manufacturing")
+    assert response.status_code == 200
+    return response.get_json()["csrf_token"]
+
+
+def domain_counts():
+    db = models.get_db()
+    try:
+        return {
+            table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("leads", "lead_consents", "assessments", "roi_estimates")
+        }
+    finally:
+        db.close()
+
+
+def rate_limit_row_count():
+    db = models.get_db()
+    try:
+        return db.execute("SELECT COUNT(*) FROM request_rate_limits").fetchone()[0]
+    finally:
+        db.close()
+
+
+def test_config_exposes_only_published_branch_rules_and_required_disclosure(client):
+    client.application.config.update(PRIVACY_CONFIG)
+    db = models.get_db()
+    try:
+        industry_id = db.execute(
+            "SELECT id FROM industries WHERE code='manufacturing'"
+        ).fetchone()[0]
+        version_id = db.execute(
+            "SELECT id FROM assessment_versions WHERE code='v2.0-2026-08-19'"
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO industry_branches "
+            "(industry_id,code,name,status,sort_order) VALUES (?,?,?,?,?)",
+            (industry_id, "private-draft-branch", "草稿分支", "draft", 999),
+        )
+        db.execute(
+            "INSERT INTO assessment_questions "
+            "(assessment_version_id,code,dimension_code,prompt,sort_order,status) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                version_id,
+                "private_draft_question",
+                "business_value",
+                "草稿问题",
+                999,
+                "draft",
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v2/assessment/config/manufacturing")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    serialized = json.dumps(body, ensure_ascii=False)
+    assert body["schema_version"] == "2.0"
+    assert body["rule_version"] == "v2.0-2026-08-19"
+    assert body["branch"] == {"code": "manufacturing", "label": "制造业"}
+    assert len(body["subbranches"]) == 4
+    assert len(body["departments"]) == 6
+    assert len(body["pain_points"]) == 8
+    assert len(body["company_sizes"]) == 4
+    assert len(body["questions"]) == 12
+    assert [option["score"] for option in body["questions"][0]["options"]] == [
+        0,
+        1,
+        2,
+        3,
+    ]
+    assert body["pain_selection"] == {"minimum": 1, "maximum": 3}
+    assert body["reference_line"]["label"] == "平台建议就绪参考线"
+    assert body["privacy_disclosure"] == {
+        "processor_name": "测试处理者",
+        "contact": "privacy@example.invalid",
+        "policy_url": "https://example.invalid/privacy",
+        "purpose": "用于生成评估报告、联系需求诊断并改进平台服务。",
+        "required_data_categories": ["企业名称", "联系人", "手机号", "隐私与联系授权"],
+        "optional_data_categories": ["邮箱", "微信"],
+        "retention": "未成交线索在最后一次有效跟进后保存365天。",
+        "expiry_action": "到期后匿名化联系信息和跟进备注，仅保留不可回溯个人的评估与转化统计。",
+        "rights": "可通过上述联系方式申请查阅、更正、撤回同意或删除个人信息。",
+    }
+    assert isinstance(body["csrf_token"], str) and body["csrf_token"]
+    assert "private-draft-branch" not in serialized
+    assert "private_draft_question" not in serialized
+    assert "行业平均" not in serialized
+
+
+def test_config_requires_real_privacy_values_and_rejects_unknown_branch(client):
+    client.application.config.update(PRIVACY_CONFIG)
+    client.application.config["PRIVACY_CONTACT"] = ""
+
+    unavailable = client.get("/api/v2/assessment/config/manufacturing")
+    invalid_branch = client.get("/api/v2/assessment/config/not-a-branch")
+
+    assert unavailable.status_code == 503
+    assert unavailable.get_json() == {
+        "error": "assessment temporarily unavailable",
+        "recoverable": True,
+    }
+    assert invalid_branch.status_code == 400
+    assert invalid_branch.get_json() == {"error": "invalid assessment payload"}
+    assert "默认".encode() not in unavailable.data
+
+
+def test_preview_returns_only_the_three_safe_summary_fields(client):
+    enable_v2(client)
+
+    response = client.post("/api/v2/assessment/preview", json=valid_assessment())
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "maturity": "collaborate",
+        "strongest": "business_value",
+        "weakest": "business_value",
+    }
+    serialized = json.dumps(response.get_json())
+    for forbidden in ("recommendations", "roi", "contact", "phone", "email"):
+        assert forbidden not in serialized
+
+
+def test_preview_rejects_invalid_profile_answer_and_roi_codes_without_writes(client):
+    enable_v2(client)
+    payloads = []
+    for path, bad_value in (
+        (("profile", "subbranch_code"), "other-branch"),
+        (("answers", "business_value_frequency"), "secret-option"),
+        (("roi_choices", "budget"), "unbounded-budget"),
+    ):
+        payload = copy.deepcopy(valid_assessment())
+        payload[path[0]][path[1]] = bad_value
+        payloads.append(payload)
+
+    responses = [
+        client.post("/api/v2/assessment/preview", json=payload)
+        for payload in payloads
+    ]
+
+    assert [response.status_code for response in responses] == [400, 400, 400]
+    assert all(
+        response.get_json() == {"error": "invalid assessment payload"}
+        for response in responses
+    )
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
+    assert rate_limit_row_count() == 0
+
+
+def test_completion_requires_public_csrf_and_accepted_consent_before_writes(client):
+    enable_v2(client)
+    without_csrf = client.post(
+        "/api/v2/assessment/complete", json=valid_completion()
+    )
+    token = enable_v2(client)
+    refused = valid_completion()
+    refused["consent"]["accepted"] = False
+    without_consent = client.post(
+        "/api/v2/assessment/complete",
+        json=refused,
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert without_csrf.status_code == 403
+    assert without_consent.status_code == 400
+    assert without_consent.get_json() == {"error": "invalid assessment payload"}
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
+
+
+def test_completion_rejects_attribution_contact_fields_and_overlong_values(client):
+    token = enable_v2(client)
+    with_contact = valid_completion()
+    with_contact["attribution"]["phone"] = "13800138000"
+    overlong = valid_completion()
+    overlong["attribution"]["utm_campaign"] = "x" * 101
+
+    responses = [
+        client.post(
+            "/api/v2/assessment/complete",
+            json=payload,
+            headers={"X-CSRF-Token": token},
+        )
+        for payload in (with_contact, overlong)
+    ]
+
+    assert [response.status_code for response in responses] == [400, 400]
+    assert all(
+        response.get_json() == {"error": "invalid assessment payload"}
+        for response in responses
+    )
+    assert domain_counts()["assessments"] == 0
+
+
+def test_completion_returns_private_urls_and_bounds_session_to_last_five_ids(client):
+    token = enable_v2(client)
+    responses = [
+        client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={"X-CSRF-Token": token},
+        )
+        for _ in range(6)
+    ]
+
+    assert all(response.status_code == 200 for response in responses)
+    bodies = [response.get_json() for response in responses]
+    assessment_ids = [body["assessment_id"] for body in bodies]
+    for body, assessment_id in zip(bodies, assessment_ids):
+        assert body == {
+            "success": True,
+            "assessment_id": assessment_id,
+            "report_url": f"/assessment/report/{assessment_id}",
+            "pdf_url": f"/assessment/report/{assessment_id}/pdf",
+        }
+        serialized = json.dumps(body, ensure_ascii=False)
+        for private_value in (
+            "示例企业",
+            "张先生",
+            "13800138000",
+            "private@example.invalid",
+            "private-wechat",
+        ):
+            assert private_value not in serialized
+    with client.session_transaction() as session:
+        assert session["assessment_report_ids"] == assessment_ids[-5:]
+    assert domain_counts()["assessments"] == 6
+
+
+def test_missing_published_rules_return_recoverable_503_without_domain_writes(client):
+    client.application.config.update(PRIVACY_CONFIG)
+    with client.session_transaction() as session:
+        session["csrf_token"] = "public-csrf"
+    db = models.get_db()
+    try:
+        db.execute(
+            "UPDATE assessment_versions SET status='draft' "
+            "WHERE code='v2.0-2026-08-19'"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    responses = (
+        client.get("/api/v2/assessment/config/manufacturing"),
+        client.post("/api/v2/assessment/preview", json=valid_assessment()),
+        client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={"X-CSRF-Token": "public-csrf"},
+        ),
+    )
+
+    assert [response.status_code for response in responses] == [503, 503, 503]
+    assert all(
+        response.get_json()
+        == {"error": "assessment temporarily unavailable", "recoverable": True}
+        for response in responses
+    )
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
+    assert rate_limit_row_count() == 0
+
+
+def test_inconsistent_published_rules_return_503_instead_of_partial_results(client):
+    token = enable_v2(client)
+    db = models.get_db()
+    try:
+        db.execute(
+            "DELETE FROM assessment_options WHERE id=("
+            "SELECT ao.id FROM assessment_options ao "
+            "JOIN assessment_questions q ON q.id=ao.question_id "
+            "WHERE q.code='business_value_frequency' AND ao.code='level_0')"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    config = client.get("/api/v2/assessment/config/manufacturing")
+    preview = client.post("/api/v2/assessment/preview", json=valid_assessment())
+    complete = client.post(
+        "/api/v2/assessment/complete",
+        json=valid_completion(),
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert [config.status_code, preview.status_code, complete.status_code] == [
+        503,
+        503,
+        503,
+    ]
+    assert domain_counts()["assessments"] == 0
+    assert rate_limit_row_count() == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "UPDATE assessment_branch_weights SET business_value_weight=-1,"
+        "process_weight=41 WHERE assessment_version_id=(SELECT id FROM "
+        "assessment_versions WHERE code='v2.0-2026-08-19') AND industry_id=("
+        "SELECT id FROM industries WHERE code='manufacturing')",
+        "UPDATE scenario_roi_profiles SET efficiency_mid=-1 WHERE id=("
+        "SELECT MIN(id) FROM scenario_roi_profiles)",
+        "UPDATE scenario_roi_profiles SET efficiency_mid='not-a-number' WHERE id=("
+        "SELECT MIN(id) FROM scenario_roi_profiles)",
+        "DELETE FROM scenario_roi_profiles WHERE scenario_id=("
+        "SELECT id FROM scenarios WHERE code='mfg_operations_reporting')",
+        "INSERT INTO scenario_services (scenario_id,service_id) SELECT "
+        "(SELECT id FROM scenarios WHERE code='mfg_operations_reporting'),"
+        "(SELECT id FROM services WHERE code='foundation_workshop')",
+    ),
+)
+def test_numeric_and_link_rule_corruption_fails_closed_without_writes(
+    client, mutation
+):
+    enable_v2(client)
+    db = models.get_db()
+    try:
+        db.execute(mutation)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/v2/assessment/preview", json=valid_assessment())
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "error": "assessment temporarily unavailable",
+        "recoverable": True,
+    }
+    assert domain_counts()["assessments"] == 0
+    assert rate_limit_row_count() == 0
+
+
+def test_default_preview_and_completion_rate_limits_are_60_and_10_per_hour(client):
+    token = enable_v2(client)
+
+    for _ in range(60):
+        assert client.post(
+            "/api/v2/assessment/preview", json=valid_assessment()
+        ).status_code == 200
+    preview_blocked = client.post(
+        "/api/v2/assessment/preview", json=valid_assessment()
+    )
+
+    for _ in range(10):
+        assert client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={"X-CSRF-Token": token},
+        ).status_code == 200
+    completion_blocked = client.post(
+        "/api/v2/assessment/complete",
+        json=valid_completion(),
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert preview_blocked.status_code == 429
+    assert completion_blocked.status_code == 429
+    assert preview_blocked.headers["Retry-After"] == "3600"
+    assert completion_blocked.headers["Retry-After"] == "3600"
+
+
+def test_v2_rate_limits_keep_proxy_forwarded_public_identities_separate(client):
+    token = enable_v2(client)
+    client.application.config.update(
+        ASSESSMENT_PREVIEW_RATE_LIMIT=1,
+        ASSESSMENT_COMPLETE_RATE_LIMIT=1,
+    )
+    proxy = {"X-Forwarded-Proto": "https"}
+
+    previews = [
+        client.post(
+            "/api/v2/assessment/preview",
+            json=valid_assessment(),
+            headers={**proxy, "X-Forwarded-For": address},
+        )
+        for address in ("198.51.100.10", "198.51.100.11")
+    ]
+    completions = [
+        client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={
+                **proxy,
+                "X-Forwarded-For": address,
+                "X-CSRF-Token": token,
+            },
+        )
+        for address in ("198.51.100.10", "198.51.100.11")
+    ]
+
+    assert [response.status_code for response in previews] == [200, 200]
+    assert [response.status_code for response in completions] == [200, 200]

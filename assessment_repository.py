@@ -32,6 +32,22 @@ def load_published_catalog(branch_code: str) -> AssessmentCatalog:
         db.close()
 
 
+def load_published_rule_bundle(branch_code: str):
+    """Load one public rule bundle while keeping connection ownership here."""
+    db = get_db()
+    try:
+        catalog = load_catalog(db, branch_code)
+        return (
+            catalog,
+            load_public_config(db, catalog, branch_code),
+            load_scenarios(db, catalog.version_id),
+            load_service_packages(db, catalog.version_id),
+            load_roi_option_ranges(db, catalog.version_id),
+        )
+    finally:
+        db.close()
+
+
 def load_catalog(db, branch_code: str) -> AssessmentCatalog:
     """Load one exact published catalog on a caller-owned connection."""
     version = _published_version(db)
@@ -254,6 +270,65 @@ def load_roi_option_ranges(db, version_id: int):
     return ranges
 
 
+def load_public_config(db, catalog: AssessmentCatalog, branch_code: str):
+    """Return only published, user-facing questionnaire configuration."""
+    version = db.execute(
+        "SELECT pain_min_selections,pain_max_selections "
+        "FROM assessment_versions WHERE id=? AND status='published'",
+        (catalog.version_id,),
+    ).fetchone()
+    industry = db.execute(
+        "SELECT id,code,name FROM industries WHERE code=? AND status='published'",
+        (branch_code,),
+    ).fetchone()
+    if version is None or industry is None:
+        raise RuntimeError("published assessment configuration is unavailable")
+    reference = db.execute(
+        "SELECT label FROM industry_benchmarks "
+        "WHERE assessment_version_id=? AND industry_id=?",
+        (catalog.version_id, industry["id"]),
+    ).fetchone()
+    if reference is None:
+        raise RuntimeError("published assessment reference line is unavailable")
+    return {
+        "branch": {"code": industry["code"], "label": industry["name"]},
+        "subbranches": _labeled_codes(
+            db,
+            "SELECT code,name FROM industry_branches "
+            "WHERE industry_id=? AND status='published' ORDER BY sort_order",
+            (industry["id"],),
+        ),
+        "departments": _labeled_codes(
+            db,
+            "SELECT code,name FROM departments "
+            "WHERE industry_id=? AND status='published' ORDER BY sort_order",
+            (industry["id"],),
+        ),
+        "pain_points": _labeled_codes(
+            db,
+            "SELECT code,name FROM pain_points "
+            "WHERE industry_id=? AND status='published' ORDER BY sort_order",
+            (industry["id"],),
+        ),
+        "company_sizes": _labeled_codes(
+            db,
+            "SELECT code,name FROM company_sizes "
+            "WHERE status='published' ORDER BY sort_order",
+        ),
+        "pain_selection": {
+            "minimum": version["pain_min_selections"],
+            "maximum": version["pain_max_selections"],
+        },
+        "roi_options": {
+            group: list(options)
+            for group, options in _roi_option_codes(
+                db, catalog.version_id
+            ).items()
+        },
+        "reference_label": reference["label"],
+    }
+
+
 def find_by_submission_key(db, submission_key: str):
     return db.execute(
         "SELECT id,lead_id FROM assessments WHERE submission_key=?",
@@ -326,6 +401,24 @@ def _published_version(db):
 
 def _codes(db, statement, parameters=()):
     return tuple(row[0] for row in db.execute(statement, parameters))
+
+
+def _labeled_codes(db, statement, parameters=()):
+    return [
+        {"code": row["code"], "label": row["name"]}
+        for row in db.execute(statement, parameters)
+    ]
+
+
+def _roi_option_codes(db, version_id):
+    groups = {}
+    for row in db.execute(
+        "SELECT option_group,code FROM roi_option_ranges "
+        "WHERE assessment_version_id=? ORDER BY option_group,id",
+        (version_id,),
+    ):
+        groups.setdefault(row["option_group"], []).append(row["code"])
+    return groups
 
 
 def _dimension_maps(db, version_id, table, suffix):

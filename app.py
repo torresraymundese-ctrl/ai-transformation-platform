@@ -10,6 +10,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from blueprints.admin import bp as admin_bp
+from blueprints.assessment import bp as assessment_bp
 from blueprints.api import bp as api_bp
 from blueprints.public import bp as public_bp, svc_emoji
 from models import init_db
@@ -34,6 +35,15 @@ DEFAULT_CONFIG = {
     "LOGIN_RATE_WINDOW": 15 * 60,
     "ASSESSMENT_RATE_LIMIT": 30,
     "ASSESSMENT_RATE_WINDOW": 60 * 60,
+    "ASSESSMENT_PREVIEW_RATE_LIMIT": 60,
+    "ASSESSMENT_PREVIEW_RATE_WINDOW": 60 * 60,
+    "ASSESSMENT_COMPLETE_RATE_LIMIT": 10,
+    "ASSESSMENT_COMPLETE_RATE_WINDOW": 60 * 60,
+    "PRIVACY_PROCESSOR_NAME": os.environ.get(
+        "AI_PLATFORM_PRIVACY_PROCESSOR_NAME"
+    ),
+    "PRIVACY_CONTACT": os.environ.get("AI_PLATFORM_PRIVACY_CONTACT"),
+    "PRIVACY_POLICY_URL": os.environ.get("AI_PLATFORM_PRIVACY_POLICY_URL"),
     "SCRAPE_RATE_LIMIT": 3,
     "SCRAPE_RATE_WINDOW": 60 * 60,
 }
@@ -68,6 +78,7 @@ def create_app(test_config=None):
 
     flask_app.register_blueprint(public_bp)
     flask_app.register_blueprint(api_bp)
+    flask_app.register_blueprint(assessment_bp)
     flask_app.register_blueprint(admin_bp)
     return flask_app
 

@@ -56,6 +56,12 @@ def csrf_is_valid():
     return bool(expected and supplied and compare_digest(expected, supplied))
 
 
+def require_public_csrf():
+    """Require the Session-bound CSRF token for a public write endpoint."""
+    if not csrf_is_valid():
+        abort(403)
+
+
 def check_admin_auth():
     return (
         security_configured()
