@@ -1,10 +1,20 @@
 import builtins
+from copy import deepcopy
 import importlib
+from itertools import product
 import json
 import uuid
 
 from bs4 import BeautifulSoup
 
+import assessment_repository
+from assessment.contracts import AssessmentProfile
+from assessment.reporting import (
+    DIMENSION_EXPLANATIONS,
+    DIMENSION_IMPROVEMENT_EXPLANATIONS,
+    YEAR_1_BY_MATURITY,
+)
+from assessment.scoring import DIMENSION_ORDER, score_assessment
 import models
 import pytest
 import report_pdf
@@ -40,7 +50,7 @@ PRIVATE_VALUES = (
 )
 
 
-def _complete_assessment(client):
+def _complete_assessment(client, answers=None):
     client.application.config.update(PRIVACY_CONFIG)
     config = client.get("/api/v2/assessment/config/manufacturing")
     assert config.status_code == 200
@@ -58,7 +68,11 @@ def _complete_assessment(client):
                     "company_size_code": "50_200",
                     "pain_codes": ["production_reporting"],
                 },
-                "answers": {code: "level_3" for code in QUESTION_CODES},
+                "answers": (
+                    {code: "level_3" for code in QUESTION_CODES}
+                    if answers is None
+                    else answers
+                ),
                 "roi_choices": {
                     "headcount": "6_20",
                     "monthly_hours": "20_80",
@@ -94,6 +108,10 @@ def completed_assessment(client):
 
 
 def _snapshot(assessment_id):
+    return json.loads(_raw_snapshot(assessment_id))
+
+
+def _raw_snapshot(assessment_id):
     db = models.get_db()
     try:
         value = db.execute(
@@ -102,7 +120,7 @@ def _snapshot(assessment_id):
         ).fetchone()[0]
     finally:
         db.close()
-    return json.loads(value)
+    return value
 
 
 def _replace_snapshot(assessment_id, snapshot):
@@ -220,6 +238,121 @@ def test_sixth_oldest_report_is_evicted_for_html_and_pdf(
     assert newest_pdf.status_code == 200
     for response in (oldest_html, oldest_pdf, newest_html, newest_pdf):
         _assert_private_cache_headers(response)
+
+
+def test_canonical_weakest_tie_survives_persisted_sorted_json_html_and_pdf(
+    client, monkeypatch
+):
+    answers = {
+        "business_value_frequency": "level_3",
+        "business_value_scope": "level_3",
+        "process_documentation": "level_0",
+        "process_stability": "level_0",
+        "data_availability": "level_2",
+        "data_quality": "level_2",
+        "systems_foundation": "level_2",
+        "systems_automation": "level_2",
+        "organization_owner": "level_2",
+        "organization_adoption": "level_2",
+        "delivery_budget": "level_0",
+        "delivery_timeline": "level_0",
+    }
+    assessment_id = _complete_assessment(client, answers=answers)
+    persisted = json.loads(_raw_snapshot(assessment_id))
+    captured = {}
+
+    def render(html, base_url):
+        captured["html"] = html
+        return b"%PDF-test"
+
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    html = client.get(f"/assessment/report/{assessment_id}")
+    pdf = client.get(f"/assessment/report/{assessment_id}/pdf")
+
+    assert list(persisted["scores"]["dimension_scores"]) == [
+        "business_value",
+        "data",
+        "delivery",
+        "organization",
+        "process",
+        "systems",
+    ]
+    assert persisted["scores"]["weakest"]["dimension"] == "process"
+    assert html.status_code == 200
+    assert pdf.status_code == 200
+    browser_page = BeautifulSoup(html.data, "html.parser")
+    pdf_page = BeautifulSoup(captured["html"], "html.parser")
+    assert "流程维度仍需补齐" in browser_page.select_one("#weaknesses").get_text(
+        " ", strip=True
+    )
+    assert pdf_page.select_one("#weaknesses").get_text(" ", strip=True) == (
+        browser_page.select_one("#weaknesses").get_text(" ", strip=True)
+    )
+    _assert_private_cache_headers(html)
+    _assert_private_cache_headers(pdf)
+
+
+def test_all_paired_answer_score_extrema_survive_sorted_json_roundtrip(
+    completed_assessment,
+):
+    catalog = assessment_repository.load_published_catalog("manufacturing")
+    base = _snapshot(completed_assessment)
+    questions_by_dimension = {
+        dimension: tuple(
+            question.code
+            for question in catalog.questions
+            if question.dimension == dimension
+        )
+        for dimension in DIMENSION_ORDER
+    }
+    rejected = []
+
+    for selected_levels in product(
+        ("level_0", "level_1", "level_2", "level_3"), repeat=6
+    ):
+        answers = {
+            question_code: level
+            for dimension, level in zip(DIMENSION_ORDER, selected_levels)
+            for question_code in questions_by_dimension[dimension]
+        }
+        profile = AssessmentProfile(
+            branch_code="manufacturing",
+            subbranch_code="discrete_manufacturing",
+            department_code="production",
+            company_size_code="50_200",
+            pain_codes=("production_reporting",),
+            answers=answers,
+            roi_choices=base["assessment"]["roi_choices"],
+        )
+        scores = score_assessment(catalog, profile)
+        candidate = deepcopy(base)
+        candidate["assessment"]["answers"] = answers
+        candidate["scores"]["dimension_scores"] = dict(scores.dimension_scores)
+        candidate["scores"]["overall_score"] = scores.overall_score
+        candidate["scores"]["maturity_code"] = scores.maturity_code
+        candidate["scores"]["strongest"] = {
+            "dimension": scores.strongest_dimension,
+            "explanation": DIMENSION_EXPLANATIONS[scores.strongest_dimension],
+        }
+        candidate["scores"]["weakest"] = {
+            "dimension": scores.weakest_dimension,
+            "explanation": DIMENSION_IMPROVEMENT_EXPLANATIONS[
+                scores.weakest_dimension
+            ],
+        }
+        candidate["roadmap_years_1_3"][0]["action"] = YEAR_1_BY_MATURITY[
+            scores.maturity_code
+        ]
+        roundtripped = json.loads(
+            json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+        )
+        if not assessment_repository._valid_report_snapshot(roundtripped):
+            rejected.append(selected_levels)
+
+    assert not rejected, (
+        f"{len(rejected)} paired-answer profiles were rejected; "
+        f"first profiles: {rejected[:3]}"
+    )
 
 
 def test_legacy_incomplete_and_invalid_snapshots_return_404(
@@ -349,6 +482,15 @@ def test_resource_abusive_snapshot_json_returns_private_404_without_rendering(
         "negative_roi_savings",
         "nonfinite_roi_savings",
         "component_over_domain_max",
+        "boolean_dimension_score",
+        "boolean_overall_score",
+        "boolean_match_score",
+        "boolean_component_score",
+        "boolean_roi_money",
+        "boolean_coefficient",
+        "boolean_scenario_week",
+        "boolean_package_support_days",
+        "boolean_roadmap_year",
         "missing_selected_roi_band",
         "extra_selected_roi_band",
         "extra_roadmap_key",
@@ -390,6 +532,26 @@ def test_frozen_v2_snapshot_rejects_schema_cardinality_and_domain_corruption(
         snapshot["roi"]["midpoint"]["annual_savings"] = "NaN"
     elif corruption == "component_over_domain_max":
         snapshot["recommendations"][0]["components"]["pain"] = 36
+    elif corruption == "boolean_dimension_score":
+        snapshot["scores"]["dimension_scores"]["data"] = True
+    elif corruption == "boolean_overall_score":
+        snapshot["scores"]["overall_score"] = True
+    elif corruption == "boolean_match_score":
+        snapshot["recommendations"][0]["match_score"] = True
+    elif corruption == "boolean_component_score":
+        snapshot["recommendations"][0]["components"]["pain"] = True
+    elif corruption == "boolean_roi_money":
+        snapshot["roi"]["midpoint"]["annual_savings"] = True
+    elif corruption == "boolean_coefficient":
+        snapshot["calculation_basis"]["coefficients"]["efficiency"][0] = True
+    elif corruption == "boolean_scenario_week":
+        snapshot["recommendations"][0]["scenario"]["delivery_weeks"][
+            "min"
+        ] = True
+    elif corruption == "boolean_package_support_days":
+        snapshot["recommendations"][0]["package"]["support_days"] = True
+    elif corruption == "boolean_roadmap_year":
+        snapshot["roadmap_years_1_3"][0]["year"] = True
     elif corruption == "missing_selected_roi_band":
         snapshot["calculation_basis"]["selected_roi_bands"].pop("budget")
     elif corruption == "extra_selected_roi_band":

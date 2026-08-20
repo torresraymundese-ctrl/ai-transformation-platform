@@ -12,7 +12,7 @@ from assessment.contracts import (
 )
 from assessment.matching import COMPONENT_MAX, REASON_TEMPLATES
 from assessment.reporting import DISCLAIMER, RISK_EXPLANATIONS, ROI_CHOICE_ORDER
-from assessment.scoring import maturity_for_score
+from assessment.scoring import DIMENSION_ORDER, maturity_for_score
 from assessment.seed import load_assessment_manifest, load_core_catalog_manifest
 from assessment_validation import (
     BRANCH_CODES,
@@ -26,14 +26,6 @@ from assessment_validation import (
 from models import get_db
 
 
-DIMENSIONS = (
-    "business_value",
-    "process",
-    "data",
-    "systems",
-    "organization",
-    "delivery",
-)
 DEFAULT_VERSION_CODE = "v2.0-2026-08-19"
 MAX_REPORT_SNAPSHOT_BYTES = 128 * 1024
 PRIVATE_REPORT_KEYS = frozenset(
@@ -245,7 +237,7 @@ def load_scenarios(db, version_id: int) -> tuple[Scenario, ...]:
                 ),
                 minimum_scores={
                     dimension: row[f"minimum_{dimension}"]
-                    for dimension in DIMENSIONS
+                    for dimension in DIMENSION_ORDER
                 },
                 integration_level=row["integration_level"],
                 budget_codes=_codes(
@@ -554,7 +546,8 @@ def _dimension_maps(db, version_id, table, suffix):
     ).fetchall()
     return {
         row["code"]: {
-            dimension: row[f"{dimension}_{suffix}"] for dimension in DIMENSIONS
+            dimension: row[f"{dimension}_{suffix}"]
+            for dimension in DIMENSION_ORDER
         }
         for row in rows
     }
@@ -665,7 +658,7 @@ def _valid_report_scores(value, assessment) -> bool:
     if value.get("maturity_code") != maturity_for_score(overall):
         return False
     expected_reference = dict(
-        zip(DIMENSIONS, REFERENCE_LINES[assessment["branch_code"]])
+        zip(DIMENSION_ORDER, REFERENCE_LINES[assessment["branch_code"]])
     )
     if reference != expected_reference:
         return False
@@ -674,15 +667,16 @@ def _valid_report_scores(value, assessment) -> bool:
     return (
         _valid_dimension_explanation(strongest)
         and _valid_dimension_explanation(weakest)
-        and strongest["dimension"] == max(dimensions, key=dimensions.get)
-        and weakest["dimension"] == min(dimensions, key=dimensions.get)
+        and strongest["dimension"]
+        == max(DIMENSION_ORDER, key=dimensions.get)
+        and weakest["dimension"] == min(DIMENSION_ORDER, key=dimensions.get)
     )
 
 
 def _valid_dimension_values(value) -> bool:
     return (
         isinstance(value, dict)
-        and set(value) == set(DIMENSIONS)
+        and set(value) == set(DIMENSION_ORDER)
         and all(type(score) is int and 0 <= score <= 100 for score in value.values())
     )
 
@@ -691,7 +685,7 @@ def _valid_dimension_explanation(value) -> bool:
     return (
         isinstance(value, dict)
         and set(value) == {"dimension", "explanation"}
-        and value["dimension"] in DIMENSIONS
+        and value["dimension"] in DIMENSION_ORDER
         and _bounded_text(value["explanation"])
     )
 
@@ -739,7 +733,9 @@ def _valid_recommendation(value) -> bool:
     }
     if (
         scenario["category_code"] != scenario_rule["category_code"]
-        or scenario["delivery_weeks"] != expected_weeks
+        or not _exact_integer_mapping(
+            scenario["delivery_weeks"], expected_weeks
+        )
         or scenario["integration_level"] != scenario_manifest["integration_level"]
     ):
         return False
@@ -806,12 +802,13 @@ def _valid_package(value, expected_service_code) -> bool:
         and set(budget) == {"min", "max"}
         and {name: _decimal(amount) for name, amount in budget.items()}
         == expected_budget
-        and value["delivery_weeks"] == expected_weeks
+        and _exact_integer_mapping(value["delivery_weeks"], expected_weeks)
         and value["deliverables"] == service["deliverables"]
         and value["implementation_steps"] == service["implementation_steps"]
         and value["prerequisites"] == service["prerequisites"]
         and value["not_included"] == service["not_included"]
         and value["acceptance"] == service["acceptance"]
+        and type(value["support_days"]) is int
         and value["support_days"] == service["support_days"]
     )
 
@@ -866,7 +863,8 @@ def _valid_roadmap(value, position_key, expected_length) -> bool:
             "31-60",
             "61-90",
         ]
-    return [item[position_key] for item in value] == [1, 2, 3]
+    years = [item[position_key] for item in value]
+    return all(type(year) is int for year in years) and years == [1, 2, 3]
 
 
 def _valid_calculation_basis(value, assessment, recommendations) -> bool:
@@ -924,6 +922,17 @@ def _valid_calculation_basis(value, assessment, recommendations) -> bool:
 
 def _finite_decimal(value) -> bool:
     return _decimal(value) is not None
+
+
+def _exact_integer_mapping(value, expected) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(expected)
+        and all(
+            type(value[name]) is int and value[name] == expected[name]
+            for name in expected
+        )
+    )
 
 
 def _nonnegative_decimal(value) -> bool:
