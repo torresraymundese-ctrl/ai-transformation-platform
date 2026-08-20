@@ -7,6 +7,7 @@ from math import cos, pi, sin
 from pathlib import Path
 import sqlite3
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from flask import (
     Blueprint,
@@ -21,6 +22,7 @@ from flask import (
 )
 
 import assessment_repository
+import appointment_repository
 import report_pdf
 from assessment.contracts import AssessmentInputError
 from assessment.reporting import RISK_LABELS, public_service_not_included
@@ -29,6 +31,9 @@ from assessment_completion_service import complete_assessment
 from assessment_validation import (
     AssessmentRulesUnavailable,
     CONSENT_POLICY_VERSION,
+    appointment_date_window,
+    current_shanghai_date,
+    parse_appointment_payload,
     parse_completion_payload,
     parse_preview_payload,
     validate_profile_membership,
@@ -292,6 +297,53 @@ def assessment_complete():
     )
 
 
+@bp.post("/api/v2/appointments")
+def appointment_create():
+    require_public_csrf()
+    try:
+        appointment_request = parse_appointment_payload(
+            request.get_json(silent=True),
+            current_shanghai_date(
+                current_app.config.get("APPOINTMENT_NOW_PROVIDER")
+            ),
+        )
+    except ValidationError:
+        return _invalid_appointment_response()
+    except RuntimeError as error:
+        return _unavailable_response(error)
+
+    if _authorized_report_snapshot(appointment_request.assessment_id) is None:
+        abort(404)
+    if not consume_rate_limit(
+        "assessment_v2_appointment",
+        current_app.config["APPOINTMENT_RATE_LIMIT"],
+        current_app.config["APPOINTMENT_RATE_WINDOW"],
+    ):
+        return rate_limit_response(
+            current_app.config["APPOINTMENT_RATE_WINDOW"]
+        )
+
+    try:
+        appointment = appointment_repository.submit_appointment_intent(
+            appointment_request.assessment_id,
+            appointment_request.submission_key,
+            appointment_request.preferred_date,
+            appointment_request.time_slot,
+            appointment_request.note,
+        )
+    except DataConflictError:
+        return jsonify({"error": "appointment conflict"}), 409
+    except (RuntimeError, sqlite3.DatabaseError) as error:
+        return _unavailable_response(error)
+    return jsonify(
+        {
+            "success": True,
+            "appointment_id": appointment.appointment_id,
+            "status": appointment.status,
+        }
+    )
+
+
 @bp.get("/assessment/report/<int:assessment_id>")
 def assessment_report(assessment_id):
     _protect_report_response()
@@ -369,7 +421,7 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
                 "reference": scores["reference_line"][code],
             }
         )
-    return {
+    context = {
         "assessment_id": assessment_id,
         "snapshot": snapshot,
         "snapshot_digest": hashlib.sha256(
@@ -395,6 +447,16 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
         "public_service_not_included": public_service_not_included,
         "pdf_mode": pdf_mode,
     }
+    if not pdf_mode:
+        minimum_date, maximum_date = appointment_date_window(
+            current_app.config.get("APPOINTMENT_NOW_PROVIDER")
+        )
+        context.update(
+            appointment_date_min=minimum_date.isoformat(),
+            appointment_date_max=maximum_date.isoformat(),
+            appointment_submission_key=str(uuid4()),
+        )
+    return context
 
 
 def _roi_choice_rows(calculation_basis):
@@ -520,6 +582,10 @@ def _privacy_disclosure():
 
 def _invalid_response():
     return jsonify({"error": "invalid assessment payload"}), 400
+
+
+def _invalid_appointment_response():
+    return jsonify({"error": "invalid appointment payload"}), 400
 
 
 def _unavailable_response(error):

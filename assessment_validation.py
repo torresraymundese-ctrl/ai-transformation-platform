@@ -1,8 +1,11 @@
 """Strict HTTP-boundary validation for the public V2 assessment APIs."""
 
 from collections import Counter
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 import re
 import unicodedata
+from zoneinfo import ZoneInfo
 
 from assessment.contracts import (
     AssessmentCatalog,
@@ -100,10 +103,90 @@ EXPECTED_BRANCH_COLLECTION_LENGTHS = {
 }
 CODE_PATTERN = re.compile(r"^[a-z0-9_]+$")
 EMBEDDED_MAINLAND_MOBILE_DIGITS = re.compile(r"(?:86)?1[3-9]\d{9}")
+APPOINTMENT_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+APPOINTMENT_TIME_SLOTS = frozenset({"morning", "afternoon", "evening"})
+SHANGHAI_ZONE = ZoneInfo("Asia/Shanghai")
+
+
+@dataclass(frozen=True)
+class AppointmentIntentRequest:
+    assessment_id: int
+    submission_key: str
+    preferred_date: date
+    time_slot: str
+    note: str
 
 
 class AssessmentRulesUnavailable(RuntimeError):
     """Raised when a published rule bundle cannot safely serve a request."""
+
+
+def current_shanghai_date(now_provider=None) -> date:
+    """Return the calendar date in Asia/Shanghai using an injectable clock."""
+    moment = (
+        now_provider()
+        if now_provider is not None
+        else datetime.now(SHANGHAI_ZONE)
+    )
+    if (
+        not isinstance(moment, datetime)
+        or moment.tzinfo is None
+        or moment.utcoffset() is None
+    ):
+        raise RuntimeError("appointment clock must return an aware datetime")
+    return moment.astimezone(SHANGHAI_ZONE).date()
+
+
+def appointment_date_window(now_provider=None):
+    minimum = current_shanghai_date(now_provider)
+    return minimum, minimum + timedelta(days=90)
+
+
+def parse_appointment_payload(data, current_date: date) -> AppointmentIntentRequest:
+    payload = _object(data)
+    _allowed_keys(
+        payload,
+        required={
+            "assessment_id",
+            "submission_key",
+            "preferred_date",
+            "time_slot",
+        },
+        allowed={
+            "assessment_id",
+            "submission_key",
+            "preferred_date",
+            "time_slot",
+            "note",
+        },
+    )
+    assessment_id = payload["assessment_id"]
+    if type(assessment_id) is not int or assessment_id < 1:
+        raise ValidationError("invalid appointment payload")
+    submission_key = validated_submission_key(payload["submission_key"])
+    raw_date = payload["preferred_date"]
+    if (
+        not isinstance(raw_date, str)
+        or APPOINTMENT_DATE_PATTERN.fullmatch(raw_date) is None
+    ):
+        raise ValidationError("invalid appointment payload")
+    try:
+        preferred_date = date.fromisoformat(raw_date)
+    except ValueError:
+        raise ValidationError("invalid appointment payload") from None
+    if not current_date <= preferred_date <= current_date + timedelta(days=90):
+        raise ValidationError("invalid appointment payload")
+    time_slot = payload["time_slot"]
+    if time_slot not in APPOINTMENT_TIME_SLOTS:
+        raise ValidationError("invalid appointment payload")
+    note = _text(payload.get("note", ""), maximum=500)
+    return AppointmentIntentRequest(
+        assessment_id=assessment_id,
+        submission_key=submission_key,
+        preferred_date=preferred_date,
+        time_slot=time_slot,
+        note=note,
+    )
 
 
 def validated_branch_code(value):

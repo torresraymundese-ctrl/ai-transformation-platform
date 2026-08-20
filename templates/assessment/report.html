@@ -11,4 +11,51 @@
 
 {% block content %}
 {% include "assessment/_report_content.html" %}
+
+<section class="report-appointment" aria-labelledby="appointment-title">
+  <div class="report-section-heading">
+    <p class="report-section-number">08</p>
+    <div>
+      <h2 id="appointment-title">预约免费诊断沟通</h2>
+      <p>选择方便的日期和时间段即可提交意向，无需再次填写联系方式。顾问将在后续联系中确认具体时间。</p>
+    </div>
+  </div>
+  <form id="appointment-intent-form" action="{{ url_for('assessment_v2.appointment_create') }}" method="post" aria-describedby="appointment-window-help">
+    <input type="hidden" name="assessment_id" value="{{ assessment_id }}">
+    <input type="hidden" name="submission_key" value="{{ appointment_submission_key }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="appointment-field">
+      <label for="appointment-date">希望沟通日期</label>
+      <input id="appointment-date" name="preferred_date" type="date" min="{{ appointment_date_min }}" max="{{ appointment_date_max }}" aria-describedby="appointment-window-help" required>
+      <p id="appointment-window-help" class="appointment-help">可选择 {{ appointment_date_min }} 至 {{ appointment_date_max }}（北京时间），最终时间以顾问确认为准。</p>
+    </div>
+
+    <fieldset id="appointment-time-slots" class="appointment-field">
+      <legend>希望沟通时间段</legend>
+      <div class="appointment-slot-options">
+        <input id="appointment-slot-morning" name="time_slot" type="radio" value="morning" required>
+        <label for="appointment-slot-morning">上午</label>
+        <input id="appointment-slot-afternoon" name="time_slot" type="radio" value="afternoon" required>
+        <label for="appointment-slot-afternoon">下午</label>
+        <input id="appointment-slot-evening" name="time_slot" type="radio" value="evening" required>
+        <label for="appointment-slot-evening">晚上</label>
+      </div>
+    </fieldset>
+
+    <div class="appointment-field">
+      <label for="appointment-note">补充说明（选填）</label>
+      <textarea id="appointment-note" name="note" rows="4" maxlength="500" aria-describedby="appointment-note-help"></textarea>
+      <p id="appointment-note-help" class="appointment-help">可简要说明希望优先讨论的场景，不超过 500 个字符。</p>
+    </div>
+
+    <button class="btn btn-primary" type="submit">提交预约意向</button>
+    <p class="appointment-feedback" data-appointment-feedback role="status" aria-live="polite"></p>
+    <p class="appointment-error" data-appointment-error role="alert" hidden></p>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/report.js') }}" defer></script>
 {% endblock %}

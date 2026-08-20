@@ -97,6 +97,7 @@
 }
 
 .report-section,
+.report-appointment,
 .report-disclaimer {
   margin-top: 28px;
   padding: 44px;
@@ -104,6 +105,85 @@
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
+}
+
+.report-appointment form {
+  display: grid;
+  gap: 24px;
+  max-width: 760px;
+  margin-top: 28px;
+}
+
+.appointment-field {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.appointment-field > label,
+.appointment-field legend {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.appointment-field input[type="date"],
+.appointment-field textarea {
+  width: 100%;
+  padding: 13px 14px;
+  color: var(--text);
+  font: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.appointment-slot-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.appointment-slot-options input {
+  position: absolute;
+  opacity: 0;
+}
+
+.appointment-slot-options label {
+  padding: 13px 16px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.appointment-slot-options input:focus-visible + label {
+  outline: 3px solid rgba(0, 113, 227, 0.28);
+  outline-offset: 2px;
+}
+
+.appointment-slot-options input:checked + label {
+  color: var(--primary);
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.appointment-help,
+.appointment-feedback,
+.appointment-error {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.appointment-error {
+  color: #b42318;
+}
+
+#appointment-intent-form[aria-busy="true"] {
+  opacity: 0.72;
 }
 
 .report-section-heading {
@@ -472,6 +552,7 @@
 
   .report-hero,
   .report-section,
+  .report-appointment,
   .report-disclaimer {
     padding: 28px 22px;
   }
@@ -504,13 +585,18 @@
   .risk-list {
     columns: 1;
   }
+
+  .appointment-slot-options {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media print {
   .nav,
   .footer,
   .sticky-cta,
-  .report-download {
+  .report-download,
+  .report-appointment {
     display: none !important;
   }
 
