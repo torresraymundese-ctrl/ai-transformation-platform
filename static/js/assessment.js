@@ -6,6 +6,9 @@
   const ATTRIBUTION_LIMIT = 100;
   const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign"];
   const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const UNICODE_DECIMAL_DIGIT_PATTERN = /\p{Decimal_Number}/gu;
+  const CONTACT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const MAINLAND_MOBILE_PATTERN = /^1[3-9]\d{9}$/;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   const BRANCH_OPTIONS = [
@@ -78,6 +81,16 @@
   };
 
   const root = document.getElementById("assessment-wizard");
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      clearStoredStateAndRedirect: clearStoredStateAndRedirect,
+      configurationResponseIsCurrent: configurationResponseIsCurrent,
+      ensureConfigurationAvailable: ensureConfigurationAvailable,
+      privacySafeAttribution: privacySafeAttribution,
+      setMutableControlsBusy: setMutableControlsBusy,
+      validateContactValues: validateContactValues,
+    };
+  }
   if (!root) return;
 
   const stepTarget = document.getElementById("assessment-step");
@@ -107,6 +120,8 @@
 
   let configuration = null;
   let contactGateVisible = false;
+  let busyRequestCount = 0;
+  let latestConfigurationRequest = 0;
 
   function createSubmissionKey() {
     return crypto.randomUUID();
@@ -117,7 +132,7 @@
     const values = {};
     ATTRIBUTION_KEYS.forEach(function (key) {
       values[key] = params.has(key)
-        ? params.get(key).slice(0, ATTRIBUTION_LIMIT)
+        ? privacySafeAttribution(params.get(key))
         : "";
     });
     return values;
@@ -140,7 +155,7 @@
     const attribution = {};
     ATTRIBUTION_KEYS.forEach(function (key) {
       attribution[key] = typeof value.attribution[key] === "string"
-        ? value.attribution[key].slice(0, ATTRIBUTION_LIMIT)
+        ? privacySafeAttribution(value.attribution[key])
         : "";
     });
     return {
@@ -170,6 +185,15 @@
       submissionKey: state.submissionKey,
       attribution: Object.assign({}, state.attribution),
     };
+  }
+
+  function privacySafeAttribution(value) {
+    if (typeof value !== "string") return "";
+    const normalized = value.normalize("NFKC").trim().slice(0, ATTRIBUTION_LIMIT);
+    if (normalized.indexOf("@") !== -1) return "";
+    const decimalDigits = normalized.match(UNICODE_DECIMAL_DIGIT_PATTERN) || [];
+    if (decimalDigits.length >= 11) return "";
+    return normalized;
   }
 
   function persistState() {
@@ -391,6 +415,7 @@
   }
 
   async function selectBranch(code) {
+    if (busyRequestCount > 0) return;
     if (code === state.branchCode && configuration) return;
     state.branchCode = code;
     state.subbranchCode = "";
@@ -405,22 +430,50 @@
   }
 
   async function fetchConfiguration(branchCode) {
+    const requestId = latestConfigurationRequest + 1;
+    latestConfigurationRequest = requestId;
     setBusy(true);
     try {
       const url = root.dataset.configBase + "/" + encodeURIComponent(branchCode);
       const result = await requestJson(url, { method: "GET" });
-      if (state.branchCode !== branchCode) return;
+      if (!configurationResponseIsCurrent(
+        requestId,
+        latestConfigurationRequest,
+        branchCode,
+        state.branchCode
+      )) return false;
       configuration = result;
       sanitizeStateForConfiguration();
       clearError();
       renderWizard();
       announce("行业评估选项已加载。");
+      return true;
     } catch (error) {
-      configuration = null;
-      showError("评估选项暂时无法加载，您的进度已保留，请重试。", continueButton);
+      if (configurationResponseIsCurrent(
+        requestId,
+        latestConfigurationRequest,
+        branchCode,
+        state.branchCode
+      )) {
+        configuration = null;
+        showError("评估选项暂时无法加载，您的进度已保留，请重试。", continueButton);
+      }
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  function configurationResponseIsCurrent(requestId, latestRequestId, requestedBranch, selectedBranch) {
+    return requestId === latestRequestId && requestedBranch === selectedBranch;
+  }
+
+  async function ensureConfigurationAvailable(branchCode, currentConfiguration, loader) {
+    if (currentConfiguration && currentConfiguration.branch.code === branchCode) {
+      return true;
+    }
+    if (!branchCode) return false;
+    return Boolean(await loader(branchCode));
   }
 
   function sanitizeStateForConfiguration() {
@@ -506,10 +559,26 @@
   }
 
   async function handleContinue() {
+    if (busyRequestCount > 0) return;
     clearError();
     if (contactGateVisible) {
       await requestCompletion();
       return;
+    }
+
+    if (!state.branchCode && state.step > 0) {
+      state.step = 0;
+      renderWizard();
+      showError("请重新选择所属行业。", stepTarget.querySelector('[name="branch-code"]'));
+      return;
+    }
+    if (state.branchCode) {
+      const ready = await ensureConfigurationAvailable(
+        state.branchCode,
+        configuration,
+        fetchConfiguration
+      );
+      if (!ready) return;
     }
 
     const issue = validateCurrentStep();
@@ -528,6 +597,7 @@
   }
 
   function handleBack() {
+    if (busyRequestCount > 0) return;
     clearError();
     if (contactGateVisible) {
       contactGateVisible = false;
@@ -586,10 +656,23 @@
   }
 
   async function requestCompletion() {
-    const invalidField = form.querySelector(":invalid");
-    if (invalidField) {
-      invalidField.setAttribute("aria-invalid", "true");
-      showError("请填写企业名称、联系人和有效手机号，并勾选隐私授权。", invalidField);
+    const contact = validateContactValues({
+      company_name: document.getElementById("company-name").value,
+      contact_name: document.getElementById("contact-name").value,
+      phone: document.getElementById("phone").value,
+      email: document.getElementById("email").value,
+      wechat: document.getElementById("wechat").value,
+    });
+    if (!contact.valid) {
+      const invalidField = document.getElementById(contact.fieldId);
+      showError(contact.message, invalidField);
+      invalidField.focus();
+      return;
+    }
+    const consentField = document.getElementById("privacy-consent");
+    if (!consentField.checked) {
+      showError("请阅读说明并勾选隐私与联系授权。", consentField);
+      consentField.focus();
       return;
     }
 
@@ -605,15 +688,9 @@
         body: JSON.stringify({
           submission_key: state.submissionKey,
           assessment: buildAssessmentPayload(),
-          contact: {
-            company_name: document.getElementById("company-name").value.trim(),
-            contact_name: document.getElementById("contact-name").value.trim(),
-            phone: document.getElementById("phone").value.trim(),
-            email: document.getElementById("email").value.trim(),
-            wechat: document.getElementById("wechat").value.trim(),
-          },
+          contact: contact.values,
           consent: {
-            accepted: document.getElementById("privacy-consent").checked,
+            accepted: consentField.checked,
             policy_version: configuration.consent_policy_version,
           },
           attribution: {
@@ -627,8 +704,12 @@
       if (typeof result.report_url !== "string" || !result.report_url.startsWith("/assessment/report/")) {
         throw new Error("invalid report destination");
       }
-      sessionStorage.removeItem(STORAGE_KEY);
-      window.location.assign(result.report_url);
+      clearStoredStateAndRedirect(
+        sessionStorage,
+        window.location,
+        STORAGE_KEY,
+        result.report_url
+      );
     } catch (error) {
       showError("完整报告暂时无法生成，您的答案和已填写信息仍保留在本页，请重试。", continueButton);
     } finally {
@@ -648,10 +729,55 @@
     return payload;
   }
 
+  function clearStoredStateAndRedirect(storage, location, storageKey, reportUrl) {
+    try {
+      storage.removeItem(storageKey);
+    } catch (error) {
+      // Storage cleanup is best-effort after the server has completed the flow.
+    }
+    location.assign(reportUrl);
+  }
+
+  function validateContactValues(rawValues) {
+    const values = {
+      company_name: stringValue(rawValues.company_name).trim(),
+      contact_name: stringValue(rawValues.contact_name).trim(),
+      phone: stringValue(rawValues.phone).trim(),
+      email: stringValue(rawValues.email).trim(),
+      wechat: stringValue(rawValues.wechat).trim(),
+    };
+    if (!values.company_name) return invalidContact("company-name", "请输入企业名称。");
+    if (values.company_name.length > 200) return invalidContact("company-name", "企业名称不能超过 200 个字符。");
+    if (!values.contact_name) return invalidContact("contact-name", "请输入联系人。");
+    if (values.contact_name.length > 100) return invalidContact("contact-name", "联系人不能超过 100 个字符。");
+    if (!validMainlandMobile(values.phone)) return invalidContact("phone", "请输入有效的中国大陆手机号。");
+    if (values.email.length > 254 || (values.email && !CONTACT_EMAIL_PATTERN.test(values.email))) {
+      return invalidContact("email", "请输入包含完整域名的有效邮箱，或将邮箱留空。");
+    }
+    if (values.wechat.length > 64) return invalidContact("wechat", "微信号不能超过 64 个字符。");
+    return { valid: true, fieldId: "", message: "", values: values };
+  }
+
+  function validMainlandMobile(value) {
+    let normalized = value.replace(/[\s-]/g, "");
+    if (normalized.startsWith("+86")) normalized = normalized.slice(3);
+    else if (normalized.startsWith("0086")) normalized = normalized.slice(4);
+    return MAINLAND_MOBILE_PATTERN.test(normalized);
+  }
+
+  function invalidContact(fieldId, message) {
+    return { valid: false, fieldId: fieldId, message: message, values: null };
+  }
+
   function setBusy(isBusy) {
-    root.setAttribute("aria-busy", String(isBusy));
-    root.querySelectorAll("button").forEach(function (button) {
-      button.disabled = isBusy;
+    busyRequestCount = Math.max(0, busyRequestCount + (isBusy ? 1 : -1));
+    setMutableControlsBusy(root, busyRequestCount > 0);
+  }
+
+  function setMutableControlsBusy(container, isBusy) {
+    container.setAttribute("aria-busy", String(isBusy));
+    container.querySelectorAll("button, input, select, textarea").forEach(function (control) {
+      control.disabled = isBusy;
     });
   }
 

@@ -1,0 +1,137 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+global.window = {
+  matchMedia: function () { return { matches: false }; },
+};
+global.document = {
+  getElementById: function () { return null; },
+};
+
+const wizard = require("../../static/js/assessment.js");
+
+
+test("successful completion redirects when storage cleanup throws", function () {
+  const assigned = [];
+  const storage = {
+    removeItem: function () { throw new Error("storage blocked"); },
+  };
+  const location = {
+    assign: function (url) { assigned.push(url); },
+  };
+
+  wizard.clearStoredStateAndRedirect(
+    storage,
+    location,
+    "assessment-v2-state",
+    "/assessment/report/41"
+  );
+
+  assert.deepEqual(assigned, ["/assessment/report/41"]);
+});
+
+
+test("busy state freezes and restores every mutable form control", function () {
+  const controls = Array.from({ length: 4 }, function () {
+    return { disabled: false };
+  });
+  const attributes = {};
+  const root = {
+    setAttribute: function (name, value) { attributes[name] = value; },
+    querySelectorAll: function (selector) {
+      assert.equal(selector, "button, input, select, textarea");
+      return controls;
+    },
+  };
+
+  wizard.setMutableControlsBusy(root, true);
+  assert.equal(attributes["aria-busy"], "true");
+  assert.ok(controls.every(function (control) { return control.disabled; }));
+
+  wizard.setMutableControlsBusy(root, false);
+  assert.equal(attributes["aria-busy"], "false");
+  assert.ok(controls.every(function (control) { return !control.disabled; }));
+});
+
+
+test("configuration retry is recoverable and stale responses are rejected", async function () {
+  assert.equal(
+    wizard.configurationResponseIsCurrent(3, 3, "retail", "retail"),
+    true
+  );
+  assert.equal(
+    wizard.configurationResponseIsCurrent(2, 3, "retail", "retail"),
+    false
+  );
+  assert.equal(
+    wizard.configurationResponseIsCurrent(3, 3, "manufacturing", "retail"),
+    false
+  );
+
+  let attempts = 0;
+  const failed = await wizard.ensureConfigurationAvailable(
+    "retail",
+    null,
+    async function () { attempts += 1; return false; }
+  );
+  const recovered = await wizard.ensureConfigurationAvailable(
+    "retail",
+    null,
+    async function (branch) { attempts += 1; return branch === "retail"; }
+  );
+
+  assert.equal(failed, false);
+  assert.equal(recovered, true);
+  assert.equal(attempts, 2);
+});
+
+
+test("initial attribution drops normalized contact-like values", function () {
+  assert.equal(wizard.privacySafeAttribution("organic-search"), "organic-search");
+  assert.equal(wizard.privacySafeAttribution("ｌｅａｄ＠ｅｘａｍｐｌｅ．ｃｏｍ"), "");
+  assert.equal(wizard.privacySafeAttribution("ref +86 (138) 0013-8000"), "");
+  assert.equal(wizard.privacySafeAttribution("١٣٨٠٠١٣٨٠٠٠"), "");
+  assert.equal(wizard.privacySafeAttribution("campaign-2026-08-19-123"), "");
+  assert.equal(wizard.privacySafeAttribution("x".repeat(120)).length, 100);
+});
+
+
+test("contact validation trims required values and enforces dotted email", function () {
+  const blank = wizard.validateContactValues({
+    company_name: "   ",
+    contact_name: " 张先生 ",
+    phone: " 13800138000 ",
+    email: "",
+    wechat: "",
+  });
+  assert.equal(blank.valid, false);
+  assert.equal(blank.fieldId, "company-name");
+
+  const undotted = wizard.validateContactValues({
+    company_name: " 示例企业 ",
+    contact_name: " 张先生 ",
+    phone: " 13800138000 ",
+    email: "lead@localhost",
+    wechat: " wx-id ",
+  });
+  assert.equal(undotted.valid, false);
+  assert.equal(undotted.fieldId, "email");
+
+  const valid = wizard.validateContactValues({
+    company_name: " 示例企业 ",
+    contact_name: " 张先生 ",
+    phone: " +86 138-0013-8000 ",
+    email: " lead@example.invalid ",
+    wechat: " wx-id ",
+  });
+  assert.equal(valid.valid, true);
+  assert.deepEqual(valid.values, {
+    company_name: "示例企业",
+    contact_name: "张先生",
+    phone: "+86 138-0013-8000",
+    email: "lead@example.invalid",
+    wechat: "wx-id",
+  });
+});

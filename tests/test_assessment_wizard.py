@@ -115,8 +115,8 @@ def test_storage_snapshot_is_non_contact_and_restores_one_submission_key():
     assert "const restoredState = readStoredState();" in source
     assert "restoredState.submissionKey" in source
     assert 'sessionStorage.setItem(STORAGE_KEY, JSON.stringify(storedStateSnapshot()))' in source
-    assert "sessionStorage.removeItem(STORAGE_KEY)" in source
-    assert "params.get(key).slice(0, ATTRIBUTION_LIMIT)" in source
+    assert "storage.removeItem(storageKey)" in source
+    assert "privacySafeAttribution(params.get(key))" in source
     assert 'const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign"]' in source
 
 
@@ -125,12 +125,13 @@ def test_requests_disable_actions_and_failure_paths_preserve_entered_state():
     source = SCRIPT.read_text(encoding="utf-8")
 
     assert "function setBusy(isBusy)" in source
-    assert "button.disabled = isBusy" in source
+    assert 'querySelectorAll("button, input, select, textarea")' in source
+    assert "control.disabled = isBusy" in source
     assert source.count("setBusy(true)") >= 3
     assert source.count("setBusy(false)") >= 3
     assert 'await requestJson("/api/v2/assessment/preview"' in source
     assert 'await requestJson("/api/v2/assessment/complete"' in source
-    assert "window.location.assign(result.report_url)" in source
+    assert "clearStoredStateAndRedirect(" in source
     assert 'form.addEventListener("submit"' in source
     assert "event.preventDefault()" in source
 
