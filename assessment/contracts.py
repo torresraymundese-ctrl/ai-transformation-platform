@@ -126,3 +126,43 @@ class RoiResult:
     conservative: RoiBand
     midpoint: RoiBand
     ideal: RoiBand
+
+
+@dataclass(frozen=True)
+class Contact:
+    company_name: str
+    contact_name: str
+    phone: str
+    email: str = ""
+    wechat: str = ""
+
+
+@dataclass(frozen=True)
+class Consent:
+    accepted: bool
+    policy_version: str
+    source: str = "website_assessment"
+
+
+@dataclass(frozen=True)
+class Attribution:
+    source: str
+    utm_source: str = ""
+    utm_medium: str = ""
+    utm_campaign: str = ""
+
+
+@dataclass(frozen=True)
+class CompletionRequest:
+    submission_key: str
+    profile: AssessmentProfile
+    contact: Contact
+    consent: Consent
+    attribution: Attribution
+
+
+@dataclass(frozen=True)
+class CompletionResult:
+    assessment_id: int
+    lead_id: int
+    created: bool
