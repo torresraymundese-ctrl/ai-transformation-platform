@@ -1,0 +1,230 @@
+<main class="report-page" data-snapshot-sha256="{{ snapshot_digest }}">
+  <header class="report-hero">
+    <p class="report-eyebrow">企业 AI 就绪度评估</p>
+    <h1>AI 转型评估报告</h1>
+    <p class="report-version">规则版本 {{ snapshot.rule_version }}</p>
+    <div class="report-summary" aria-label="评估摘要">
+      <div>
+        <span>总分</span>
+        <strong>{{ snapshot.scores.overall_score }}</strong>
+        <small>/ 100</small>
+      </div>
+      <div>
+        <span>成熟度</span>
+        <strong>{{ maturity_label }}</strong>
+      </div>
+    </div>
+    {% if not pdf_mode %}
+    <a class="btn btn-primary report-download" href="{{ url_for('assessment_v2.assessment_report_pdf', assessment_id=assessment_id) }}">下载 PDF 报告</a>
+    {% endif %}
+  </header>
+
+  <section id="readiness-scores" class="report-section" aria-labelledby="readiness-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">01</p>
+      <div>
+        <h2 id="readiness-title">六维就绪度</h2>
+        <p>评估得分与平台建议就绪参考线使用同一规则版本。</p>
+      </div>
+    </div>
+    <div class="score-layout">
+      <svg id="readiness-radar" class="radar-chart" viewBox="0 0 320 320" role="img" aria-labelledby="report-radar-title report-radar-desc">
+        <title id="report-radar-title">六维 AI 就绪度雷达图</title>
+        <desc id="report-radar-desc">蓝色区域表示本次评估得分，虚线表示平台建议就绪参考线。表格提供相同数据。</desc>
+        {% for points in radar.grid %}
+        <polygon class="radar-grid" points="{{ points }}"></polygon>
+        {% endfor %}
+        {% for axis in radar.axes %}
+        <line class="radar-axis" x1="160" y1="160" x2="{{ axis.x }}" y2="{{ axis.y }}"></line>
+        <text x="{{ axis.label_x }}" y="{{ axis.label_y }}" text-anchor="{{ axis.anchor }}">{{ axis.label }}</text>
+        {% endfor %}
+        <polygon class="radar-reference" points="{{ radar.reference }}"></polygon>
+        <polygon class="radar-score" points="{{ radar.score }}"></polygon>
+      </svg>
+
+      <div class="score-table-wrap">
+        <table>
+          <caption>六维得分与平台建议就绪参考线</caption>
+          <thead>
+            <tr>
+              <th scope="col">维度</th>
+              <th scope="col">本次得分</th>
+              <th scope="col">参考线</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in dimension_rows %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              <td>{{ row.score }}</td>
+              <td>{{ row.reference }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="chart-legend" aria-hidden="true">
+          <span><i class="legend-score"></i>本次得分</span>
+          <span><i class="legend-reference"></i>平台建议就绪参考线</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="report-section" aria-labelledby="diagnosis-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">02</p>
+      <div>
+        <h2 id="diagnosis-title">优势与首要短板</h2>
+        <p>解释来自固定规则模板，不由大模型动态生成。</p>
+      </div>
+    </div>
+    <div class="diagnosis-grid">
+      <article id="strengths" class="diagnosis-card diagnosis-strength">
+        <p class="card-label">突出优势</p>
+        <h3>{{ dimension_labels[snapshot.scores.strongest.dimension] }}</h3>
+        <p>{{ snapshot.scores.strongest.explanation }}</p>
+      </article>
+      <article id="weaknesses" class="diagnosis-card diagnosis-weakness">
+        <p class="card-label">首要短板</p>
+        <h3>{{ dimension_labels[snapshot.scores.weakest.dimension] }}</h3>
+        <p>{{ snapshot.scores.weakest.explanation }}</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="recommendations" class="report-section" aria-labelledby="recommendations-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">03</p>
+      <div>
+        <h2 id="recommendations-title">优先场景建议</h2>
+        <p>仅展示通过能力门槛和匹配规则的场景。</p>
+      </div>
+    </div>
+    <div class="recommendation-list">
+      {% for recommendation in snapshot.recommendations %}
+      <article class="recommendation-card">
+        <div class="recommendation-rank">{{ "%02d" | format(loop.index) }}</div>
+        <div>
+          <p class="card-label">匹配分 {{ recommendation.match_score }}</p>
+          <h3>{{ scenario_labels.get(recommendation.scenario.code, recommendation.scenario.code) }}</h3>
+          <p class="recommendation-meta">集成级别：{{ recommendation.scenario.integration_level }} · 建议周期：{{ recommendation.scenario.delivery_weeks.min }}—{{ recommendation.scenario.delivery_weeks.max }} 周</p>
+          <ul>
+            {% for reason in recommendation.reasons %}<li>{{ reason }}</li>{% endfor %}
+          </ul>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section id="roi" class="report-section" aria-labelledby="roi-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">04</p>
+      <div>
+        <h2 id="roi-title">ROI 三档测算</h2>
+        <p>区间选择与场景系数共同形成保守、中位和理想结果。</p>
+      </div>
+    </div>
+    <div class="roi-grid">
+      {% for code, label in roi_bands %}
+      {% set band = snapshot.roi[code] %}
+      <article class="roi-band">
+        <h3>{{ label }}档</h3>
+        <dl>
+          <div><dt>年度总节省</dt><dd>¥{{ band.annual_savings }}</dd></div>
+          <div><dt>初始投入</dt><dd>¥{{ band.initial_investment }}</dd></div>
+          <div><dt>年度持续服务</dt><dd>¥{{ band.annual_support }}</dd></div>
+          <div><dt>预计回收月数</dt><dd>{% if band.payback_months is none %}暂无法估算{% else %}{{ band.payback_months }} 个月{% endif %}</dd></div>
+          <div><dt>三年净收益</dt><dd>¥{{ band.three_year_net }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="calculation-basis">
+      <h3>测算依据</h3>
+      <p>主场景：{{ scenario_labels.get(snapshot.calculation_basis.selected_scenario, snapshot.calculation_basis.selected_scenario) }}</p>
+      <p>效率系数：{{ snapshot.calculation_basis.coefficients.efficiency | join(' / ') }}；损耗改善系数：{{ snapshot.calculation_basis.coefficients.loss_improvement | join(' / ') }}；持续服务系数：{{ snapshot.calculation_basis.coefficients.annual_support_rate | join(' / ') }}</p>
+    </div>
+  </section>
+
+  <section class="report-section" aria-labelledby="roadmap-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">05</p>
+      <div>
+        <h2 id="roadmap-title">行动路线图</h2>
+        <p>先完成 90 天验证，再按成熟度逐年扩展。</p>
+      </div>
+    </div>
+    <div class="roadmap-grid">
+      <div id="roadmap-90-days">
+        <h3>90 天行动计划</h3>
+        <ol class="timeline-list">
+          {% for item in snapshot.roadmap_90_days %}
+          <li><strong>第 {{ item.days }} 天</strong><span>{{ item.action }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+      <div id="roadmap-years">
+        <h3>1—3 年路线图</h3>
+        <ol class="timeline-list">
+          {% for item in snapshot.roadmap_years_1_3 %}
+          <li><strong>第 {{ item.year }} 年</strong><span>{{ item.action }}</span></li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="service-packages" class="report-section" aria-labelledby="packages-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">06</p>
+      <div>
+        <h2 id="packages-title">匹配服务包</h2>
+        <p>范围、配合、排除项和验收标准均来自发布时的不可变快照。</p>
+      </div>
+    </div>
+    {% for recommendation in snapshot.recommendations %}
+    {% set package = recommendation.package %}
+    <article class="service-package">
+      <header>
+        <p class="card-label">{{ package.category }}</p>
+        <h3>{{ package.public_name }}</h3>
+        <p class="package-budget"><strong>参考预算：</strong>¥{{ package.budget_range.min }}—¥{{ package.budget_range.max }}</p>
+        <p class="package-timeline"><strong>交付周期：</strong>{{ package.delivery_weeks.min }}—{{ package.delivery_weeks.max }} 周</p>
+      </header>
+      <div class="package-details">
+        <section class="package-deliverables"><h4>交付物</h4><ul>{% for item in package.deliverables %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-steps"><h4>实施步骤</h4><ol>{% for item in package.implementation_steps %}<li>{{ item }}</li>{% endfor %}</ol></section>
+        <section class="package-cooperation"><h4>客户配合</h4><ul>{% for item in package.prerequisites %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-exclusions"><h4>明确不包含</h4><ul>{% for item in package.not_included %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-acceptance"><h4>验收标准</h4><ul>{% for item in package.acceptance %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-support"><h4>培训、质保与支持</h4><p>交付后支持 {{ package.support_days }} 天。</p></section>
+      </div>
+      <p class="package-note">参考预算，最终范围和报价以需求确认结果为准。</p>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section id="risks" class="report-section" aria-labelledby="risks-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">07</p>
+      <div>
+        <h2 id="risks-title">风险与控制建议</h2>
+        <p>在立项和验收前逐项确认以下边界。</p>
+      </div>
+    </div>
+    <ul class="risk-list">
+      {% for recommendation in snapshot.recommendations %}
+      {% for risk in recommendation.risks %}
+      <li><strong>{{ risk.code }}</strong><span>{{ risk.explanation }}</span></li>
+      {% endfor %}
+      {% endfor %}
+    </ul>
+  </section>
+
+  <footer id="report-disclaimer" class="report-disclaimer">
+    <h2>重要说明</h2>
+    <p>{{ snapshot.disclaimer }}</p>
+    <p>ROI 测算基于用户选择的区间与已发布规则系数，不构成收益承诺；实际范围、投入和周期以需求确认结果为准。</p>
+  </footer>
+</main>

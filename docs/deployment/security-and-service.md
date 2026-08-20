@@ -42,6 +42,24 @@ chown -R ai-platform:ai-platform /opt/ai-platform/data
 
 生产虚拟环境位于 `/opt/ai-platform/.venv`，由 root 安装锁定依赖，运行用户仅需读取权限。
 
+## PDF 运行时与阶段 7 预检
+
+生产环境固定使用 `WeasyPrint==69.0`。Ubuntu 需要预先安装 WeasyPrint 69 官方 wheel 指南列出的运行库：
+
+- `libpango-1.0-0`
+- `libharfbuzz0b`
+- `libpangoft2-1.0-0`
+- `libharfbuzz-subset0`
+- `fonts-noto-cjk`（确保中文报告字体完整）
+
+安装应用依赖和上述系统包后，阶段 7 上线门禁必须单独执行：
+
+```bash
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python -m weasyprint --info
+```
+
+命令必须成功显示 WeasyPrint、Python 和底层文本渲染库信息，随后才能进行 PDF 中文字体、分页、表格和雷达图烟雾测试。此预检不得加入 systemd `ExecStartPre`：PDF 原生运行库异常时，HTML 应用和已生成的在线报告仍须能够启动并访问，PDF 路由只返回可重试的通用 503。
+
 ## 安装服务单元
 
 ```bash

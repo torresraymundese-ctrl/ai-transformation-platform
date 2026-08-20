@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}AI 转型评估报告{% endblock %}
+
+{% block head %}
+<meta name="robots" content="noindex,nofollow,noarchive">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}">
+{% endblock %}
+
+{% block body_class %}report-body{% endblock %}
+
+{% block content %}
+{% include "assessment/_report_content.html" %}
+{% endblock %}

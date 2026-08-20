@@ -3,3 +3,4 @@ bleach>=6.2,<7
 requests>=2.28
 beautifulsoup4>=4.12
 gunicorn>=21.2
+WeasyPrint==69.0

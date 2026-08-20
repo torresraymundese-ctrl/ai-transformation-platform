@@ -1,12 +1,27 @@
 """Public V2 assessment configuration, preview, and completion APIs."""
 
 from decimal import DecimalException
+import hashlib
+import json
+from math import cos, pi, sin
+from pathlib import Path
 import sqlite3
 from urllib.parse import urlsplit
 
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import (
+    Blueprint,
+    abort,
+    after_this_request,
+    current_app,
+    jsonify,
+    make_response,
+    render_template,
+    request,
+    session,
+)
 
 import assessment_repository
+import report_pdf
 from assessment.contracts import AssessmentInputError
 from assessment.scoring import score_assessment
 from assessment_completion_service import complete_assessment
@@ -40,6 +55,44 @@ PRIVACY_DISCLOSURE_TEXT = {
     "expiry_action": "到期后匿名化联系信息和跟进备注，仅保留不可回溯个人的评估与转化统计。",
     "rights": "可通过上述联系方式申请查阅、更正、撤回同意或删除个人信息。",
 }
+
+REPORT_DIMENSIONS = (
+    ("business_value", "业务价值"),
+    ("process", "流程基础"),
+    ("data", "数据基础"),
+    ("systems", "系统基础"),
+    ("organization", "组织准备"),
+    ("delivery", "落地条件"),
+)
+
+MATURITY_LABELS = {
+    "explore": "探索起步",
+    "pilot": "单点试验",
+    "scale": "规模扩展",
+    "collaborate": "智能协同",
+}
+
+SCENARIO_LABELS = {
+    "mfg_knowledge_assistant": "制造业知识助手",
+    "mfg_quality_inspection": "制造业质量检测",
+    "mfg_operations_reporting": "生产经营数据洞察",
+    "retail_ai_service": "零售智能客服",
+    "retail_marketing_content": "零售营销内容助手",
+    "retail_inventory_insight": "零售库存洞察",
+    "pro_document_knowledge": "专业文档知识助手",
+    "pro_delivery_drafting": "专业交付文档自动化",
+    "pro_contract_review": "合同审阅辅助",
+    "creative_content_workflow": "创意内容工作流",
+    "software_support_knowledge": "软件服务知识助手",
+    "project_delivery_automation": "项目交付自动化",
+    "data_process_foundation": "数据与流程准备",
+}
+
+ROI_BANDS = (
+    ("conservative", "保守"),
+    ("midpoint", "中位"),
+    ("ideal", "理想"),
+)
 
 
 @bp.get("/api/v2/assessment/config/<branch_code>")
@@ -175,6 +228,141 @@ def assessment_complete():
             "pdf_url": f"/assessment/report/{result.assessment_id}/pdf",
         }
     )
+
+
+@bp.get("/assessment/report/<int:assessment_id>")
+def assessment_report(assessment_id):
+    _protect_report_response()
+    snapshot = _authorized_report_snapshot(assessment_id)
+    if snapshot is None:
+        abort(404)
+    return render_template(
+        "assessment/report.html",
+        **_report_template_context(assessment_id, snapshot, pdf_mode=False),
+    )
+
+
+@bp.get("/assessment/report/<int:assessment_id>/pdf")
+def assessment_report_pdf(assessment_id):
+    _protect_report_response()
+    snapshot = _authorized_report_snapshot(assessment_id)
+    if snapshot is None:
+        abort(404)
+    html = render_template(
+        "assessment/report_pdf.html",
+        **_report_template_context(assessment_id, snapshot, pdf_mode=True),
+    )
+    try:
+        pdf = report_pdf.render_pdf(html, _trusted_app_base_url())
+        if not isinstance(pdf, (bytes, bytearray)) or not pdf:
+            raise TypeError("PDF renderer returned no bytes")
+    except Exception as error:
+        current_app.logger.error(
+            "PDF report generation unavailable failure_type=%s endpoint=%s",
+            type(error).__name__,
+            request.endpoint or "unknown",
+        )
+        return render_template(
+            "error.html",
+            title="PDF 暂时无法生成",
+            message="在线报告仍可查看，请稍后重试 PDF 下载。",
+        ), 503
+    response = make_response(bytes(pdf))
+    response.mimetype = "application/pdf"
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="ai-readiness-report-{assessment_id}.pdf"'
+    )
+    return response
+
+
+def _protect_report_response():
+    @after_this_request
+    def private_no_store(response):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
+def _authorized_report_snapshot(assessment_id):
+    report_ids = session.get("assessment_report_ids")
+    if not isinstance(report_ids, (list, tuple)):
+        return None
+    if not any(
+        type(value) is int and value == assessment_id for value in report_ids
+    ):
+        return None
+    return assessment_repository.load_report_snapshot(assessment_id)
+
+
+def _report_template_context(assessment_id, snapshot, pdf_mode):
+    scores = snapshot["scores"]
+    dimension_rows = []
+    for code, label in REPORT_DIMENSIONS:
+        dimension_rows.append(
+            {
+                "code": code,
+                "label": label,
+                "score": scores["dimension_scores"][code],
+                "reference": scores["reference_line"][code],
+            }
+        )
+    return {
+        "assessment_id": assessment_id,
+        "snapshot": snapshot,
+        "snapshot_digest": hashlib.sha256(
+            json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest(),
+        "dimension_rows": dimension_rows,
+        "dimension_labels": dict(REPORT_DIMENSIONS),
+        "radar": _radar_context(dimension_rows),
+        "maturity_label": MATURITY_LABELS[scores["maturity_code"]],
+        "scenario_labels": SCENARIO_LABELS,
+        "roi_bands": ROI_BANDS,
+        "pdf_mode": pdf_mode,
+    }
+
+
+def _radar_context(dimension_rows):
+    center = 160.0
+    radius = 100.0
+    angles = tuple(-pi / 2 + index * pi / 3 for index in range(6))
+
+    def polygon(values, scale=radius):
+        return " ".join(
+            f"{center + cos(angle) * scale * value / 100:.1f},"
+            f"{center + sin(angle) * scale * value / 100:.1f}"
+            for angle, value in zip(angles, values)
+        )
+
+    axes = []
+    anchors = ("middle", "start", "start", "middle", "end", "end")
+    for row, angle, anchor in zip(dimension_rows, angles, anchors):
+        axes.append(
+            {
+                "label": row["label"],
+                "x": f"{center + cos(angle) * radius:.1f}",
+                "y": f"{center + sin(angle) * radius:.1f}",
+                "label_x": f"{center + cos(angle) * 126:.1f}",
+                "label_y": f"{center + sin(angle) * 126 + 4:.1f}",
+                "anchor": anchor,
+            }
+        )
+    return {
+        "grid": [polygon((100,) * 6, scale) for scale in (25, 50, 75, 100)],
+        "score": polygon([row["score"] for row in dimension_rows]),
+        "reference": polygon([row["reference"] for row in dimension_rows]),
+        "axes": axes,
+    }
+
+
+def _trusted_app_base_url():
+    return f"{Path(current_app.root_path).resolve().as_uri().rstrip('/')}/"
 
 
 def _published_context(branch_code):

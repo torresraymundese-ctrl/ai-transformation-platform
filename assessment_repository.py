@@ -1,7 +1,7 @@
 """Typed read access to the published assessment and starter catalog."""
 
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from assessment.contracts import (
     AssessmentCatalog,
@@ -22,6 +22,21 @@ DIMENSIONS = (
     "delivery",
 )
 DEFAULT_VERSION_CODE = "v2.0-2026-08-19"
+REPORT_MATURITY_CODES = frozenset({"explore", "pilot", "scale", "collaborate"})
+PRIVATE_REPORT_KEYS = frozenset(
+    {
+        "company",
+        "company_name",
+        "contact",
+        "contact_name",
+        "phone",
+        "phone_normalized",
+        "mobile",
+        "email",
+        "contact_email",
+        "wechat",
+    }
+)
 
 
 def load_published_catalog(branch_code: str) -> AssessmentCatalog:
@@ -336,6 +351,54 @@ def find_by_submission_key(db, submission_key: str):
     ).fetchone()
 
 
+def load_report_snapshot(assessment_id: int):
+    """Return one complete immutable V2 snapshot, or ``None`` when unusable."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT a.report_snapshot_json,a.branch_code,a.subbranch_code,"
+            "a.department_code,a.company_size_code,a.dimension_scores_json,"
+            "a.overall_score,a.maturity_code,v.code AS rule_version_code "
+            "FROM assessments a "
+            "JOIN assessment_versions v ON v.id=a.rule_version_id "
+            "WHERE a.id=? AND a.submission_key IS NOT NULL "
+            "AND a.lead_id IS NOT NULL AND a.completed_at IS NOT NULL",
+            (assessment_id,),
+        ).fetchone()
+        if row is None or not isinstance(row["report_snapshot_json"], str):
+            return None
+        try:
+            snapshot = json.loads(row["report_snapshot_json"])
+            stored_dimensions = json.loads(row["dimension_scores_json"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not _valid_report_snapshot(snapshot):
+            return None
+        assessment = snapshot["assessment"]
+        scores = snapshot["scores"]
+        if snapshot["rule_version"] != row["rule_version_code"]:
+            return None
+        if any(
+            assessment[field] != row[field]
+            for field in (
+                "branch_code",
+                "subbranch_code",
+                "department_code",
+                "company_size_code",
+            )
+        ):
+            return None
+        if scores["dimension_scores"] != stored_dimensions:
+            return None
+        if scores["overall_score"] != row["overall_score"]:
+            return None
+        if scores["maturity_code"] != row["maturity_code"]:
+            return None
+        return snapshot
+    finally:
+        db.close()
+
+
 def insert_completed(
     db,
     lead_id,
@@ -449,3 +512,298 @@ def _json(value):
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _valid_report_snapshot(snapshot) -> bool:
+    if not isinstance(snapshot, dict) or _contains_private_report_key(snapshot):
+        return False
+    required = {
+        "schema_version",
+        "rule_version",
+        "assessment",
+        "scores",
+        "recommendations",
+        "roi",
+        "calculation_basis",
+        "roadmap_90_days",
+        "roadmap_years_1_3",
+        "disclaimer",
+    }
+    if not required <= snapshot.keys():
+        return False
+    if snapshot["schema_version"] != "2.0":
+        return False
+    if not _nonempty_text(snapshot["rule_version"]):
+        return False
+    if not _nonempty_text(snapshot["disclaimer"]):
+        return False
+    return all(
+        (
+            _valid_report_assessment(snapshot["assessment"]),
+            _valid_report_scores(snapshot["scores"]),
+            _valid_recommendations(snapshot["recommendations"]),
+            _valid_roi(snapshot["roi"]),
+            _valid_calculation_basis(snapshot["calculation_basis"]),
+            _valid_roadmap(snapshot["roadmap_90_days"], "days", 4),
+            _valid_roadmap(snapshot["roadmap_years_1_3"], "year", 3),
+        )
+    )
+
+
+def _valid_report_assessment(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required_text = (
+        "branch_code",
+        "subbranch_code",
+        "department_code",
+        "company_size_code",
+    )
+    return (
+        all(_nonempty_text(value.get(field)) for field in required_text)
+        and isinstance(value.get("pain_codes"), list)
+        and 1 <= len(value["pain_codes"]) <= 3
+        and all(_nonempty_text(item) for item in value["pain_codes"])
+        and isinstance(value.get("answers"), dict)
+        and all(
+            _nonempty_text(key) and _nonempty_text(item)
+            for key, item in value["answers"].items()
+        )
+        and isinstance(value.get("roi_choices"), dict)
+        and all(
+            _nonempty_text(key) and _nonempty_text(item)
+            for key, item in value["roi_choices"].items()
+        )
+    )
+
+
+def _valid_report_scores(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    dimensions = value.get("dimension_scores")
+    reference = value.get("reference_line")
+    if not _valid_dimension_values(dimensions) or not _valid_dimension_values(
+        reference
+    ):
+        return False
+    overall = value.get("overall_score")
+    if type(overall) is not int or not 0 <= overall <= 100:
+        return False
+    if value.get("maturity_code") not in REPORT_MATURITY_CODES:
+        return False
+    return _valid_dimension_explanation(value.get("strongest")) and (
+        _valid_dimension_explanation(value.get("weakest"))
+    )
+
+
+def _valid_dimension_values(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(DIMENSIONS)
+        and all(type(score) is int and 0 <= score <= 100 for score in value.values())
+    )
+
+
+def _valid_dimension_explanation(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("dimension") in DIMENSIONS
+        and _nonempty_text(value.get("explanation"))
+    )
+
+
+def _valid_recommendations(value) -> bool:
+    if not isinstance(value, list) or not 1 <= len(value) <= 3:
+        return False
+    return all(_valid_recommendation(item) for item in value)
+
+
+def _valid_recommendation(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    scenario = value.get("scenario")
+    package = value.get("package")
+    risks = value.get("risks")
+    match_score = value.get("match_score")
+    components = value.get("components")
+    reason_codes = value.get("reason_codes")
+    return (
+        isinstance(scenario, dict)
+        and _nonempty_text(scenario.get("code"))
+        and _nonempty_text(scenario.get("category_code"))
+        and scenario.get("integration_level") in {"low", "medium", "high"}
+        and _valid_week_range(scenario.get("delivery_weeks"))
+        and type(match_score) is int
+        and 0 <= match_score <= 100
+        and isinstance(components, dict)
+        and components
+        and all(
+            _nonempty_text(key) and type(score) is int and score >= 0
+            for key, score in components.items()
+        )
+        and isinstance(reason_codes, list)
+        and reason_codes
+        and all(_nonempty_text(item) for item in reason_codes)
+        and isinstance(value.get("reasons"), list)
+        and value["reasons"]
+        and all(_nonempty_text(item) for item in value["reasons"])
+        and len(reason_codes) == len(value["reasons"])
+        and isinstance(risks, list)
+        and len(risks) >= 1
+        and all(
+            isinstance(item, dict)
+            and _nonempty_text(item.get("code"))
+            and _nonempty_text(item.get("explanation"))
+            for item in risks
+        )
+        and _valid_package(package)
+    )
+
+
+def _valid_package(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    list_fields = (
+        "deliverables",
+        "implementation_steps",
+        "prerequisites",
+        "not_included",
+        "acceptance",
+    )
+    budget = value.get("budget_range")
+    budget_min = _decimal(budget.get("min")) if isinstance(budget, dict) else None
+    budget_max = _decimal(budget.get("max")) if isinstance(budget, dict) else None
+    return (
+        all(
+            _nonempty_text(value.get(field))
+            for field in ("code", "category", "public_name")
+        )
+        and isinstance(budget, dict)
+        and budget_min is not None
+        and budget_max is not None
+        and Decimal(0) <= budget_min <= budget_max
+        and _valid_week_range(value.get("delivery_weeks"))
+        and all(
+            isinstance(value.get(field), list)
+            and value[field]
+            and all(_nonempty_text(item) for item in value[field])
+            for field in list_fields
+        )
+        and type(value.get("support_days")) is int
+        and value["support_days"] >= 0
+    )
+
+
+def _valid_week_range(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and type(value.get("min")) is int
+        and type(value.get("max")) is int
+        and 0 < value["min"] <= value["max"]
+    )
+
+
+def _valid_roi(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "conservative",
+        "midpoint",
+        "ideal",
+    }:
+        return False
+    required_money = (
+        "current_annual_cost",
+        "labor_savings",
+        "loss_savings",
+        "annual_savings",
+        "initial_investment",
+        "annual_support",
+        "three_year_support",
+        "three_year_net",
+    )
+    for band in value.values():
+        if not isinstance(band, dict):
+            return False
+        if not all(_finite_decimal(band.get(field)) for field in required_money):
+            return False
+        payback = band.get("payback_months")
+        if payback is not None and not _finite_decimal(payback):
+            return False
+    return True
+
+
+def _valid_roadmap(value, position_key, expected_length) -> bool:
+    if not (
+        isinstance(value, list)
+        and len(value) == expected_length
+        and all(
+            isinstance(item, dict)
+            and position_key in item
+            and _nonempty_text(item.get("action"))
+            for item in value
+        )
+    ):
+        return False
+    if position_key == "days":
+        return [item[position_key] for item in value] == [
+            "1-15",
+            "16-30",
+            "31-60",
+            "61-90",
+        ]
+    return [item[position_key] for item in value] == [1, 2, 3]
+
+
+def _valid_calculation_basis(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    coefficients = value.get("coefficients")
+    choices = value.get("selected_roi_choices")
+    if not isinstance(coefficients, dict) or set(coefficients) != {
+        "efficiency",
+        "loss_improvement",
+        "annual_support_rate",
+    }:
+        return False
+    return (
+        _nonempty_text(value.get("selected_scenario"))
+        and isinstance(choices, dict)
+        and choices
+        and all(
+            _nonempty_text(key) and _nonempty_text(item)
+            for key, item in choices.items()
+        )
+        and all(
+            isinstance(coefficients[name], list)
+            and len(coefficients[name]) == 3
+            and all(_finite_decimal(item) for item in coefficients[name])
+            for name in coefficients
+        )
+        and value.get("selected_roi_bands")
+        == ["conservative", "midpoint", "ideal"]
+    )
+
+
+def _finite_decimal(value) -> bool:
+    return _decimal(value) is not None
+
+
+def _decimal(value):
+    try:
+        parsed = Decimal(str(value))
+        return parsed if parsed.is_finite() else None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _contains_private_report_key(value) -> bool:
+    if isinstance(value, dict):
+        if PRIVATE_REPORT_KEYS.intersection(value):
+            return True
+        return any(_contains_private_report_key(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_private_report_key(item) for item in value)
+    return False
+
+
+def _nonempty_text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
