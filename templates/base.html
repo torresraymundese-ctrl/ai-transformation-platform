@@ -8,7 +8,7 @@
 <style>{% block extra_css %}{% endblock %}</style>
 {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
 
 {% include "components/navigation.html" %}
 

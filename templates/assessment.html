@@ -1,373 +1,107 @@
 {% extends "base.html" %}
-{% block title %}企业AI就绪度评估 - 企业AI转型平台{% endblock %}
-{% block extra_css %}
-.progress-bar { height: 4px; background: var(--border-light); border-radius: 2px; margin-bottom: 32px; transition: all var(--transition); }
-.progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.4s var(--ease-out); }
-.industry-card { cursor: pointer; transition: all var(--transition); text-align: center; padding: 28px 20px; }
-.industry-card:hover { box-shadow: var(--shadow-xl); transform: translateY(-3px); border-color: var(--primary); }
-.industry-card.selected { border-color: var(--primary); background: var(--primary-light); box-shadow: var(--shadow-lg); }
-.industry-emoji { font-size: 36px; margin-bottom: 8px; }
-.industry-name { font-size: 15px; font-weight: 600; }
-.result-header { text-align: center; padding: 32px 0 24px; }
-.score-circle { width: 120px; height: 120px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 6px solid var(--primary); margin-bottom: 12px; }
-.score-num { font-size: 42px; font-weight: 700; color: var(--primary); letter-spacing: -0.02em; }
-.meter-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.meter-label { width: 80px; font-size: 13px; color: var(--text-secondary); text-align: right; flex-shrink: 0; }
-.meter-track { flex: 1; height: 8px; background: var(--border-light); border-radius: 4px; overflow: hidden; }
-.meter-fill { height: 100%; border-radius: 4px; transition: width 0.6s var(--ease-out); }
-.recommend-card { padding: 20px; border-radius: var(--radius); background: var(--primary-light); margin-bottom: 12px; border-left: 3px solid var(--primary); }
-.recommend-card h4 { font-size: 15px; margin-bottom: 4px; }
-.recommend-card p { font-size: 13px; color: var(--text-secondary); }
+{% block title %}企业 AI 就绪度评估 - 企业AI转型平台{% endblock %}
+{% block body_class %}assessment-route{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/assessment.css') }}">
 {% endblock %}
 {% block content %}
-<section class="page-hero"><h1>企业 AI 就绪度评估</h1><p>行业定制化评估 · 8 道行业题 + 4 道通用题 · 5 分钟生成专属方案</p></section>
-
-<section class="section"><div class="section-inner" style="max-width:740px;">
-<div id="assessment">
-  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%;"></div></div>
-  <div id="questionBox"></div>
-  <div style="display:flex;gap:12px;margin-top:32px;justify-content:space-between;align-items:center;">
-    <button class="btn btn-outline btn-sm" id="prevBtn" style="display:none;" onclick="prevQ()">← 上一步</button>
-    <div style="flex:1;"></div>
-    <button class="btn btn-primary" id="nextBtn" onclick="nextQ()">下一步 →</button>
-    <button class="btn btn-primary" id="submitBtn" style="display:none;" onclick="submit()">查看评估报告</button>
+<header class="assessment-hero">
+  <div class="assessment-hero__inner">
+    <p class="assessment-eyebrow">免费企业诊断</p>
+    <h1>企业 AI 就绪度评估</h1>
+    <p>用 6 个步骤梳理业务价值、流程、数据、系统和落地条件，约 5 分钟完成。</p>
   </div>
-  <div id="resultBox" style="display:none;"></div>
-</div>
-</div></section>
+</header>
 
-<script>
-// ====== INDUSTRY CUSTOMIZATION ======
-const INDUSTRIES = [
-  {id:"manufacturing", name:"制造业", emoji:"🏭", desc:"机械、电子、汽车、化工等"},
-  {id:"finance", name:"金融/保险", emoji:"🏦", desc:"银行、证券、保险、基金等"},
-  {id:"healthcare", name:"医疗/健康", emoji:"🏥", desc:"医院、药企、医疗器械等"},
-  {id:"retail", name:"零售/电商", emoji:"🛒", desc:"商超、连锁、电商平台等"},
-  {id:"construction", name:"建筑/地产", emoji:"🏗️", desc:"施工、设计、开发、物业等"},
-  {id:"tech", name:"科技/互联网", emoji:"💻", desc:"软件、SaaS、IT服务等"},
-  {id:"other", name:"其他行业", emoji:"🏢", desc:"教育、物流、农业、能源等"},
-];
+<main class="assessment-main">
+  <section
+    id="assessment-wizard"
+    class="assessment-wizard"
+    aria-labelledby="assessment-title"
+    data-config-base="/api/v2/assessment/config"
+    data-preview-url="{{ url_for('assessment_v2.assessment_preview') }}"
+    data-complete-url="{{ url_for('assessment_v2.assessment_complete') }}"
+  >
+    <div class="assessment-wizard__header">
+      <div>
+        <p id="assessment-progress-text" class="assessment-progress-text">第 1 步，共 6 步</p>
+        <h2 id="assessment-title">了解企业画像</h2>
+      </div>
+      <span class="assessment-time">约 5 分钟</span>
+    </div>
 
-// Industry-specific questions (6 each)
-const INDUSTRY_QUESTIONS = {
-  manufacturing: [
-    {q:"生产设备数据采集程度？", opts:["基本靠人工记录","部分设备有PLC联网","关键设备已联网且数据集中","全产线IoT覆盖，实时数据湖"]},
-    {q:"质量管理数字化水平？", opts:["全人工检验，纸质记录","部分工序有在线检测","SPC统计过程控制已上线","AI视觉质检+自动判定已部署"]},
-    {q:"设备维修知识如何管理？", opts:["全靠老师傅经验传承","有纸质维修手册","维修记录已电子化但分散","统一知识库，可快速检索故障案例"]},
-    {q:"供应链协同程度？", opts:["采购/库存/物流各自独立","部分链路有系统对接","供应链平台已打通上下游","智能预测+动态调拨+风险预警"]},
-    {q:"工艺文档标准化程度？", opts:["各工序标准不统一","有标准SOP但更新不及时","数字化工艺卡片已上线","工艺参数AI优化+自动下发"]},
-    {q:"MES/WMS等系统建设情况？", opts:["无MES/WMS系统","有单机版管理软件","MES已覆盖核心产线","MES+APS+WMS全面集成"]},
-  ],
-  finance: [
-    {q:"合规审查流程自动化？", opts:["全人工审核","有规则引擎辅助","NLP辅助合同/文档审查","AI全流程合规审查+实时预警"]},
-    {q:"客户风控手段？", opts:["纯人工经验判断","基于评分卡模型","机器学习风控模型已上线","实时多维AI风控+知识图谱"]},
-    {q:"客户服务渠道覆盖？", opts:["仅线下网点/电话","有在线客服但人工为主","智能客服处理常见问题","全渠道AI客服+情感分析+主动预警"]},
-    {q:"监管报告生成方式？", opts:["手工撰写，周期长","有固定模板但需人工填报","半自动化生成部分报表","AI自动提取数据+生成+校验"]},
-    {q:"反欺诈检测能力？", opts:["无系统化反欺诈","有规则引擎做交易监控","ML模型实时检测异常交易","AI多维度关联分析+图计算"]},
-    {q:"投资研究知识管理？", opts:["研究员各自收集信息","有研报库但检索不便","知识图谱关联行业/公司","AI研报生成+智能投研助手"]},
-  ],
-  healthcare: [
-    {q:"病历电子化程度？", opts:["仍以纸质病历为主","部分科室已电子化","全院HIS/EMR已打通","互联互通+AI辅助诊疗建议"]},
-    {q:"医学文献/指南知识管理？", opts:["医生自行查阅文献","有文献库但更新不及时","知识库已结构化且定期更新","AI实时检索+证据等级推荐"]},
-    {q:"影像类AI应用现状？", opts:["未引入AI辅助诊断","在试用AI辅助阅片","AI辅助诊断已覆盖多科室","AI+多模态融合精准诊断"]},
-    {q:"药品/耗材管理数字化？", opts:["人工盘点/请领","有SPD/药房系统","智能库存+效期预警","AI预测用药+自动补货"]},
-    {q:"患者随访与慢病管理？", opts:["电话回访为主","有随访系统但覆盖不全","线上随访+健康数据监测","AI个性化干预+风险分层"]},
-    {q:"医保控费/DRG执行？", opts:["未开展DRG","手工DRG分组","系统辅助DRG分组+费用预警","AI预测分组+成本优化"]},
-  ],
-  retail: [
-    {q:"线上线下数据打通程度？", opts:["线上/线下完全独立","部分渠道数据可汇总","全渠道数据已打通","全域OneID+实时CDP"]},
-    {q:"库存与供应链管理？", opts:["人工经验补货","有进销存系统","智能补货模型已上线","AI需求预测+动态调拨"]},
-    {q:"会员/客户画像建设？", opts:["无会员体系","有基础会员标签","RFM+行为画像已建立","AI精准分群+预测LTV"]},
-    {q:"营销活动策划方式？", opts:["人工策划，经验驱动","有营销日历模板","数据驱动A/B测试","AI自动策划+个性化推荐"]},
-    {q:"客服与售后能力？", opts:["纯人工客服","有工单系统","智能客服+人工协作","全渠道AI客服+主动服务"]},
-    {q:"选品与定价策略？", opts:["人工选品/定价","参考竞品定价","数据分析辅助选品","AI动态定价+智能选品"]},
-  ],
-  construction: [
-    {q:"施工规范/标准管理？", opts:["纸质规范，查阅不便","电子版标准但分散","统一标准库可检索","AI智能问答+规范自动匹配"]},
-    {q:"工程图纸/BIM应用？", opts:["传统2D图纸","部分项目用BIM","BIM+协同平台","BIM+AI审图+数字孪生"]},
-    {q:"项目进度管控？", opts:["Excel周报","项目管理软件","实时进度跟踪+预警","AI预测延期+智能调度"]},
-    {q:"安全管理体系？", opts:["传统安全检查","监控+人工巡检","AI视频识别危险行为","AI预测风险+主动防控"]},
-    {q:"供应链/材料管理？", opts:["传统采购模式","有供应商库","电子采购+比价","AI供应商评估+智能采购"]},
-    {q:"全过程文档管理？", opts:["纸质档案为主","电子文档但未结构化","统一文档管理系统","AI自动分类+智能检索"]},
-  ],
-  tech: [
-    {q:"研发知识管理方式？", opts:["各团队独立维护","Confluence/Wiki","知识库+标签体系","AI语义检索+自动关联"]},
-    {q:"技术文档搜索效率？", opts:["文档分散，靠人找","有文档搜索引擎","全文搜索+标签分类","AI语义搜索+自动摘要"]},
-    {q:"DevOps/项目协同？", opts:["传统瀑布模式","基本项目管理工具","CI/CD+看板","AI代码审查+自动测试"]},
-    {q:"运维/告警管理？", opts:["人工巡检","基础监控告警","APM+集中告警","AIOps智能根因分析"]},
-    {q:"客户成功/技术支持？", opts:["邮件/电话支持","工单系统","在线FAQ+工单","AI客服+主动预警"]},
-    {q:"数据驱动决策？", opts:["靠经验决策","有基础BI报表","数据看板+分析","AI预测+归因分析"]},
-  ],
-  other: [
-    {q:"核心业务流程数字化？", opts:["大部分流程线下/纸质","部分流程已线上化","主流程已数字化","全流程数字化+AI优化"]},
-    {q:"客户/用户管理方式？", opts:["Excel/手工记录","有CRM但利用率低","CRM深度使用+标签","AI客户洞察+预测"]},
-    {q:"数据分析与报表？", opts:["手工Excel报表","有BI工具但使用有限","业务部门自助分析","AI自动诊断+智能归因"]},
-    {q:"公司知识沉淀方式？", opts:["散落在个人手中","有文档共享盘","结构化知识库","AI知识库+智能问答"]},
-    {q:"IT投入与规划？", opts:["年IT预算<营收1%","1-3%，以运维为主","3-5%，有数字化团队",">5%，设立AI/创新部门"]},
-    {q:"行业特有合规要求？", opts:["无特殊合规需求","有基本合规要求","需要定期合规审计","强监管，需完整合规体系"]},
-  ],
-};
+    <progress id="assessment-progress" class="assessment-progress" max="6" value="1" aria-labelledby="assessment-progress-text">1 / 6</progress>
 
-const COMMON_QUESTIONS = [
-  {q:"企业数据基础现状？", opts:["数据散落、格式不统一","已有数据仓库但利用率低","数据治理完善、有统一目录","AI-Ready 数据层已就绪"]},
-  {q:"IT 基础设施与 AI 算力？", opts:["无 GPU/AI 基础设施","有基础 GPU 资源","私有云 GPU 集群可用","AI 平台/中台算力充足"]},
-  {q:"AI 项目预算范围？", opts:["10 万以下（探索期）","10-50 万（试点项目）","50-200 万（规模化部署）","200 万以上（全面转型）"]},
-  {q:"期望多久看到初步效果？", opts:["1 个月内","1-3 个月","3-6 个月","可接受长期投入"]},
-];
+    <p id="assessment-error" class="assessment-error" role="alert" tabindex="-1" hidden></p>
+    <p id="assessment-live-status" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
 
-let selectedIndustry = null, currentQ = -1, answers = {}; // -1 = industry picker
+    <form id="assessment-form" novalidate>
+      <div id="assessment-step" class="assessment-step" aria-live="off"></div>
 
-function totalSteps() { return 1 + (INDUSTRY_QUESTIONS[selectedIndustry]?.length||6) + COMMON_QUESTIONS.length + 1; }
-function progressPct() { return Math.round((currentQ + 1) / totalSteps() * 100); }
+      <section id="assessment-contact-gate" class="assessment-contact-gate" aria-labelledby="contact-gate-title" hidden>
+        <div class="preview-card">
+          <p class="assessment-eyebrow">简版结果</p>
+          <h2 id="contact-gate-title" tabindex="-1">您的评估已完成</h2>
+          <p>提交联系方式并授权后，即时查看完整报告和 PDF。</p>
+          <dl class="preview-summary">
+            <div>
+              <dt>成熟度</dt>
+              <dd id="preview-maturity"></dd>
+            </div>
+            <div>
+              <dt>突出优势</dt>
+              <dd id="preview-strongest"></dd>
+            </div>
+            <div>
+              <dt>首要短板</dt>
+              <dd id="preview-weakest"></dd>
+            </div>
+          </dl>
+        </div>
 
-function renderIndustryPicker() {
-  let h = `<h3 style="font-size:22px;font-weight:700;margin-bottom:8px;text-align:center;">选择您的行业</h3>
-           <p style="text-align:center;color:var(--text-secondary);margin-bottom:28px;">我们将基于行业特点为您定制评估题目</p>
-           <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));">`;
-  INDUSTRIES.forEach(ind => {
-    h += `<div class="card industry-card" onclick="selectIndustry('${ind.id}')" id="ind-${ind.id}">
-      <div class="industry-emoji">${ind.emoji}</div>
-      <div class="industry-name">${ind.name}</div>
-      <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">${ind.desc}</div>
-    </div>`;
-  });
-  h += `</div>`;
-  document.getElementById('questionBox').innerHTML = h;
-  document.getElementById('nextBtn').style.display = 'none';
-  document.getElementById('submitBtn').style.display = 'none';
-}
+        <div class="contact-fields">
+          <div class="field">
+            <label for="company-name">企业名称 <span aria-hidden="true">*</span></label>
+            <input id="company-name" name="company_name" type="text" autocomplete="organization" maxlength="200" required>
+          </div>
+          <div class="field">
+            <label for="contact-name">联系人 <span aria-hidden="true">*</span></label>
+            <input id="contact-name" name="contact_name" type="text" autocomplete="name" maxlength="100" required>
+          </div>
+          <div class="field">
+            <label for="phone">手机号 <span aria-hidden="true">*</span></label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="32" pattern="1[3-9][0-9]{9}" aria-describedby="phone-help" required>
+            <p id="phone-help" class="field-help">请输入 11 位中国大陆手机号。</p>
+          </div>
+          <div class="field">
+            <label for="email">邮箱 <span class="field-optional">选填</span></label>
+            <input id="email" name="email" type="email" autocomplete="email" maxlength="254">
+          </div>
+          <div class="field">
+            <label for="wechat">微信 <span class="field-optional">选填</span></label>
+            <input id="wechat" name="wechat" type="text" autocomplete="off" maxlength="64">
+          </div>
+        </div>
 
-function selectIndustry(id) {
-  selectedIndustry = id;
-  document.querySelectorAll('.industry-card').forEach(c => c.classList.remove('selected'));
-  document.getElementById('ind-' + id).classList.add('selected');
-  document.getElementById('nextBtn').style.display = 'inline-flex';
-}
+        <div class="privacy-card">
+          <h3>个人信息处理说明</h3>
+          <p id="privacy-summary"></p>
+          <p><a id="privacy-policy-link" href="#" rel="noopener noreferrer" target="_blank">查看隐私政策</a></p>
+          <div class="consent-field">
+            <input id="privacy-consent" name="privacy_consent" type="checkbox" required>
+            <label for="privacy-consent">我已阅读上述说明，并同意为生成报告和需求联系处理所提交的信息。</label>
+          </div>
+        </div>
+      </section>
 
-function renderQ() {
-  const total = totalSteps();
-  document.getElementById('progressFill').style.width = progressPct() + '%';
-
-  if (currentQ === -1) { renderIndustryPicker(); return; }
-
-  const q = getQuestion(currentQ);
-  if (!q) return;
-
-  let h = `<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;letter-spacing:0.05em;text-transform:uppercase;">第 ${currentQ+1} 题 / 共 ${total-1} 题</div>`;
-  h += `<h3 style="font-size:21px;font-weight:700;margin-bottom:4px;">${q.q}</h3>`;
-  if (q.subtitle) h += `<p style="color:var(--text-secondary);font-size:14px;margin-bottom:20px;">${q.subtitle}</p>`;
-
-  if (q.type === 'contact') {
-    h += `<input id="company" placeholder="公司名称" style="width:100%;padding:12px 16px;border:1.5px solid var(--border-light);border-radius:var(--radius);margin-bottom:12px;font-size:16px;font-family:inherit;transition:all var(--transition);" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border-light)'">
-           <input id="email" placeholder="邮箱（接收完整评估报告）" style="width:100%;padding:12px 16px;border:1.5px solid var(--border-light);border-radius:var(--radius);font-size:16px;font-family:inherit;transition:all var(--transition);" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border-light)'">
-           <p style="font-size:12px;color:var(--text-tertiary);margin-top:8px;">选填，填写后将收到行业对标数据和详细路线图</p>`;
-  } else {
-    q.opts.forEach((o, oi) => {
-      const type = q.multi ? 'checkbox' : 'radio';
-      const checked = answers[currentQ] !== undefined && (q.multi ? answers[currentQ].includes(oi) : answers[currentQ] === oi);
-      h += `<label style="display:block;padding:14px 18px;margin-bottom:10px;border:1.5px solid var(--border-light);border-radius:var(--radius);cursor:pointer;transition:all var(--transition);font-size:15px;" onmouseenter="this.style.borderColor='var(--primary)'" onmouseleave="this.style.borderColor=${checked?'var(--primary)':'var(--border-light)'}">
-        <input type="${type}" name="q${currentQ}" value="${oi}" style="margin-right:10px;accent-color:var(--primary);" ${checked?'checked':''} onchange="saveAnswer()"> ${o}</label>`;
-    });
-  }
-
-  document.getElementById('questionBox').innerHTML = h;
-  document.getElementById('prevBtn').style.display = currentQ > -1 ? 'inline-flex' : 'none';
-  document.getElementById('nextBtn').style.display = currentQ < total - 2 ? 'inline-flex' : 'none';
-  document.getElementById('submitBtn').style.display = currentQ === total - 2 ? 'inline-flex' : 'none';
-}
-
-function getQuestion(idx) {
-  if (idx === -1) return null;
-  const iq = INDUSTRY_QUESTIONS[selectedIndustry] || INDUSTRY_QUESTIONS.other;
-  if (idx < iq.length) return iq[idx];
-  idx -= iq.length;
-  if (idx < COMMON_QUESTIONS.length) return COMMON_QUESTIONS[idx];
-  idx -= COMMON_QUESTIONS.length;
-  return {q:"联系方式（选填，用于发送完整评估报告）", type:"contact", subtitle:"留下邮箱，获取含行业对标数据的专属方案"};
-}
-
-function nextQ() {
-  if (currentQ === -1 && !selectedIndustry) return;
-  if (currentQ === -1) { currentQ = 0; renderQ(); window.scrollTo({top:200,behavior:'smooth'}); return; }
-  saveAnswer();
-  const a = answers[currentQ];
-  if (a === undefined || a === -1 || (Array.isArray(a) && a.length === 0)) {
-    // Briefly highlight to prompt selection
-    const box = document.getElementById('questionBox');
-    box.style.animation = 'none'; box.offsetHeight;
-    box.style.animation = 'shake 0.3s ease';
-    return;
-  }
-  const total = totalSteps();
-  if (currentQ < total - 2) { currentQ++; renderQ(); window.scrollTo({top:200,behavior:'smooth'}); }
-}
-
-function prevQ() {
-  saveAnswer();
-  if (currentQ > -1) { currentQ--; renderQ(); window.scrollTo({top:200,behavior:'smooth'}); }
-}
-
-function saveAnswer() {
-  if (currentQ === -1) return;
-  const q = getQuestion(currentQ);
-  if (!q) return;
-  if (q.type === 'contact') {
-    answers[currentQ] = {company: document.getElementById('company')?.value||'', email: document.getElementById('email')?.value||''};
-    return;
-  }
-  const checked = document.querySelectorAll(`input[name="q${currentQ}"]:checked`);
-  answers[currentQ] = q.multi ? Array.from(checked).map(c=>parseInt(c.value)) : (checked[0] ? parseInt(checked[0].value) : -1);
-}
-
-async function submit() {
-  saveAnswer();
-  const iq = INDUSTRY_QUESTIONS[selectedIndustry] || INDUSTRY_QUESTIONS.other;
-  const totalIQ = iq.length + COMMON_QUESTIONS.length;
-
-  // Calculate dimension scores
-  let industryScore = 0, industryMax = iq.length * 3;
-  for (let i=0; i<iq.length; i++) {
-    const a = answers[i]; industryScore += (Array.isArray(a) ? a.reduce((s,v)=>s+v,0) : (a||0));
-  }
-
-  let commonScore = 0, commonMax = COMMON_QUESTIONS.length * 3;
-  for (let i=0; i<COMMON_QUESTIONS.length; i++) {
-    const a = answers[iq.length + i]; commonScore += (Array.isArray(a) ? a.reduce((s,v)=>s+v,0) : (a||0));
-  }
-
-  const totalScore = industryScore + commonScore;
-  const maxScore = industryMax + commonMax;
-  const pct = Math.round(totalScore / maxScore * 100);
-
-  // Determine tier
-  const tier = pct >= 70 ? '旗舰包 · AI 中台建设' : pct >= 40 ? '加速包 · 行业 AI 落地' : '启航包 · 企业 AI 就绪';
-
-  // Industry benchmark
-  const benchmarks = {manufacturing:42, finance:55, healthcare:38, retail:48, construction:35, tech:62, other:40};
-  const benchPct = benchmarks[selectedIndustry] || 40;
-
-  // Dimension breakdown
-  const dimPct = {
-    industry: Math.round(industryScore / industryMax * 100),
-    data: Math.round((answers[iq.length]||0) / 3 * 100),
-    infra: Math.round((answers[iq.length+1]||0) / 3 * 100),
-    budget: Math.round((answers[iq.length+2]||0) / 3 * 100),
-    timeline: Math.round((answers[iq.length+3]||0) / 3 * 100),
-  };
-
-  // Generate personalized recommendations
-  const recommendations = generateRecommendations(selectedIndustry, dimPct, tier);
-  const industry = INDUSTRIES.find(x=>x.id===selectedIndustry);
-  const contact = answers[totalIQ] || {};
-  const company = contact.company || '贵企业';
-
-  document.getElementById('questionBox').style.display = 'none';
-  document.getElementById('prevBtn').style.display = 'none';
-  document.getElementById('nextBtn').style.display = 'none';
-  document.getElementById('submitBtn').style.display = 'none';
-  document.getElementById('progressFill').style.width = '100%';
-
-  const resultHtml = `
-<div class="card" style="margin-top:0;box-shadow:var(--shadow-xl);">
-  <div class="result-header">
-    <div class="score-circle"><span class="score-num">${pct}</span></div>
-    <div style="color:var(--text-tertiary);font-size:13px;">满分 100 · ${industry.name}行业</div>
-    <h3 style="font-size:22px;font-weight:700;margin-top:8px;">${company} AI 就绪度评估</h3>
-    <p style="font-size:15px;color:var(--primary);font-weight:600;">推荐方案：${tier}</p>
-    <p style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">${industry.name}行业平均就绪度 ${benchPct}% · 您的企业${pct >= benchPct ? '高于' : '低于'}行业均值 ${Math.abs(pct-benchPct)}%</p>
-  </div>
-
-  <h4 style="margin-bottom:16px;font-size:16px;">各维度评估</h4>
-  ${meterRow('行业适配', dimPct.industry, '#0071e3')}
-  ${meterRow('数据基础', dimPct.data, '#0071e3')}
-  ${meterRow('IT 设施', dimPct.infra, '#0071e3')}
-  ${meterRow('投入意愿', dimPct.budget, '#0071e3')}
-  ${meterRow('落地紧迫', dimPct.timeline, '#0071e3')}
-
-  <h4 style="margin:28px 0 16px;font-size:16px;">行动建议（按优先级排序）</h4>
-  ${recommendations.map(r => `
-    <div class="recommend-card">
-      <h4>${r.icon} ${r.title}</h4>
-      <p>${r.desc} <span style="color:var(--text-tertiary);">预估周期：${r.timeline}</span></p>
-    </div>`).join('')}
-
-  <div style="margin-top:24px;padding:20px;background:var(--bg-gray);border-radius:var(--radius);text-align:center;">
-    <p style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">${contact.email ? `完整评估报告将发送至 <strong>${contact.email}</strong>` : '留下邮箱获取含行业对标的完整报告'}</p>
-    <a href="/services" class="btn btn-primary">查看详细服务方案 →</a>
-  </div>
-  <p style="margin-top:12px;color:var(--text-tertiary);font-size:12px;text-align:center;">评估仅供参考，精准方案建议预约专家一对一咨询。</p>
-</div>`;
-
-  document.getElementById('resultBox').innerHTML = resultHtml;
-  document.getElementById('resultBox').style.display = 'block';
-
-  try {
-    await fetch('/api/assessment', {method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({company:contact.company||'', email:contact.email||'', industry:selectedIndustry, scores:answers, result:tier, pct})});
-  } catch(e) {}
-}
-
-function meterRow(label, val, color) {
-  return `<div class="meter-row"><div class="meter-label">${label}</div><div class="meter-track"><div class="meter-fill" style="width:${val}%;background:${color};"></div></div><div style="font-size:13px;font-weight:600;width:36px;text-align:right;">${val}%</div></div>`;
-}
-
-function generateRecommendations(industry, dim, tier) {
-  const recs = {
-    manufacturing: [
-      {icon:"🔧", title:"构建设备维修 RAG 知识库", desc:"将设备手册、维修记录、故障案例向量化，老师傅经验数字化，减少停机时间。", timeline:"2-4周"},
-      {icon:"👁️", title:"部署 AI 视觉质检", desc:"针对产线关键工位部署视觉检测，替代人工目检，提升缺陷检出率至 99%+。", timeline:"4-8周"},
-      {icon:"📊", title:"打通 MES 数据，建设生产决策 AI", desc:"将MES/APS/WMS数据整合，AI自动分析OEE、预测设备故障、优化排产。", timeline:"8-12周"},
-    ],
-    finance: [
-      {icon:"📋", title:"AI 合规审查系统", desc:"部署本地大模型+NLP，自动比对合同条款与合规规则库，审查效率提升 80%。", timeline:"4-8周"},
-      {icon:"🛡️", title:"升级智能风控引擎", desc:"引入知识图谱+机器学习，实现多维关联分析反欺诈，降低不良率。", timeline:"8-12周"},
-      {icon:"🤖", title:"智能客服+理财顾问 Agent", desc:"接入全渠道，7×24 自动处理高频问题，理财咨询接入 Agent 辅助。", timeline:"6-10周"},
-    ],
-    healthcare: [
-      {icon:"📚", title:"临床知识库 + AI 辅助诊疗", desc:"将诊疗指南、药品说明书、病历知识向量化，辅助医生快速决策。", timeline:"4-8周"},
-      {icon:"🩻", title:"AI 影像辅助诊断", desc:"针对X光/CT/MRI部署AI辅助阅片，提升早期病灶检出率。", timeline:"8-16周"},
-      {icon:"💊", title:"智慧药房/耗材管理", desc:"AI预测用药需求+效期预警+自动补货，降低库存成本。", timeline:"4-6周"},
-    ],
-    retail: [
-      {icon:"🎯", title:"全域客户画像 + AI 精准营销", desc:"打通线上线下数据，构建 OneID 客户画像，AI 自动策划个性化营销。", timeline:"4-8周"},
-      {icon:"📦", title:"AI 需求预测 + 智能补货", desc:"基于历史销量+季节+促销等多维因素，AI预测需求并自动生成补货建议。", timeline:"6-10周"},
-      {icon:"💬", title:"全渠道 AI 客服", desc:"接入微信/APP/网站，AI 处理退换货、物流查询等高频问题，成本降低 40%。", timeline:"2-4周"},
-    ],
-    construction: [
-      {icon:"🏗️", title:"工程规范 RAG 知识库", desc:"将施工规范、安全标准、图纸说明向量化，现场即时查询。", timeline:"2-4周"},
-      {icon:"📐", title:"BIM + AI 审图", desc:"AI自动检测图纸碰撞、规范不合规项，减少人工审图工作量。", timeline:"6-12周"},
-      {icon:"🔒", title:"AI 安全监控", desc:"部署视频AI识别未戴安全帽、危险区域闯入等行为，实时预警。", timeline:"4-8周"},
-    ],
-    tech: [
-      {icon:"📖", title:"技术文档 AI 知识库", desc:"将Wiki/Confluence/代码注释向量化，研发团队秒级搜索技术方案。", timeline:"2-4周"},
-      {icon:"⚙️", title:"AIOps 智能运维", desc:"接入告警+日志+APM数据，AI自动根因分析+故障预测。", timeline:"6-10周"},
-      {icon:"🤖", title:"AI 代码审查 + 测试生成", desc:"接入CI/CD流程，AI自动审查代码质量并生成单元测试。", timeline:"4-8周"},
-    ],
-    other: [
-      {icon:"🗄️", title:"企业私有知识库搭建", desc:"将公司文档、制度、FAQ向量化，员工AI秒级问答，告别找文档。", timeline:"2-4周"},
-      {icon:"📈", title:"AI 数据分析看板", desc:"接入业务数据，AI自动生成经营分析报告+异常预警。", timeline:"4-8周"},
-      {icon:"🔄", title:"RPA+AI 流程自动化", desc:"识别高频重复操作，AI+自动化减少人力投入。", timeline:"4-8周"},
-    ],
-  };
-  const list = recs[industry] || recs.other;
-
-  // Adjust based on actual scores
-  if (dim.infra < 30) list[0].desc += " 优先解决基础设施问题。";
-  if (dim.data > 60) list[2].desc += " 可跳过基础治理，直接进入行业高阶应用。";
-  if (dim.budget < 30) list[1] = {...list[1], desc: list[1].desc + " 建议先用最小投入验证ROI。"};
-
-  return list;
-}
-
-// Init
-renderQ();
-</script>
-
-<style>
-@keyframes shake {
-  0%,100% { transform: translateX(0); }
-  25% { transform: translateX(-6px); }
-  75% { transform: translateX(6px); }
-}
-</style>
+      <div class="assessment-actions">
+        <button id="assessment-back" class="btn btn-outline" type="button" hidden>返回</button>
+        <button id="assessment-continue" class="btn btn-primary" type="button">继续</button>
+      </div>
+    </form>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/assessment.js') }}" defer></script>
 {% endblock %}
