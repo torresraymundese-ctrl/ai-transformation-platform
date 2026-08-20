@@ -309,6 +309,10 @@ def test_completion_rejects_attribution_contact_fields_and_overlong_values(clien
         ("utm_source", "referral-13800138000"),
         ("utm_medium", "referral 138 0013 8000"),
         ("utm_campaign", "referral +86 138-0013-8000"),
+        ("source", "+86 (138) 0013-8000"),
+        ("utm_source", "referral/138/0013/8000"),
+        ("utm_medium", "partner lead @ example.com campaign"),
+        ("utm_campaign", "ｌｅａｄ＠ｅｘａｍｐｌｅ．ｃｏｍ"),
     ),
 )
 def test_completion_rejects_contact_values_embedded_in_attribution(
@@ -573,6 +577,78 @@ def test_numeric_and_link_rule_corruption_fails_closed_without_writes(
         "recoverable": True,
     }
     assert domain_counts()["assessments"] == 0
+    assert rate_limit_row_count() == 0
+
+
+@pytest.mark.parametrize(
+    "mutations",
+    (
+        (
+            "UPDATE roi_option_ranges SET high_value=1.2 "
+            "WHERE option_group='loss_factor' AND code='severe'",
+        ),
+        (
+            "UPDATE scenarios SET category_code='unsupported_category' "
+            "WHERE code='mfg_operations_reporting'",
+        ),
+        (
+            "DELETE FROM scenario_budget_options WHERE scenario_id=("
+            "SELECT id FROM scenarios WHERE code='mfg_operations_reporting') "
+            "AND budget_code='50000_200000'",
+        ),
+        (
+            "UPDATE scenarios SET risk_codes_json='[\"metric_definition\"]' "
+            "WHERE code='mfg_operations_reporting'",
+        ),
+        (
+            "DELETE FROM scenario_services WHERE scenario_id=("
+            "SELECT id FROM scenarios WHERE code='mfg_operations_reporting')",
+            "INSERT INTO scenario_services (scenario_id,service_id) SELECT "
+            "(SELECT id FROM scenarios WHERE code='mfg_operations_reporting'),"
+            "(SELECT id FROM services WHERE code='foundation_workshop')",
+        ),
+    ),
+    ids=(
+        "loss-factor-above-one",
+        "unsupported-category",
+        "partial-budget-links",
+        "partial-risk-links",
+        "wrong-nonempty-service-link",
+    ),
+)
+def test_frozen_scenario_manifest_corruption_blocks_preview_and_completion(
+    client, mutations
+):
+    token = enable_v2(client)
+    db = models.get_db()
+    try:
+        for mutation in mutations:
+            db.execute(mutation)
+        db.commit()
+    finally:
+        db.close()
+
+    responses = (
+        client.post("/api/v2/assessment/preview", json=valid_assessment()),
+        client.post(
+            "/api/v2/assessment/complete",
+            json=valid_completion(),
+            headers={"X-CSRF-Token": token},
+        ),
+    )
+
+    assert [response.status_code for response in responses] == [503, 503]
+    assert all(
+        response.get_json()
+        == {"error": "assessment temporarily unavailable", "recoverable": True}
+        for response in responses
+    )
+    assert domain_counts() == {
+        "leads": 0,
+        "lead_consents": 0,
+        "assessments": 0,
+        "roi_estimates": 0,
+    }
     assert rate_limit_row_count() == 0
 
 

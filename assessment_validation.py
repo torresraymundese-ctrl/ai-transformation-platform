@@ -2,6 +2,7 @@
 
 from collections import Counter
 import re
+import unicodedata
 
 from assessment.contracts import (
     AssessmentCatalog,
@@ -13,6 +14,7 @@ from assessment.contracts import (
 )
 from assessment.reporting import RISK_EXPLANATIONS
 from assessment.scoring import DIMENSION_ORDER
+from assessment.seed import load_core_catalog_manifest
 from validation import ValidationError, validated_submission_key
 
 
@@ -75,23 +77,17 @@ REFERENCE_LINES = {
     "professional_knowledge": (60, 60, 55, 50, 55, 55),
     "software_creative": (60, 55, 55, 60, 55, 55),
 }
-SCENARIO_CODES = frozenset(
-    {
-        "mfg_knowledge_assistant",
-        "mfg_quality_inspection",
-        "mfg_operations_reporting",
-        "retail_ai_service",
-        "retail_marketing_content",
-        "retail_inventory_insight",
-        "pro_document_knowledge",
-        "pro_delivery_drafting",
-        "pro_contract_review",
-        "creative_content_workflow",
-        "software_support_knowledge",
-        "project_delivery_automation",
-        "data_process_foundation",
+FROZEN_SCENARIO_RULES = {
+    scenario["code"]: {
+        "category_code": scenario["category_code"],
+        "budget_codes": tuple(scenario["budget_codes"]),
+        "weeks": tuple(scenario["weeks"]),
+        "risk_codes": tuple(scenario["risk_codes"]),
+        "service_code": scenario["service_code"],
     }
-)
+    for scenario in load_core_catalog_manifest()["scenarios"]
+}
+SCENARIO_CODES = frozenset(FROZEN_SCENARIO_RULES)
 SERVICE_CODES = frozenset(
     {
         "foundation_workshop",
@@ -110,21 +106,6 @@ SERVICE_CATEGORIES = {
     "data_insight": "standard",
     "industry_integration": "integration",
 }
-SCENARIO_SERVICE_CODES = {
-    "mfg_knowledge_assistant": "knowledge_assistant_pilot",
-    "mfg_quality_inspection": "industry_integration",
-    "mfg_operations_reporting": "data_insight",
-    "retail_ai_service": "customer_growth_pilot",
-    "retail_marketing_content": "customer_growth_pilot",
-    "retail_inventory_insight": "data_insight",
-    "pro_document_knowledge": "knowledge_assistant_pilot",
-    "pro_delivery_drafting": "workflow_automation",
-    "pro_contract_review": "workflow_automation",
-    "creative_content_workflow": "customer_growth_pilot",
-    "software_support_knowledge": "knowledge_assistant_pilot",
-    "project_delivery_automation": "industry_integration",
-    "data_process_foundation": "foundation_workshop",
-}
 EXPECTED_BRANCH_COLLECTION_LENGTHS = {
     "subbranches": 4,
     "departments": 6,
@@ -137,10 +118,7 @@ EMBEDDED_EMAIL_PATTERN = re.compile(
     r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
     re.I,
 )
-EMBEDDED_MAINLAND_MOBILE_PATTERN = re.compile(
-    r"(?<!\d)(?:(?:\+?86|0086)[\s.-]*)?"
-    r"1[3-9](?:[\s.-]*\d){9}(?!\d)"
-)
+EMBEDDED_MAINLAND_MOBILE_DIGITS = re.compile(r"(?:86)?1[3-9]\d{9}")
 
 
 class AssessmentRulesUnavailable(RuntimeError):
@@ -380,19 +358,24 @@ def _validate_completion_dependencies(scenarios, services, ranges):
     if len(foundation) != 1:
         raise AssessmentRulesUnavailable("foundation")
     for scenario in scenarios:
+        frozen = FROZEN_SCENARIO_RULES.get(scenario.code)
         if (
-            set(scenario.minimum_scores) != set(DIMENSION_ORDER)
+            frozen is None
+            or set(scenario.minimum_scores) != set(DIMENSION_ORDER)
             or any(
                 not isinstance(value, int) or not 0 <= value <= 100
                 for value in scenario.minimum_scores.values()
             )
-            or scenario.service_code != SCENARIO_SERVICE_CODES.get(scenario.code)
+            or scenario.category_code != frozen["category_code"]
+            or scenario.service_code != frozen["service_code"]
             or scenario.integration_level not in {"low", "medium", "high"}
             or not _positive_integer_range(
                 scenario.min_weeks, scenario.max_weeks
             )
+            or (scenario.min_weeks, scenario.max_weeks) != frozen["weeks"]
             or not scenario.budget_codes
             or not set(scenario.budget_codes) <= set(ROI_OPTION_CODES["budget"])
+            or tuple(scenario.budget_codes) != frozen["budget_codes"]
             or len(scenario.efficiency) != 3
             or len(scenario.loss_improvement) != 3
             or len(scenario.annual_support_rate) != 3
@@ -401,6 +384,7 @@ def _validate_completion_dependencies(scenarios, services, ranges):
             or not _ordered_unit_triple(scenario.annual_support_rate)
             or not scenario.risk_codes
             or not set(scenario.risk_codes) <= set(RISK_EXPLANATIONS)
+            or tuple(scenario.risk_codes) != frozen["risk_codes"]
         ):
             raise AssessmentRulesUnavailable("scenario")
         if not scenario.fallback_only and (
@@ -430,10 +414,12 @@ def _validate_completion_dependencies(scenarios, services, ranges):
     for group, expected_codes in ROI_OPTION_CODES.items():
         if tuple(ranges[group]) != expected_codes:
             raise AssessmentRulesUnavailable("roi_codes")
-        if any(
-            not _ordered_nonnegative_triple(values)
-            for values in ranges[group].values()
-        ):
+        validator = (
+            _ordered_unit_triple
+            if group == "loss_factor"
+            else _ordered_nonnegative_triple
+        )
+        if any(not validator(values) for values in ranges[group].values()):
             raise AssessmentRulesUnavailable("roi_ranges")
 
 
@@ -513,10 +499,18 @@ def _text(value, *, maximum, required=False):
 
 
 def _attribution_text(value, *, maximum, required=False):
-    value = _text(value, maximum=maximum, required=required)
+    if not isinstance(value, str):
+        raise ValidationError("invalid assessment payload")
+    value = _text(
+        unicodedata.normalize("NFKC", value),
+        maximum=maximum,
+        required=required,
+    )
+    email_candidate = re.sub(r"\s+", "", value)
+    digit_candidate = re.sub(r"\D", "", value)
     if (
-        EMBEDDED_EMAIL_PATTERN.search(value)
-        or EMBEDDED_MAINLAND_MOBILE_PATTERN.search(value)
+        EMBEDDED_EMAIL_PATTERN.search(email_candidate)
+        or EMBEDDED_MAINLAND_MOBILE_DIGITS.search(digit_candidate)
     ):
         raise ValidationError("invalid assessment payload")
     return value

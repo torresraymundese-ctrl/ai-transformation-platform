@@ -11,6 +11,11 @@ def _load_json(name):
     return json.loads((SEED_DATA_DIR / name).read_text(encoding="utf-8"))
 
 
+def load_core_catalog_manifest():
+    """Load the frozen public V2.0 catalog used to verify persisted rules."""
+    return _load_json("core_catalog_v2.json")
+
+
 def _json_tuple(values):
     return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
 
@@ -29,7 +34,7 @@ def seed_v2_defaults(connection):
     ).fetchone():
         return
 
-    core = _load_json("core_catalog_v2.json")
+    core = load_core_catalog_manifest()
     industry_ids = _seed_industries(connection, core["industries"])
     _seed_company_sizes(connection, core["company_sizes"])
     version_id = connection.execute(
