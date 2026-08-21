@@ -6,6 +6,7 @@ import json
 import re
 import secrets
 import unicodedata
+from datetime import datetime
 
 from flask import session
 
@@ -298,13 +299,17 @@ def record_event(
         db.close()
 
 
-def insert_server_event(db, event_name: str, assessment_id: int) -> None:
+def insert_server_event(
+    db, event_name: str, assessment_id: int, *, created_at=None
+) -> None:
     if (
         not isinstance(event_name, str)
         or event_name not in SERVER_EVENTS
         or type(assessment_id) is not int
         or assessment_id < 1
     ):
+        raise ValidationError("event_name has an invalid value")
+    if created_at is not None and not isinstance(created_at, datetime):
         raise ValidationError("event_name has an invalid value")
     _insert_event(
         db,
@@ -313,6 +318,7 @@ def insert_server_event(db, event_name: str, assessment_id: int) -> None:
         session_analytics_id_hash(),
         None,
         {},
+        created_at=created_at,
     )
 
 
@@ -323,20 +329,32 @@ def _insert_event(
     analytics_id_hash,
     branch_code,
     metadata,
+    *,
+    created_at=None,
 ):
+    parameters = (
+        event_name,
+        assessment_id,
+        analytics_id_hash,
+        branch_code,
+        json.dumps(
+            metadata, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ),
+    )
+    if created_at is None:
+        db.execute(
+            "INSERT OR IGNORE INTO analytics_events "
+            "(event_name,assessment_id,analytics_id_hash,branch_code,metadata_json) "
+            "VALUES (?,?,?,?,?)",
+            parameters,
+        )
+        return
+    timestamp = created_at.replace(microsecond=0).isoformat(sep=" ")
     db.execute(
         "INSERT OR IGNORE INTO analytics_events "
-        "(event_name,assessment_id,analytics_id_hash,branch_code,metadata_json) "
-        "VALUES (?,?,?,?,?)",
-        (
-            event_name,
-            assessment_id,
-            analytics_id_hash,
-            branch_code,
-            json.dumps(
-                metadata, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-            ),
-        ),
+        "(event_name,assessment_id,analytics_id_hash,branch_code,metadata_json,"
+        "created_at) VALUES (?,?,?,?,?,?)",
+        (*parameters, timestamp),
     )
 
 

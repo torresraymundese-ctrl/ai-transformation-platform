@@ -142,10 +142,18 @@ def test_completion_creates_atomic_lead_consent_assessment_roi_and_events(
 def test_completion_uses_shanghai_wall_clock_for_exact_365_day_retention(
     completion_db, monkeypatch
 ):
-    shanghai_now = datetime(2026, 8, 21, 0, 30, 0)
-    monkeypatch.setattr(
-        lead_repository, "current_shanghai_datetime", lambda: shanghai_now
-    )
+    clock_calls = []
+
+    class UtcHostDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            clock_calls.append(tz)
+            if tz is None:
+                return cls(2026, 8, 20, 16, 30, 0)
+            assert tz is lead_repository.SHANGHAI
+            return cls(2026, 8, 21, 0, 30, 0, tzinfo=tz)
+
+    monkeypatch.setattr(lead_repository, "datetime", UtcHostDatetime)
 
     result = complete_assessment(valid_completion(), "hashed-ip")
 
@@ -154,18 +162,36 @@ def test_completion_uses_shanghai_wall_clock_for_exact_365_day_retention(
         (result.lead_id,),
     )[0]
     assessment = rows(
-        "SELECT completed_at FROM assessments WHERE id=?", (result.assessment_id,)
+        "SELECT completed_at,created_at FROM assessments WHERE id=?",
+        (result.assessment_id,),
     )[0]
     consent = rows(
-        "SELECT consented_at FROM lead_consents WHERE lead_id=?", (result.lead_id,)
+        "SELECT consented_at,created_at FROM lead_consents WHERE lead_id=?",
+        (result.lead_id,),
     )[0]
+    roi = rows(
+        "SELECT created_at FROM roi_estimates WHERE assessment_id=?",
+        (result.assessment_id,),
+    )[0]
+    events = rows(
+        "SELECT event_name,created_at FROM analytics_events "
+        "WHERE assessment_id=? ORDER BY event_name",
+        (result.assessment_id,),
+    )
+    expected_timestamp = "2026-08-21 00:30:00"
+    assert clock_calls == [lead_repository.SHANGHAI]
     assert dict(lead) == {
-        "created_at": "2026-08-21 00:30:00",
-        "updated_at": "2026-08-21 00:30:00",
+        "created_at": expected_timestamp,
+        "updated_at": expected_timestamp,
         "retention_expires_at": "2027-08-21 00:30:00",
     }
-    assert assessment["completed_at"] == "2026-08-21 00:30:00"
-    assert consent["consented_at"] == "2026-08-21 00:30:00"
+    assert tuple(assessment) == (expected_timestamp, expected_timestamp)
+    assert tuple(consent) == (expected_timestamp, expected_timestamp)
+    assert roi["created_at"] == expected_timestamp
+    assert [tuple(event) for event in events] == [
+        ("assessment_completed", expected_timestamp),
+        ("lead_submitted", expected_timestamp),
+    ]
 
 
 def test_primary_recommendation_supplies_the_single_roi_and_private_snapshot(
@@ -283,10 +309,12 @@ def test_submission_key_returns_original_result_without_duplicate_writes(complet
 def test_write_failure_rolls_back_every_completion_row(completion_db, monkeypatch):
     real_insert = analytics_repository.insert_server_event
 
-    def fail_second_event(db, event_name, assessment_id):
+    def fail_second_event(db, event_name, assessment_id, *, created_at=None):
         if event_name == "lead_submitted":
             raise sqlite3.OperationalError("forced analytics failure")
-        return real_insert(db, event_name, assessment_id)
+        return real_insert(
+            db, event_name, assessment_id, created_at=created_at
+        )
 
     monkeypatch.setattr(
         analytics_repository, "insert_server_event", fail_second_event
@@ -309,10 +337,12 @@ def test_write_failure_rolls_back_existing_lead_refresh(completion_db, monkeypat
     original = rows("SELECT * FROM leads WHERE id=?", (first.lead_id,))[0]
     real_insert = analytics_repository.insert_server_event
 
-    def fail_second_event(db, event_name, assessment_id):
+    def fail_second_event(db, event_name, assessment_id, *, created_at=None):
         if event_name == "lead_submitted":
             raise sqlite3.OperationalError("forced analytics failure")
-        return real_insert(db, event_name, assessment_id)
+        return real_insert(
+            db, event_name, assessment_id, created_at=created_at
+        )
 
     monkeypatch.setattr(
         analytics_repository, "insert_server_event", fail_second_event

@@ -473,7 +473,7 @@ def insert_completed(
         "(submission_key,lead_id,rule_version_id,branch_code,subbranch_code,"
         "department_code,company_size_code,answers_json,dimension_scores_json,"
         "overall_score,maturity_code,report_snapshot_json,attribution_json,"
-        "completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "completed_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             submission_key,
             lead_id,
@@ -488,6 +488,7 @@ def insert_completed(
             scores.maturity_code,
             _json(report_snapshot),
             _json(request.attribution.__dict__),
+            timestamp,
             timestamp,
         ),
     ).lastrowid

@@ -62,6 +62,9 @@ LANDLINE = re.compile(
     r"(?<!\d)(?:(?:\+?86|0086)[\s-]*)?0\d{2,3}[\s-]*\d{7,8}(?!\d)"
 )
 LOCAL_PHONE = re.compile(r"(?<!\d)\d{7,8}(?!\d)")
+FORMATTED_LOCAL_PHONE = re.compile(
+    r"(?<!\d)\d{3,4}[\s-]+\d{4}(?!\d)"
+)
 INTERNATIONAL_PHONE = re.compile(
     r"(?<!\w)(?:\+|00)\d(?:[\s().-]*\d){6,14}(?!\d)"
 )
@@ -182,9 +185,9 @@ def record_consent(db, lead_id, consent, identity_hash, consented_at=None):
     )
     return db.execute(
         "INSERT INTO lead_consents "
-        "(lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,?,?,?,?)",
-        (lead_id, policy_version, timestamp, source, identity_hash),
+        "(lead_id,policy_version,consented_at,source,identity_hash,created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (lead_id, policy_version, timestamp, source, identity_hash, timestamp),
     ).lastrowid
 
 
@@ -554,6 +557,7 @@ def validate_resolution_note(value, *, required, target_lead=None):
     if (
         LANDLINE.search(normalized)
         or LOCAL_PHONE.search(normalized)
+        or FORMATTED_LOCAL_PHONE.search(normalized)
         or INTERNATIONAL_PHONE.search(normalized)
         or LABELED_LOCAL_PHONE.search(normalized)
         or LABELED_WECHAT.search(normalized)
@@ -605,7 +609,8 @@ def anonymize_lead(db, lead_id, reason_code, *, now=None):
     timestamp = _timestamp(now)
     updated = db.execute(
         "UPDATE leads SET company_name='已匿名化',contact_name='已匿名化',"
-        "phone_normalized=NULL,email=NULL,wechat=NULL,next_followup_at=NULL,"
+        "phone_normalized=NULL,email=NULL,wechat=NULL,source=NULL,"
+        "next_followup_at=NULL,"
         "retention_expires_at=NULL,anonymized_at=?,updated_at=? "
         "WHERE id=? AND anonymized_at IS NULL",
         (timestamp, timestamp, lead_id),
@@ -616,7 +621,8 @@ def anonymize_lead(db, lead_id, reason_code, *, now=None):
     db.execute("DELETE FROM lead_consents WHERE lead_id=?", (lead_id,))
     db.execute("UPDATE appointments SET note=NULL WHERE lead_id=?", (lead_id,))
     db.execute(
-        "UPDATE assessments SET company_name=NULL,contact_email=NULL WHERE lead_id=?",
+        "UPDATE assessments SET company_name=NULL,contact_email=NULL,"
+        "attribution_json='{}' WHERE lead_id=?",
         (lead_id,),
     )
     db.execute(

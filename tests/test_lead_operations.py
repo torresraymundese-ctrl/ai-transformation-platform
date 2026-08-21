@@ -782,6 +782,66 @@ def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_clie
     ) == ("verifying", None, None)
 
 
+@pytest.mark.parametrize(
+    "private_landline",
+    ("010-1234-5678", "1234-5678", "1234 5678"),
+)
+@pytest.mark.parametrize("workflow", ("completion", "rejection"))
+def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
+    admin_client, caplog, private_landline, workflow
+):
+    lead_id, _ = _insert_lead(
+        suffix=f"formatted-{workflow}-{len(private_landline)}", with_followup=True
+    )
+    lead_before = tuple(
+        _row(
+            "SELECT company_name,contact_name,phone_normalized,email,wechat,"
+            "anonymized_at FROM leads WHERE id=?",
+            (lead_id,),
+        )
+    )
+    request_id = _create_request(admin_client, lead_id, "deletion")
+    _move_request_to_verifying(admin_client, request_id)
+    note = f"已通过号码 {private_landline} 完成核验"
+    if workflow == "completion":
+        form = {
+            "action": "complete",
+            "request_id": str(request_id),
+            "resolution_note": note,
+            "confirm_anonymization": "yes",
+        }
+    else:
+        form = {
+            "action": "transition",
+            "request_id": str(request_id),
+            "new_status": "rejected",
+            "resolution_note": note,
+        }
+
+    response = _post(admin_client, "/admin/data-requests", form)
+
+    assert response.status_code == 400
+    assert note.encode("utf-8") not in response.data
+    assert note not in caplog.text
+    assert tuple(
+        _row(
+            "SELECT status,resolution_note,completed_at "
+            "FROM data_subject_requests WHERE id=?",
+            (request_id,),
+        )
+    ) == ("verifying", None, None)
+    assert tuple(
+        _row(
+            "SELECT company_name,contact_name,phone_normalized,email,wechat,"
+            "anonymized_at FROM leads WHERE id=?",
+            (lead_id,),
+        )
+    ) == lead_before
+    assert _row(
+        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
+    )[0] == 1
+
+
 def test_privacy_completion_rejects_embedded_one_character_target_name(
     admin_client,
 ):
@@ -828,7 +888,7 @@ def test_privacy_completion_rejects_embedded_one_character_target_name(
     (("withdrawal", "consent_withdrawn"), ("deletion", "deletion_requested")),
 )
 def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics(
-    admin_client, request_type, reason_code
+    admin_client, request_type, reason_code, caplog
 ):
     lead_id, assessment_id = _insert_lead(
         status="won",
@@ -845,8 +905,42 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
     )
     request_id = _create_request(admin_client, lead_id, request_type)
     _move_request_to_verifying(admin_client, request_id)
+    hostile_landline = "010-1234-5678"
+    hostile_attribution = json.dumps(
+        {
+            "utm_source": private_values[0],
+            "utm_medium": private_values[1],
+            "utm_campaign": f"{private_values[4]} {hostile_landline}",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    hostile_source = f"{private_values[0]} {hostile_landline}"
     db = models.get_db()
     try:
+        version_id = db.execute(
+            "SELECT rule_version_id FROM assessments WHERE id=?", (assessment_id,)
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE leads SET source=? WHERE id=?", (hostile_source, lead_id)
+        )
+        db.execute(
+            "UPDATE assessments SET attribution_json=? WHERE id=?",
+            (hostile_attribution, assessment_id),
+        )
+        db.execute(
+            "INSERT INTO roi_estimates "
+            "(assessment_id,rule_version_id,recommended_scenarios_json,"
+            "estimate_snapshot_json,created_at) VALUES (?,?,?,?,?)",
+            (
+                assessment_id,
+                version_id,
+                '["retained_scenario"]',
+                '{"midpoint":{"annual_savings":12345}}',
+                "2026-08-10 09:00:00",
+            ),
+        )
         db.execute(
             "INSERT INTO lead_consents "
             "(lead_id,policy_version,consented_at,source,identity_hash) "
@@ -874,6 +968,20 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         db.commit()
     finally:
         db.close()
+    assessment_before = tuple(
+        _row(
+            "SELECT answers_json,dimension_scores_json,overall_score,"
+            "report_snapshot_json FROM assessments WHERE id=?",
+            (assessment_id,),
+        )
+    )
+    roi_before = tuple(
+        _row(
+            "SELECT recommended_scenarios_json,estimate_snapshot_json "
+            "FROM roi_estimates WHERE assessment_id=?",
+            (assessment_id,),
+        )
+    )
 
     unconfirmed = _post(
         admin_client,
@@ -900,7 +1008,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
 
     assert completed.status_code == 302
     lead = _row(
-        "SELECT company_name,contact_name,phone_normalized,email,wechat,"
+        "SELECT company_name,contact_name,phone_normalized,email,wechat,source,"
         "anonymized_at,status FROM leads WHERE id=?",
         (lead_id,),
     )
@@ -910,6 +1018,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         "phone_normalized": None,
         "email": None,
         "wechat": None,
+        "source": None,
         "anonymized_at": lead["anonymized_at"],
         "status": "won",
     }
@@ -924,13 +1033,29 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         "SELECT note FROM appointments WHERE lead_id=?", (lead_id,)
     )[0] is None
     assessment = _row(
-        "SELECT company_name,contact_email,report_snapshot_json FROM assessments "
+        "SELECT company_name,contact_email,attribution_json,report_snapshot_json "
+        "FROM assessments "
         "WHERE id=?",
         (assessment_id,),
     )
     assert assessment["company_name"] is None
     assert assessment["contact_email"] is None
+    assert assessment["attribution_json"] == "{}"
     assert f"{request_type}保留报告" in assessment["report_snapshot_json"]
+    assert tuple(
+        _row(
+            "SELECT answers_json,dimension_scores_json,overall_score,"
+            "report_snapshot_json FROM assessments WHERE id=?",
+            (assessment_id,),
+        )
+    ) == assessment_before
+    assert tuple(
+        _row(
+            "SELECT recommended_scenarios_json,estimate_snapshot_json "
+            "FROM roi_estimates WHERE assessment_id=?",
+            (assessment_id,),
+        )
+    ) == roi_before
     assert _row(
         "SELECT COUNT(*) FROM analytics_events WHERE assessment_id=?",
         (assessment_id,),
@@ -946,6 +1071,9 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
     assert all(
         value not in request_row["resolution_note"] for value in private_values
     )
+    for marker in (*private_values, hostile_landline, hostile_source):
+        assert marker.encode("utf-8") not in completed.data
+        assert marker not in caplog.text
     reasons = _rows(
         "SELECT note FROM lead_status_history WHERE lead_id=? AND note IS NOT NULL "
         "ORDER BY id",
@@ -1032,6 +1160,58 @@ def test_expired_unconverted_lead_is_anonymized_but_metrics_remain(client):
         with_followup=True,
         with_appointment=True,
     )
+    hostile_attribution = json.dumps(
+        {
+            "utm_source": "expired企业",
+            "utm_medium": "expired联系人",
+            "utm_campaign": "wx_expired 010-1234-5678",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    db = models.get_db()
+    try:
+        version_id = db.execute(
+            "SELECT rule_version_id FROM assessments WHERE id=?", (assessment_id,)
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE leads SET source=? WHERE id=?",
+            ("expired企业 010-1234-5678", lead_id),
+        )
+        db.execute(
+            "UPDATE assessments SET attribution_json=? WHERE id=?",
+            (hostile_attribution, assessment_id),
+        )
+        db.execute(
+            "INSERT INTO roi_estimates "
+            "(assessment_id,rule_version_id,recommended_scenarios_json,"
+            "estimate_snapshot_json,created_at) VALUES (?,?,?,?,?)",
+            (
+                assessment_id,
+                version_id,
+                '["retained_scenario"]',
+                '{"midpoint":{"annual_savings":12345}}',
+                "2026-08-10 09:00:00",
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+    assessment_before = tuple(
+        _row(
+            "SELECT answers_json,dimension_scores_json,overall_score,"
+            "report_snapshot_json FROM assessments WHERE id=?",
+            (assessment_id,),
+        )
+    )
+    roi_before = tuple(
+        _row(
+            "SELECT recommended_scenarios_json,estimate_snapshot_json "
+            "FROM roi_estimates WHERE assessment_id=?",
+            (assessment_id,),
+        )
+    )
 
     preview_count = lead_repository.purge_expired_leads(
         now=FIXED_NOW, apply=False
@@ -1043,13 +1223,15 @@ def test_expired_unconverted_lead_is_anonymized_but_metrics_remain(client):
 
     assert count == 1
     lead = _row(
-        "SELECT company_name,contact_name,phone_normalized,email,wechat,anonymized_at "
+        "SELECT company_name,contact_name,phone_normalized,email,wechat,source,"
+        "anonymized_at "
         "FROM leads WHERE id=?",
         (lead_id,),
     )
     assert lead["company_name"] == lead["contact_name"] == "已匿名化"
     assert lead["phone_normalized"] is None
     assert lead["email"] is None and lead["wechat"] is None
+    assert lead["source"] is None
     assert lead["anonymized_at"] is not None
     assert _row(
         "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
@@ -1057,6 +1239,20 @@ def test_expired_unconverted_lead_is_anonymized_but_metrics_remain(client):
     assert _row(
         "SELECT COUNT(*) FROM assessments WHERE lead_id=?", (lead_id,)
     )[0] == 1
+    assessment = _row(
+        "SELECT attribution_json,answers_json,dimension_scores_json,overall_score,"
+        "report_snapshot_json FROM assessments WHERE id=?",
+        (assessment_id,),
+    )
+    assert assessment["attribution_json"] == "{}"
+    assert tuple(assessment)[1:] == assessment_before
+    assert tuple(
+        _row(
+            "SELECT recommended_scenarios_json,estimate_snapshot_json "
+            "FROM roi_estimates WHERE assessment_id=?",
+            (assessment_id,),
+        )
+    ) == roi_before
     assert _row(
         "SELECT COUNT(*) FROM analytics_events WHERE assessment_id=?",
         (assessment_id,),

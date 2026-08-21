@@ -84,9 +84,17 @@ def complete_assessment(request, identity_hash):
             completed_at,
         )
         analytics_repository.insert_server_event(
-            db, "assessment_completed", assessment_id
+            db,
+            "assessment_completed",
+            assessment_id,
+            created_at=completed_at,
         )
-        analytics_repository.insert_server_event(db, "lead_submitted", assessment_id)
+        analytics_repository.insert_server_event(
+            db,
+            "lead_submitted",
+            assessment_id,
+            created_at=completed_at,
+        )
         return CompletionResult(assessment_id, lead_id, True)
 
     return run_transaction(operation)
