@@ -1,6 +1,5 @@
 import json
 import re
-import unicodedata
 from datetime import datetime, timedelta
 
 import pytest
@@ -18,33 +17,27 @@ ADMIN_PRIVATE_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
-PHONE_SEPARATOR_VARIANTS = tuple(
-    dict.fromkeys(
-        (
-            "()",
-            ".",
-            "/",
-            "\\",
-            "·",
-            "\u2212",
-            "\ufe0f",
-            *(
-                character
-                for codepoint in range(0x10000)
-                if (
-                    (character := chr(codepoint)).isspace()
-                    or unicodedata.category(character) in {"Pd", "Cf"}
-                )
-            ),
-        )
-    )
+COMPLETION_OUTCOME_CASES = (
+    ("access", "access_copy_provided", "已向申请人提供个人信息副本"),
+    ("access", "access_no_data", "核验后确认无可提供的个人信息"),
+    ("correction", "correction_completed", "已按核验结果完成信息更正"),
+    ("correction", "correction_no_change", "核验后确认无需更正"),
+    (
+        "withdrawal",
+        "withdrawal_anonymized",
+        "已完成授权撤回并匿名化相关信息",
+    ),
+    (
+        "deletion",
+        "deletion_anonymized",
+        "已完成删除请求并匿名化相关信息",
+    ),
 )
-
-
-def _unicode_id(value):
-    return "-".join(f"U+{ord(character):04X}" for character in value)
-
-
+REJECTION_OUTCOME_CASES = (
+    ("identity_verification_failed", "身份核验未通过"),
+    ("request_scope_incomplete", "请求范围不明确，需补充信息"),
+    ("request_not_applicable", "经核验，该请求不符合处理条件"),
+)
 def _assert_admin_private(response):
     assert {
         key: response.headers.get(key) for key in ADMIN_PRIVATE_HEADERS
@@ -592,200 +585,54 @@ def test_offline_privacy_request_cannot_target_an_already_anonymized_lead(
     assert page.select_one(f'form select[name="lead_id"] option[value="{lead_id}"]') is None
 
 
-def test_access_request_completion_requires_sanitized_non_pii_result(admin_client):
-    lead_id, _ = _insert_lead(suffix="access")
-    request_id = _create_request(admin_client, lead_id, "access")
-    _move_request_to_verifying(admin_client, request_id)
-
-    missing_note = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": "",
-        },
-    )
-    assert missing_note.status_code == 400
-
-    completed = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": (
-                "<b>已向申请人当面提供数据副本</b>"
-                "<script>private-note-marker</script>"
-            ),
-        },
-    )
-
-    assert completed.status_code == 302
-    request_row = _row(
-        "SELECT status,resolution_note,completed_at FROM data_subject_requests "
-        "WHERE id=?",
-        (request_id,),
-    )
-    assert request_row["status"] == "completed"
-    assert request_row["resolution_note"] == "已向申请人当面提供数据副本"
-    assert request_row["completed_at"] is not None
-    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is None
-
-
-def test_privacy_request_can_be_rejected_only_after_verification(admin_client):
-    lead_id, _ = _insert_lead(suffix="rejected")
-    request_id = _create_request(admin_client, lead_id, "correction")
-    _move_request_to_verifying(admin_client, request_id)
-
-    rejected = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "transition",
-            "request_id": str(request_id),
-            "new_status": "rejected",
-            "resolution_note": "身份核验未通过，已告知补充材料要求",
-        },
-    )
-
-    assert rejected.status_code == 302
-    request_row = _row(
-        "SELECT status,resolution_note,completed_at FROM data_subject_requests "
-        "WHERE id=?",
-        (request_id,),
-    )
-    assert request_row["status"] == "rejected"
-    assert request_row["resolution_note"] == (
-        "身份核验未通过，已告知补充材料要求"
-    )
-    assert request_row["completed_at"] is not None
-    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is None
-
-
-def test_privacy_resolution_note_is_limited_to_one_thousand_characters(
-    admin_client
-):
-    lead_id, _ = _insert_lead(suffix="longnote")
-    request_id = _create_request(admin_client, lead_id, "access")
-    _move_request_to_verifying(admin_client, request_id)
-
-    response = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": "完" * 1001,
-        },
-    )
-
-    assert response.status_code == 400
-    assert tuple(
-        _row(
-            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
-            (request_id,),
-        )
-    ) == ("verifying", None)
-
-
 @pytest.mark.parametrize(
-    "private_note",
-    (
-        "已发送至138-0013-8000",
-        "已发送至 user @ example.com",
-        "已发送至١٣٨٠٠١٣٨٠٠٠",
-    ),
+    ("request_type", "outcome_code", "expected_label"),
+    COMPLETION_OUTCOME_CASES,
 )
-def test_privacy_resolution_note_rejects_contact_values(
-    admin_client, private_note
-):
-    lead_id, _ = _insert_lead(suffix=f"pii{len(private_note)}")
-    request_id = _create_request(admin_client, lead_id, "correction")
-    _move_request_to_verifying(admin_client, request_id)
-
-    response = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": private_note,
-        },
-    )
-
-    assert response.status_code == 400
-    assert private_note.encode("utf-8") not in response.data
-    row = _row(
-        "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
-        (request_id,),
-    )
-    assert tuple(row) == ("verifying", None)
-
-
-@pytest.mark.parametrize(
-    ("value_kind", "note_template"),
-    (
-        ("company_name", "已向{value}确认处理结果"),
-        ("wechat", "已通过微信 {value} 完成核验"),
-        ("landline", "已通过座机 010-12345678 完成核验"),
-        ("landline", "身份核验结果已电话告知，号码 12345678"),
-        ("landline", "身份核验结果已电话告知，号码 +44 20 7946 0958"),
-        ("landline", "身份核验使用 wechat_secret88 完成"),
-        ("landline", "身份核验使用 wxid_private88 完成"),
-    ),
-)
-def test_privacy_completion_rejects_target_identifiers_and_phone_shapes_atomically(
-    admin_client, value_kind, note_template
+def test_privacy_completion_outcome_codes_store_only_fixed_labels(
+    admin_client, request_type, outcome_code, expected_label
 ):
     lead_id, _ = _insert_lead(
-        suffix=f"private-{value_kind}", with_followup=True
+        suffix=f"fixed-{outcome_code}", with_followup=True
     )
-    lead_before = _row(
-        "SELECT company_name,contact_name,phone_normalized,email,wechat,"
-        "anonymized_at FROM leads WHERE id=?",
-        (lead_id,),
-    )
-    value = lead_before[value_kind] if value_kind != "landline" else ""
-    request_id = _create_request(admin_client, lead_id, "deletion")
+    request_id = _create_request(admin_client, lead_id, request_type)
     _move_request_to_verifying(admin_client, request_id)
+    form = {
+        "action": "complete",
+        "request_id": str(request_id),
+        "outcome_code": outcome_code,
+    }
+    if request_type in {"withdrawal", "deletion"}:
+        form["confirm_anonymization"] = "yes"
 
-    response = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": note_template.format(value=value),
-            "confirm_anonymization": "yes",
-        },
+    response = _post(admin_client, "/admin/data-requests", form)
+
+    assert response.status_code == 302
+    request_row = _row(
+        "SELECT status,resolution_note,completed_at "
+        "FROM data_subject_requests WHERE id=?",
+        (request_id,),
+    )
+    assert tuple(request_row) == ("completed", expected_label, request_row["completed_at"])
+    assert request_row["completed_at"] is not None
+    assert outcome_code not in request_row["resolution_note"]
+    assert len(request_row["resolution_note"]) <= 1000
+    lead = _row(
+        "SELECT anonymized_at FROM leads WHERE id=?", (lead_id,)
+    )
+    assert (lead["anonymized_at"] is not None) == (
+        request_type in {"withdrawal", "deletion"}
     )
 
-    assert response.status_code == 400
-    assert tuple(
-        _row(
-            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
-            (request_id,),
-        )
-    ) == ("verifying", None)
-    assert tuple(
-        _row(
-            "SELECT company_name,contact_name,phone_normalized,email,wechat,"
-            "anonymized_at FROM leads WHERE id=?",
-            (lead_id,),
-        )
-    ) == tuple(lead_before)
-    assert _row(
-        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
-    )[0] == 1
 
-
-def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_client):
-    lead_id, _ = _insert_lead(suffix="rejection-private")
-    contact_name = _row(
-        "SELECT contact_name FROM leads WHERE id=?", (lead_id,)
-    )[0]
-    request_id = _create_request(admin_client, lead_id, "access")
+@pytest.mark.parametrize(
+    ("outcome_code", "expected_label"), REJECTION_OUTCOME_CASES
+)
+def test_privacy_rejection_codes_store_only_fixed_labels(
+    admin_client, outcome_code, expected_label
+):
+    lead_id, _ = _insert_lead(suffix=f"rejected-{outcome_code}")
+    request_id = _create_request(admin_client, lead_id, "correction")
     _move_request_to_verifying(admin_client, request_id)
 
     response = _post(
@@ -795,11 +642,35 @@ def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_clie
             "action": "transition",
             "request_id": str(request_id),
             "new_status": "rejected",
-            "resolution_note": f"无法核验联系人 {contact_name}",
+            "outcome_code": outcome_code,
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 302
+    request_row = _row(
+        "SELECT status,resolution_note,completed_at "
+        "FROM data_subject_requests WHERE id=?",
+        (request_id,),
+    )
+    assert tuple(request_row) == ("rejected", expected_label, request_row["completed_at"])
+    assert request_row["completed_at"] is not None
+    assert outcome_code not in request_row["resolution_note"]
+    assert len(request_row["resolution_note"]) <= 1000
+    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is None
+
+
+def test_privacy_completion_rejects_outcome_code_for_another_request_type(
+    admin_client,
+):
+    lead_id, _ = _insert_lead(suffix="wrong-outcome-type", with_followup=True)
+    request_id = _create_request(admin_client, lead_id, "access")
+    _move_request_to_verifying(admin_client, request_id)
+
+    with pytest.raises(ValidationError, match="^privacy outcome has an invalid value$"):
+        lead_repository.complete_data_subject_request(
+            request_id, "correction_completed", now=FIXED_NOW
+        )
+
     assert tuple(
         _row(
             "SELECT status,resolution_note,completed_at "
@@ -807,29 +678,31 @@ def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_clie
             (request_id,),
         )
     ) == ("verifying", None, None)
+    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is None
+    assert _row(
+        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
+    )[0] == 1
 
 
+@pytest.mark.parametrize("workflow", ("completion", "rejection"))
+@pytest.mark.parametrize("field_name", ("outcome_code", "resolution_note"))
 @pytest.mark.parametrize(
-    "private_landline",
+    "submitted_template",
     (
-        "010-1234-5678",
-        "1234-5678",
-        "1234 5678",
-        "010-123-45678",
-        "010-12-345678",
-        "010 123 45678",
-        "tel010-123-45678",
-        "010\u2010123\u201045678",
-        "010\u2011123\u201145678",
-        "010\u200b123\u200b45678",
+        "任意自由文本",
+        "已联系 {company_name}",
+        "已使用 wxid_private88 核验",
+        "核验 010\u034f123\u034f45678",
+        "核验 010\u115f123\u116045678",
+        "核验 010\u17b4123\u17b545678",
     ),
 )
-@pytest.mark.parametrize("workflow", ("completion", "rejection"))
-def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
-    admin_client, caplog, private_landline, workflow
+def test_privacy_arbitrary_outcomes_are_generic_and_fully_rolled_back(
+    admin_client, caplog, workflow, field_name, submitted_template
 ):
     lead_id, _ = _insert_lead(
-        suffix=f"formatted-{workflow}-{len(private_landline)}", with_followup=True
+        suffix=f"closed-{workflow}-{field_name}-{len(submitted_template)}",
+        with_followup=True,
     )
     lead_before = tuple(
         _row(
@@ -838,14 +711,14 @@ def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
             (lead_id,),
         )
     )
+    submitted_value = submitted_template.format(company_name=lead_before[0])
     request_id = _create_request(admin_client, lead_id, "deletion")
     _move_request_to_verifying(admin_client, request_id)
-    note = f"已通过号码 {private_landline} 完成核验"
     if workflow == "completion":
         form = {
             "action": "complete",
             "request_id": str(request_id),
-            "resolution_note": note,
+            field_name: submitted_value,
             "confirm_anonymization": "yes",
         }
     else:
@@ -853,14 +726,14 @@ def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
             "action": "transition",
             "request_id": str(request_id),
             "new_status": "rejected",
-            "resolution_note": note,
+            field_name: submitted_value,
         }
 
     response = _post(admin_client, "/admin/data-requests", form)
 
     assert response.status_code == 400
-    assert note.encode("utf-8") not in response.data
-    assert note not in caplog.text
+    assert submitted_value.encode("utf-8") not in response.data
+    assert submitted_value not in caplog.text
     assert tuple(
         _row(
             "SELECT status,resolution_note,completed_at "
@@ -880,122 +753,135 @@ def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
     )[0] == 1
 
 
-@pytest.mark.parametrize(
-    "separator", PHONE_SEPARATOR_VARIANTS, ids=_unicode_id
-)
-@pytest.mark.parametrize("country_prefix", ("", "+86"), ids=("local", "cn"))
-def test_privacy_note_rejects_generated_visual_phone_separators(
-    separator, country_prefix
-):
-    local_number = separator.join("01012345678")
-    prefix = f"{country_prefix}{separator}" if country_prefix else ""
-    private_note = f"核验号码 {prefix}{local_number} 已告知"
-
-    with pytest.raises(ValidationError) as error:
-        lead_repository.validate_resolution_note(private_note, required=True)
-
-    assert str(error.value) == "resolution_note contains a private value"
-    assert private_note not in str(error.value)
-
-
-@pytest.mark.parametrize(
-    "separator", PHONE_SEPARATOR_VARIANTS, ids=_unicode_id
-)
-def test_privacy_phone_canonicalization_preserves_bounded_non_phone_identifiers(
-    separator,
-):
-    identifier_note = f"工单ABC{separator.join('12345678')}已归档"
-    batch_note = f"批次{separator.join('202612345678')}已归档"
-
-    assert lead_repository.validate_resolution_note(identifier_note, required=True)
-    assert lead_repository.validate_resolution_note(batch_note, required=True)
-
-
-def test_privacy_phone_scan_ignores_values_in_removed_markup_attributes():
-    marked_up_note = '<span data-order="12345678">工单已归档</span>'
-
-    assert lead_repository.validate_resolution_note(
-        marked_up_note, required=True
-    ) == "工单已归档"
-
-
-@pytest.mark.parametrize(
-    "non_phone_identifier",
-    ("工单ABC1234-5678已归档", "批次2026-1234-5678已归档"),
-)
-def test_privacy_note_candidate_does_not_consume_adjacent_identifiers(
-    admin_client, non_phone_identifier
-):
-    lead_id, _ = _insert_lead(suffix=f"bounded-{len(non_phone_identifier)}")
-    request_id = _create_request(admin_client, lead_id, "correction")
-    _move_request_to_verifying(admin_client, request_id)
+def test_privacy_verifying_transition_rejects_an_outcome_value(admin_client):
+    lead_id, _ = _insert_lead(suffix="early-outcome")
+    request_id = _create_request(admin_client, lead_id, "access")
+    submitted_value = "不应在核验中记录"
 
     response = _post(
         admin_client,
         "/admin/data-requests",
         {
-            "action": "complete",
+            "action": "transition",
             "request_id": str(request_id),
-            "resolution_note": non_phone_identifier,
-        },
-    )
-
-    assert response.status_code == 302
-    assert tuple(
-        _row(
-            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
-            (request_id,),
-        )
-    ) == ("completed", non_phone_identifier)
-
-
-def test_privacy_completion_rejects_embedded_one_character_target_name(
-    admin_client,
-):
-    lead_id, _ = _insert_lead(suffix="one-character-name", with_followup=True)
-    db = models.get_db()
-    try:
-        db.execute("UPDATE leads SET contact_name='王' WHERE id=?", (lead_id,))
-        db.commit()
-    finally:
-        db.close()
-    request_id = _create_request(admin_client, lead_id, "withdrawal")
-    _move_request_to_verifying(admin_client, request_id)
-
-    response = _post(
-        admin_client,
-        "/admin/data-requests",
-        {
-            "action": "complete",
-            "request_id": str(request_id),
-            "resolution_note": "已由王完成身份核验",
-            "confirm_anonymization": "yes",
+            "new_status": "verifying",
+            "outcome_code": submitted_value,
         },
     )
 
     assert response.status_code == 400
+    assert submitted_value.encode("utf-8") not in response.data
     assert tuple(
         _row(
-            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
+            "SELECT status,resolution_note,completed_at "
+            "FROM data_subject_requests WHERE id=?",
             (request_id,),
         )
-    ) == ("verifying", None)
-    assert tuple(
-        _row(
-            "SELECT contact_name,anonymized_at FROM leads WHERE id=?", (lead_id,)
-        )
-    ) == ("王", None)
-    assert _row(
-        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
-    )[0] == 1
+    ) == ("received", None, None)
 
 
 @pytest.mark.parametrize(
-    ("request_type", "reason_code"),
-    (("withdrawal", "consent_withdrawn"), ("deletion", "deletion_requested")),
+    ("request_type", "expected_completion_options"),
+    (
+        (
+            "access",
+            (
+                ("access_copy_provided", "已向申请人提供个人信息副本"),
+                ("access_no_data", "核验后确认无可提供的个人信息"),
+            ),
+        ),
+        (
+            "correction",
+            (
+                ("correction_completed", "已按核验结果完成信息更正"),
+                ("correction_no_change", "核验后确认无需更正"),
+            ),
+        ),
+        (
+            "withdrawal",
+            (("withdrawal_anonymized", "已完成授权撤回并匿名化相关信息"),),
+        ),
+        (
+            "deletion",
+            (("deletion_anonymized", "已完成删除请求并匿名化相关信息"),),
+        ),
+    ),
+)
+def test_privacy_request_template_uses_scoped_selects_and_displays_old_labels(
+    admin_client, request_type, expected_completion_options
+):
+    lead_id, _ = _insert_lead(suffix=f"select-outcomes-{request_type}")
+    request_id = _create_request(admin_client, lead_id, request_type)
+    _move_request_to_verifying(admin_client, request_id)
+
+    listing = admin_client.get("/admin/data-requests")
+
+    assert listing.status_code == 200
+    page = BeautifulSoup(listing.data, "html.parser")
+    row = page.select_one(f'tr[data-request-id="{request_id}"]')
+    assert row.select("textarea") == []
+    assert row.select('[name="resolution_note"]') == []
+    forms = row.select("form")
+    completion_form = next(
+        form
+        for form in forms
+        if form.select_one('input[name="action"][value="complete"]')
+    )
+    rejection_form = next(
+        form
+        for form in forms
+        if form.select_one('input[name="new_status"][value="rejected"]')
+    )
+    completion_options = [
+        (option.get("value"), option.get_text(" ", strip=True))
+        for option in completion_form.select('select[name="outcome_code"] option')
+    ]
+    rejection_options = [
+        (option.get("value"), option.get_text(" ", strip=True))
+        for option in rejection_form.select('select[name="outcome_code"] option')
+    ]
+    assert completion_options == list(expected_completion_options)
+    assert rejection_options == list(REJECTION_OUTCOME_CASES)
+    confirmation = completion_form.select_one(
+        'input[name="confirm_anonymization"][value="yes"]'
+    )
+    assert (confirmation is not None) == (
+        request_type in {"withdrawal", "deletion"}
+    )
+
+    old_label = "历史固定处理结果"
+    db = models.get_db()
+    try:
+        db.execute(
+            "UPDATE data_subject_requests SET status='completed',resolution_note=? "
+            "WHERE id=?",
+            (old_label, request_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert old_label in admin_client.get("/admin/data-requests").get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("request_type", "reason_code", "outcome_code", "outcome_label"),
+    (
+        (
+            "withdrawal",
+            "consent_withdrawn",
+            "withdrawal_anonymized",
+            "已完成授权撤回并匿名化相关信息",
+        ),
+        (
+            "deletion",
+            "deletion_requested",
+            "deletion_anonymized",
+            "已完成删除请求并匿名化相关信息",
+        ),
+    ),
 )
 def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics(
-    admin_client, request_type, reason_code, caplog
+    admin_client, request_type, reason_code, outcome_code, outcome_label, caplog
 ):
     lead_id, assessment_id = _insert_lead(
         status="won",
@@ -1096,7 +982,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         {
             "action": "complete",
             "request_id": str(request_id),
-            "resolution_note": "已完成身份核验",
+            "outcome_code": outcome_code,
         },
     )
     assert unconfirmed.status_code == 409
@@ -1108,7 +994,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         {
             "action": "complete",
             "request_id": str(request_id),
-            "resolution_note": "已完成身份核验并执行请求",
+            "outcome_code": outcome_code,
             "confirm_anonymization": "yes",
         },
     )
@@ -1174,7 +1060,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
     )
     assert request_row["status"] == "completed"
     assert request_row["completed_at"] is not None
-    assert request_row["resolution_note"] == "已完成身份核验并执行请求"
+    assert request_row["resolution_note"] == outcome_label
     assert all(
         value not in request_row["resolution_note"] for value in private_values
     )
@@ -1235,7 +1121,7 @@ def test_privacy_completion_rolls_back_request_and_anonymization_together(
         {
             "action": "complete",
             "request_id": str(request_id),
-            "resolution_note": "已完成核验",
+            "outcome_code": "deletion_anonymized",
             "confirm_anonymization": "yes",
         },
     )

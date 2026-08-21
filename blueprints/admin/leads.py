@@ -20,6 +20,12 @@ def _now_provider():
     return current_app.config.get("ADMIN_NOW_PROVIDER")
 
 
+def _privacy_outcome_code():
+    if "resolution_note" in request.form:
+        raise ValidationError("privacy outcome has an invalid value")
+    return request.form.get("outcome_code", "")
+
+
 def _lead_filters():
     status = request.args.get("status", "").strip()
     branch = request.args.get("branch", "").strip()
@@ -147,7 +153,7 @@ def admin_data_requests():
             lead_repository.transition_data_subject_request(
                 request_id,
                 request.form.get("new_status", ""),
-                request.form.get("resolution_note", ""),
+                _privacy_outcome_code(),
                 now=now,
             )
         elif action == "complete":
@@ -156,7 +162,7 @@ def admin_data_requests():
             )
             lead_repository.complete_data_subject_request(
                 request_id,
-                request.form.get("resolution_note", ""),
+                _privacy_outcome_code(),
                 confirm_anonymization=(
                     request.form.get("confirm_anonymization") == "yes"
                 ),
@@ -179,4 +185,6 @@ def admin_data_requests():
         statuses=tuple(sorted(lead_repository.DATA_REQUEST_STATUSES)),
         request_types=tuple(sorted(lead_repository.DATA_REQUEST_TYPES)),
         channels=tuple(sorted(lead_repository.DATA_REQUEST_CHANNELS)),
+        completion_outcomes=lead_repository.COMPLETION_OUTCOMES,
+        rejection_outcomes=lead_repository.REJECTION_OUTCOMES,
     )

@@ -2,13 +2,9 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from html import unescape
 import re
 import sqlite3
-import unicodedata
 from zoneinfo import ZoneInfo
-
-import bleach
 
 from models import get_db
 from repository import DataConflictError
@@ -53,29 +49,28 @@ PRIVACY_REASON_BY_REQUEST = {
     "withdrawal": "consent_withdrawn",
     "deletion": "deletion_requested",
 }
+COMPLETION_OUTCOMES = {
+    "access": (
+        ("access_copy_provided", "已向申请人提供个人信息副本"),
+        ("access_no_data", "核验后确认无可提供的个人信息"),
+    ),
+    "correction": (
+        ("correction_completed", "已按核验结果完成信息更正"),
+        ("correction_no_change", "核验后确认无需更正"),
+    ),
+    "withdrawal": (
+        ("withdrawal_anonymized", "已完成授权撤回并匿名化相关信息"),
+    ),
+    "deletion": (
+        ("deletion_anonymized", "已完成删除请求并匿名化相关信息"),
+    ),
+}
+REJECTION_OUTCOMES = (
+    ("identity_verification_failed", "身份核验未通过"),
+    ("request_scope_incomplete", "请求范围不明确，需补充信息"),
+    ("request_not_applicable", "经核验，该请求不符合处理条件"),
+)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-SCRIPT_OR_STYLE = re.compile(
-    r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>"
-)
-MAINLAND_MOBILE = re.compile(r"(?:86)?1[3-9]\d{9}")
-PHONE_CANDIDATE = re.compile(r"\d(?:-*\d)+")
-ASCII_PHONE_LABEL_SUFFIX = re.compile(
-    r"(?i)(?<![a-z0-9_])(?:tel|phone)$"
-)
-PHONE_PUNCTUATION = frozenset("()./\\·•")
-PHONE_MINUS_VARIANTS = frozenset({"˗", "⁒", "−", "➖"})
-LABELED_LOCAL_PHONE = re.compile(
-    r"(?i)(?:电话|手机|座机|联系(?:方式)?|tel|phone)"
-    r"\s*(?:号)?\s*[:：=-]?\s*\d{7,8}(?!\d)"
-)
-LABELED_WECHAT = re.compile(
-    r"(?i)(?:微信|wechat|weixin|wx)\s*(?:号|id)?\s*[:：=-]?\s*"
-    r"[a-z][a-z0-9_-]{5,19}\b"
-)
-WECHAT_TOKEN = re.compile(
-    r"(?i)(?<![a-z0-9_-])(?:wxid|wechat|weixin|wx)[_-]"
-    r"[a-z0-9_-]{4,}(?![a-z0-9_-])"
-)
 
 
 @dataclass(frozen=True)
@@ -444,7 +439,7 @@ def create_data_subject_request(
 
 
 def transition_data_subject_request(
-    request_id, new_status, resolution_note="", *, now=None
+    request_id, new_status, outcome_code="", *, now=None
 ):
     if new_status not in {"verifying", "rejected"}:
         raise ValidationError("new_status has an invalid value")
@@ -452,26 +447,27 @@ def transition_data_subject_request(
 
     def operation(db):
         row = db.execute(
-            "SELECT r.status,l.company_name,l.contact_name,l.phone_normalized,"
-            "l.email,l.wechat FROM data_subject_requests r "
-            "JOIN leads l ON l.id=r.lead_id WHERE r.id=?",
+            "SELECT request_type,status FROM data_subject_requests WHERE id=?",
             (request_id,),
         ).fetchone()
         expected = "received" if new_status == "verifying" else "verifying"
         if row is None or row["status"] != expected:
             raise DataConflictError("data request transition conflict")
-        note = validate_resolution_note(
-            resolution_note,
-            required=new_status == "rejected",
-            target_lead=row,
-        )
+        if new_status == "rejected":
+            outcome_label = _resolve_privacy_outcome(
+                outcome_code, REJECTION_OUTCOMES
+            )
+        elif outcome_code not in {"", None}:
+            raise ValidationError("privacy outcome has an invalid value")
+        else:
+            outcome_label = None
         completed_at = timestamp if new_status == "rejected" else None
         updated = db.execute(
             "UPDATE data_subject_requests SET status=?,resolution_note=?,"
             "completed_at=?,admin_updated_at=? WHERE id=? AND status=?",
             (
                 new_status,
-                note or None,
+                outcome_label,
                 completed_at,
                 timestamp,
                 request_id,
@@ -486,7 +482,7 @@ def transition_data_subject_request(
 
 def complete_data_subject_request(
     request_id,
-    resolution_note,
+    outcome_code,
     *,
     confirm_anonymization=False,
     now=None,
@@ -495,16 +491,15 @@ def complete_data_subject_request(
 
     def operation(db):
         request_row = db.execute(
-            "SELECT r.lead_id,r.request_type,r.status,l.company_name,"
-            "l.contact_name,l.phone_normalized,l.email,l.wechat "
-            "FROM data_subject_requests r JOIN leads l ON l.id=r.lead_id "
-            "WHERE r.id=?",
+            "SELECT lead_id,request_type,status FROM data_subject_requests "
+            "WHERE id=?",
             (request_id,),
         ).fetchone()
         if request_row is None or request_row["status"] != "verifying":
             raise DataConflictError("data request completion conflict")
-        note = validate_resolution_note(
-            resolution_note, required=True, target_lead=request_row
+        outcome_label = _resolve_privacy_outcome(
+            outcome_code,
+            COMPLETION_OUTCOMES.get(request_row["request_type"], ()),
         )
         reason = PRIVACY_REASON_BY_REQUEST.get(request_row["request_type"])
         if reason is not None:
@@ -520,7 +515,7 @@ def complete_data_subject_request(
             "UPDATE data_subject_requests SET status='completed',"
             "resolution_note=?,completed_at=?,admin_updated_at=? "
             "WHERE id=? AND status='verifying'",
-            (note, timestamp, timestamp, request_id),
+            (outcome_label, timestamp, timestamp, request_id),
         )
         if updated.rowcount != 1:
             raise DataConflictError("data request completion conflict")
@@ -528,167 +523,12 @@ def complete_data_subject_request(
     _run_immediate(operation)
 
 
-def validate_resolution_note(value, *, required, target_lead=None):
-    if not isinstance(value, str):
-        raise ValidationError("resolution_note must be text")
-    without_active_blocks = SCRIPT_OR_STYLE.sub("", value)
-    note = unescape(
-        bleach.clean(without_active_blocks, tags=set(), attributes={}, strip=True)
-    ).strip()
-    phone_scan_note = unescape(
-        bleach.clean(
-            _stabilize_phone_scan_source(without_active_blocks),
-            tags=set(),
-            attributes={},
-            strip=True,
-        )
-    ).strip()
-    if required and not note:
-        raise ValidationError("resolution_note is required")
-    if len(note) > 1000:
-        raise ValidationError("resolution_note is too long")
-    normalized = unicodedata.normalize("NFKC", note)
-    compact = re.sub(r"\s+", "", normalized)
-    if "@" in compact:
-        raise ValidationError("resolution_note contains a private value")
-    digits = []
-    for character in compact:
-        digit = unicodedata.decimal(character, None)
-        if digit is not None:
-            digits.append(str(digit))
-    if MAINLAND_MOBILE.search("".join(digits)):
-        raise ValidationError("resolution_note contains a private value")
-    if (
-        _contains_phone_candidate(phone_scan_note)
-        or _contains_phone_candidate(normalized)
-        or LABELED_LOCAL_PHONE.search(normalized)
-        or LABELED_WECHAT.search(normalized)
-        or WECHAT_TOKEN.search(normalized)
-    ):
-        raise ValidationError("resolution_note contains a private value")
-    if target_lead is not None:
-        note_identifier = _canonical_identifier(note)
-        for field_name in (
-            "company_name",
-            "contact_name",
-            "phone_normalized",
-            "email",
-            "wechat",
-        ):
-            target_value = target_lead[field_name]
-            if _contains_target_identifier(note_identifier, target_value):
-                raise ValidationError("resolution_note contains a private value")
-    return note
-
-
-def _contains_phone_candidate(value):
-    """Conservatively reject bounded phones after visual-separator folding.
-
-    Formatting characters are folded before selecting a maximal digit run so a
-    visually formatted number cannot be split into harmless-looking fragments.
-    This deliberately favours rejecting an ambiguous numeric note over storing
-    a possible contact value.
-    """
-    canonical = _canonicalize_phone_separators(value)
-    for match in PHONE_CANDIDATE.finditer(canonical):
-        if _has_ascii_identifier_neighbor(canonical, match.start(), match.end()):
-            continue
-        candidate_digits = "".join(
-            str(unicodedata.decimal(character))
-            for character in match.group()
-            if unicodedata.decimal(character, None) is not None
-        )
-        if _is_local_phone_digits(candidate_digits):
-            return True
-        if candidate_digits.startswith("86") and _is_area_phone_digits(
-            candidate_digits[2:]
-        ):
-            return True
-        prefix = canonical[: match.start()].rstrip("-")
-        if prefix.endswith("+") and 7 <= len(candidate_digits) <= 15:
-            return True
-        if candidate_digits.startswith("00") and 7 <= len(
-            candidate_digits[2:]
-        ) <= 15:
-            return True
-    return False
-
-
-def _canonicalize_phone_separators(value):
-    """Fold visual phone separators while retaining identifier boundaries."""
-    normalized = unicodedata.normalize("NFKC", value)
-    canonical = []
-    for character in normalized:
-        category = unicodedata.category(character)
-        if category == "Cf" or _is_variation_selector(character):
-            continue
-        if (
-            character.isspace()
-            or category == "Pd"
-            or character in PHONE_PUNCTUATION
-            or character in PHONE_MINUS_VARIANTS
-        ):
-            canonical.append("-")
-        else:
-            canonical.append(character)
-    return "".join(canonical)
-
-
-def _stabilize_phone_scan_source(value):
-    """Keep separators meaningful across HTML text sanitization."""
-    stabilized = []
-    for character in value:
-        category = unicodedata.category(character)
-        if category == "Cf" or _is_variation_selector(character):
-            continue
-        stabilized.append(" " if character.isspace() else character)
-    return "".join(stabilized)
-
-
-def _is_variation_selector(character):
-    codepoint = ord(character)
-    return 0xFE00 <= codepoint <= 0xFE0F or 0xE0100 <= codepoint <= 0xE01EF
-
-
-def _is_local_phone_digits(candidate_digits):
-    return len(candidate_digits) in {7, 8} or _is_area_phone_digits(
-        candidate_digits
-    )
-
-
-def _is_area_phone_digits(candidate_digits):
-    return candidate_digits.startswith("0") and any(
-        len(candidate_digits) - area_length in {7, 8}
-        for area_length in (3, 4)
-    )
-
-
-def _has_ascii_identifier_neighbor(value, start, end):
-    before = value[start - 1] if start else ""
-    after = value[end] if end < len(value) else ""
-    before_is_identifier = before.isascii() and (
-        before.isalnum() or before == "_"
-    )
-    after_is_identifier = after.isascii() and (
-        after.isalnum() or after == "_"
-    )
-    if before_is_identifier and ASCII_PHONE_LABEL_SUFFIX.search(value[:start]):
-        before_is_identifier = False
-    return before_is_identifier or after_is_identifier
-
-
-def _canonical_identifier(value):
-    if not isinstance(value, str):
-        return ""
-    normalized = unicodedata.normalize("NFKC", value).casefold()
-    return "".join(character for character in normalized if character.isalnum())
-
-
-def _contains_target_identifier(note_identifier, target_value):
-    target_identifier = _canonical_identifier(target_value)
-    if not target_identifier:
-        return False
-    return target_identifier in note_identifier
+def _resolve_privacy_outcome(outcome_code, choices):
+    if isinstance(outcome_code, str):
+        for code, label in choices:
+            if outcome_code == code:
+                return label
+    raise ValidationError("privacy outcome has an invalid value")
 
 
 def anonymize_lead(db, lead_id, reason_code, *, now=None):
