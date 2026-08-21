@@ -89,9 +89,16 @@ apt-get update
 apt-get install -y sqlite3 rsync curl \
   libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 \
   libharfbuzz-subset0 fonts-noto-cjk
+python3 -m venv /opt/ai-platform/.venv
+/opt/ai-platform/.venv/bin/python -m pip install --upgrade pip
+/opt/ai-platform/.venv/bin/python -m pip install \
+  -r /opt/ai-platform/requirements-dev.txt
 ```
 
-生产固定使用 `WeasyPrint==69.0`。应用依赖安装完成后，阶段 7 必须单独运行：
+`requirements-dev.txt` 会同时安装 `requirements.txt` 中的生产依赖和固定版本的
+pytest，因此下面要求的生产候选验证命令可在全新虚拟环境复现；服务运行时不会
+调用 pytest。生产固定使用 `WeasyPrint==69.0`。应用依赖安装完成后，阶段 7
+必须单独运行：
 
 ```bash
 sudo -u ai-platform /opt/ai-platform/.venv/bin/python -m weasyprint --info
@@ -227,7 +234,17 @@ sudo -u ai-platform /opt/ai-platform/.venv/bin/python -m pytest \
 
 ## 阶段 7 预检与启动顺序
 
-发布代码后、启动服务前，在 `/opt/ai-platform` 运行：
+先保持 Nginx 停止，并停止任何旧版应用进程；后续运行时烟雾测试只能命中新启动
+的候选版本，不能以旧进程结果作为门禁证据：
+
+```bash
+systemctl stop nginx
+systemctl stop ai-platform
+test "$(systemctl is-active nginx)" = inactive
+test "$(systemctl is-active ai-platform)" = inactive
+```
+
+发布代码后、应用仍停止时，在 `/opt/ai-platform` 完成离线门禁：
 
 ```bash
 sudo -u ai-platform /opt/ai-platform/.venv/bin/python -m pip check
@@ -239,7 +256,21 @@ sudo -u ai-platform /opt/ai-platform/.venv/bin/python -m weasyprint --info
 systemd-analyze verify /etc/systemd/system/ai-platform.service
 ```
 
-只有以下检查全部通过后才允许启动 Nginx：
+离线门禁、数据库备份和恢复副本迁移全部通过后，先启动新应用，立即验证它的
+systemd 状态、loopback 健康状态和监听边界：
+
+```bash
+systemctl start ai-platform
+systemctl is-active ai-platform
+curl --fail http://127.0.0.1:5080/health
+ss -ltnp | grep '127.0.0.1:5080'
+```
+
+上述命令必须命中新启动的候选版本。随后在 Nginx 仍停止的前提下完成管理员、
+隐私配置、完整评估、HTML/PDF、Session 隔离、预约与后台关联的运行时烟雾测试。
+任何一项失败都先停止 `ai-platform` 并执行回滚，不能启动 Nginx。
+
+只有以下检查全部通过后才允许测试并启动 Nginx：
 
 1. `systemctl is-active ai-platform` 返回 `active`。
 2. `curl --fail http://127.0.0.1:5080/health` 返回 `{"status":"ok"}`。
@@ -250,6 +281,7 @@ systemd-analyze verify /etc/systemd/system/ai-platform.service
 7. HTML 报告、原生 PDF、Session 隔离、预约和后台关联烟雾测试通过。
 8. 保留清理仍为 dry-run，或 `--apply` 已有单独备份、批准和复核记录。
 
-门禁通过后才依次执行 `systemctl restart ai-platform`、loopback 健康检查、
-`nginx -t`，最后由阶段 7 明确批准 `systemctl start nginx`。在此之前 Nginx 始终
-保持停止。生产操作和浏览器/PDF 证据均不由当前本地任务代执行。
+全部运行时门禁通过后执行 `nginx -t`；最后只能在阶段 7 明确批准后执行
+`systemctl start nginx`。应用不得在此处再次重启，否则必须重新执行全部运行时
+烟雾测试。在此之前 Nginx 始终保持停止。生产操作和浏览器/PDF 证据均不由当前
+本地任务代执行。

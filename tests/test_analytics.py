@@ -1001,10 +1001,14 @@ def test_appointment_event_failure_rolls_back_the_appointment(
     )
     real_insert = analytics_repository.insert_server_event
 
-    def fail_appointment_event(db, event_name, current_assessment_id):
+    def fail_appointment_event(
+        db, event_name, current_assessment_id, **event_options
+    ):
         if event_name == "appointment_submitted":
             raise RuntimeError("private-appointment-analytics-marker")
-        return real_insert(db, event_name, current_assessment_id)
+        return real_insert(
+            db, event_name, current_assessment_id, **event_options
+        )
 
     monkeypatch.setattr(
         analytics_repository, "insert_server_event", fail_appointment_event

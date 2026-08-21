@@ -36,6 +36,7 @@ def submit_appointment_intent(
     preferred_date,
     time_slot: str,
     note: str,
+    submitted_at=None,
 ) -> AppointmentResult:
     """Own the connection while delegating the atomic write primitive."""
     db = get_db()
@@ -47,6 +48,7 @@ def submit_appointment_intent(
             preferred_date,
             time_slot,
             note,
+            submitted_at,
         )
         appointment = get_appointment(db, appointment_id)
         if appointment is None:
@@ -63,8 +65,17 @@ def create_appointment(
     preferred_date,
     time_slot: str,
     note: str,
+    submitted_at=None,
 ) -> int:
     """Create one pending intent using the assessment's persisted lead."""
+    submitted_at = submitted_at or datetime.now(SHANGHAI).replace(
+        tzinfo=None, microsecond=0
+    )
+    if not isinstance(submitted_at, datetime):
+        raise TypeError("appointment timestamp must be a datetime")
+    timestamp = submitted_at.replace(tzinfo=None, microsecond=0).isoformat(
+        sep=" "
+    )
     try:
         db.execute("BEGIN IMMEDIATE")
         assessment = db.execute(
@@ -85,15 +96,18 @@ def create_appointment(
                 and existing["lead_id"] == assessment["lead_id"]
             ):
                 analytics_repository.insert_server_event(
-                    db, "appointment_submitted", assessment_id
+                    db,
+                    "appointment_submitted",
+                    assessment_id,
+                    created_at=submitted_at,
                 )
                 db.commit()
                 return existing["id"]
             raise DataConflictError("appointment conflict")
         appointment_id = db.execute(
             "INSERT INTO appointments "
-            "(assessment_id,lead_id,submission_key,preferred_date,time_slot,note) "
-            "VALUES (?,?,?,?,?,?)",
+            "(assessment_id,lead_id,submission_key,preferred_date,time_slot,note,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (
                 assessment_id,
                 assessment["lead_id"],
@@ -101,10 +115,15 @@ def create_appointment(
                 preferred_date.isoformat(),
                 time_slot,
                 note or None,
+                timestamp,
+                timestamp,
             ),
         ).lastrowid
         analytics_repository.insert_server_event(
-            db, "appointment_submitted", assessment_id
+            db,
+            "appointment_submitted",
+            assessment_id,
+            created_at=submitted_at,
         )
         db.commit()
         return appointment_id

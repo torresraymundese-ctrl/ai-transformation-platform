@@ -12,9 +12,9 @@
 字节，以便验证路由、Session、响应和后台关联；它不是原生 WeasyPrint/Pango
 视觉证据。
 
-生产主机、生产数据库、systemd 服务和 Nginx 均未在此阶段访问或修改。
-浏览器四分支验收与原生 PDF 页面检查由主任务后续执行；在证据文件实际生成并
-人工检查前，不得宣称阶段 4、视觉验收或生产上线完成。
+生产主机、生产数据库、systemd 服务和 Nginx 均未在此阶段访问或修改。下文的
+浏览器四分支验收与原生 PDF 页面检查使用一次性本地数据库和测试专用配置；它们
+证明核心功能闭环，但不代表最终视觉重设计或生产上线完成。
 
 ## Windows 复现
 
@@ -44,39 +44,42 @@ git diff --check
 本次代码/文档提交前的实测结果：核心旅程 `2 passed in 3.10s`；核心旅程与
 API、报告、预约、线索、管理员相关分区 `202 passed in 118.18s`；全量 Python
 `465 passed in 215.96s`；三个 Node 运行时文件合计 `12 passed, 0 failed`。
-这些数字只证明自动化范围，不替代下一节的浏览器与原生 PDF 证据。
+这些数字只证明自动化范围；浏览器与原生 PDF 证据另列如下。
 
 ## 自动化证据矩阵
 
 | 产品规格 | 已有自动化证据 | 仍需人工/后续证据 |
 | --- | --- | --- |
-| 5 评估体验 | 6 步/22 项配置、四分支、刷新状态和键盘状态机单元/运行时测试；核心旅程使用真实 config/preview/complete 路由 | 四分支桌面、移动端、键盘和刷新浏览器矩阵；5 分钟实测 |
+| 5 评估体验 | 6 步/22 项配置、四分支、刷新状态、可见焦点与核心真实 HTTP 旅程；四分支浏览器矩阵见下文 | 5 分钟用户计时抽样 |
 | 6 场景与服务 | 场景门槛、排序、保底、服务包/交付物/周期/预算/验收的确定性测试 | 内容运营子项目补全公开信息架构、案例和资源关联 |
 | 7 ROI | Decimal 三档公式、有限开放区间、除零、快照计算依据与报告展示测试 | 浏览器可读性和最终视觉设计 |
-| 8 报告/PDF | 同一不可变快照、Session 隔离、HTML/PDF 路由、失败可重试、PDF 适配器边界测试 | Ubuntu 原生 PDF 中文字形、分页、图表、预算、声明和无联系人字段的页面检查 |
+| 8 报告/PDF | 同一不可变快照、Session 隔离、HTML/PDF 路由、失败可重试；Windows 原生 WeasyPrint/Pango 生成并检查 4 页 PDF | 阶段 7 Ubuntu 原生运行库复验 |
 | 9 联系与预约 | 必填/选填、手机号去重、幂等完成、Session 预约、上海日期、预约状态与后台可见性测试 | 工作人员真实跟进流程演练 |
 | 10 隐私生命周期 | 明示同意、固定政策版本、365 天到期匿名化、已成交豁免、撤回/删除、非识别指标保留测试 | 阶段 7 仅在备份和恢复演练后执行生产保留清理 |
 | 14 埋点 | 11 个事件白名单、每事件固定字段、无 PII、Session 哈希、关键事件原子/幂等测试 | 浏览器弱网/离开页面的最佳努力送达观察；指标看板属于后续运营子项目 |
 | 15 技术边界 | Flask/SQLite 单体、纯规则模块、CSRF、限流、通用错误、事务和幂等测试 | Ubuntu 运行库、systemd/Gunicorn/Nginx 阶段 7 预检 |
-| 16 验收 | 全量 pytest、Node 语法/运行时测试和本文件的 HTTP 核心旅程 | 四分支浏览器矩阵全部通过后，核心闭环才具备进入视觉重设计的完整证据 |
+| 16 验收 | 全量 pytest、Node 语法/运行时、HTTP 核心旅程、四分支浏览器矩阵和原生 PDF 页图 | 阶段 7 生产候选复验与上线审批 |
 
-## 浏览器与 PDF 证据（待主任务执行）
+## 浏览器与 PDF 证据
 
-以下文件尚不能由本代码/文档步骤创建，也不得用占位图代替：
+2026-08-21 使用一次性 SQLite 数据库、测试管理员和测试隐私配置完成以下验收；
+所有联系方式均为本地虚构测试值，未连接生产：
 
-- `docs/testing/evidence/core-manufacturing-desktop.png`
-- `docs/testing/evidence/core-retail-mobile.png`
-- `docs/testing/evidence/core-professional-keyboard.png`
-- `docs/testing/evidence/core-software-refresh.png`
-- `docs/testing/evidence/core-report-page-1.png`
+- [制造业桌面完整报告](evidence/core-manufacturing-desktop.png)：1440×900 完成六步、简版结果、联系方式与同意、完整报告、原生 PDF 下载和预约提交。
+- [零售电商手机视口](evidence/core-retail-mobile.png)：390×844 的七个页面状态均无横向溢出；结果联系页操作区与最后字段的重叠值为 0。
+- [知识型专业服务键盘焦点](evidence/core-professional-keyboard.png)：必填错误通用且不回显输入；Tab/Shift+Tab 后单选项有 2.4px 可见焦点，返回第 3 步修改后可继续到结果页。
+- [软件与创意服务刷新恢复](evidence/core-software-refresh.png)：第 4 步刷新后仍停留第 4 步，返回第 3 步修改答案后再次进入第 4 步。
+- [原生 PDF 第 1 页](evidence/core-report-page-1.png)：WeasyPrint 69.0 + Pango 1.58.2 生成 4 页 PDF；逐页检查中文字形、分页、图表、ROI、服务包、风险和声明。
 
-验收矩阵必须使用一次性数据库和测试专用隐私配置：制造业 1440×900 完成全链路；
-零售 390×844 检查无横向溢出和粘性按钮遮挡；知识型专业服务仅键盘完成并检查
-错误焦点/可见焦点；软件与创意服务在第 4 步刷新恢复、返回修改并确认
-`sessionStorage` 从未出现联系方式；最后用原生 WeasyPrint 生成 PDF、渲染为页图
-并检查中文字形、分页、分数表、推荐、预算、声明和联系人字段缺失。
+真实 PDF 首轮页面检查发现 WeasyPrint 忽略 HTML CSS 中的 SVG `fill`/`stroke`
+属性并把雷达网格画成黑色；失败测试锁定后改为 SVG 显式呈现属性，并将左右标签
+向图内收，重新生成的 4 页 PDF 已通过逐页检查。在线报告与 PDF 均未包含企业名、
+联系人、手机号、邮箱或微信。
 
-任何一项失败都保持 Task 14 和阶段 4 为打开状态。
+浏览器安全边界不直接读取 Session 存储；联系方式不进入 `sessionStorage` 由
+`test_storage_snapshot_is_non_contact_and_restores_one_submission_key` 的持久化字段
+白名单验证，浏览器只验证刷新恢复与返回修改行为。阶段 7 仍需在 Ubuntu 生产
+候选环境复跑原生 PDF 和全部运行时门禁。
 
 ## 明确留给第二子项目的范围
 

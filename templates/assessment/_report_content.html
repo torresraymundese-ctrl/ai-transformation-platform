@@ -32,14 +32,14 @@
         <title id="report-radar-title">六维 AI 就绪度雷达图</title>
         <desc id="report-radar-desc">蓝色区域表示本次评估得分，虚线表示平台建议就绪参考线。表格提供相同数据。</desc>
         {% for points in radar.grid %}
-        <polygon class="radar-grid" points="{{ points }}"></polygon>
+        <polygon class="radar-grid" fill="none" stroke="#d2d2d7" stroke-width="1" points="{{ points }}"></polygon>
         {% endfor %}
         {% for axis in radar.axes %}
-        <line class="radar-axis" x1="160" y1="160" x2="{{ axis.x }}" y2="{{ axis.y }}"></line>
+        <line class="radar-axis" stroke="#d2d2d7" stroke-width="1" x1="160" y1="160" x2="{{ axis.x }}" y2="{{ axis.y }}"></line>
         <text x="{{ axis.label_x }}" y="{{ axis.label_y }}" text-anchor="{{ axis.anchor }}">{{ axis.label }}</text>
         {% endfor %}
-        <polygon class="radar-reference" points="{{ radar.reference }}"></polygon>
-        <polygon class="radar-score" points="{{ radar.score }}"></polygon>
+        <polygon class="radar-reference" fill="none" stroke="#bf4800" stroke-width="2" stroke-dasharray="5 4" points="{{ radar.reference }}"></polygon>
+        <polygon class="radar-score" fill="#0071e3" fill-opacity="0.18" stroke="#0071e3" stroke-width="2.5" points="{{ radar.score }}"></polygon>
       </svg>
 
       <div class="score-table-wrap">

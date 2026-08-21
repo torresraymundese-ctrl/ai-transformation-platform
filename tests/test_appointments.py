@@ -459,6 +459,14 @@ def test_authorized_api_creates_pending_intent_with_exact_public_response(client
         assert appointment["time_slot"] == "afternoon"
         assert appointment["note"] == "字" * 500
         assert appointment["status"] == "pending"
+        assert appointment["created_at"] == "2026-08-20 00:30:00"
+        assert appointment["updated_at"] == "2026-08-20 00:30:00"
+        event = db.execute(
+            "SELECT created_at FROM analytics_events "
+            "WHERE event_name='appointment_submitted' AND assessment_id=?",
+            (assessment_id,),
+        ).fetchone()
+        assert event["created_at"] == "2026-08-20 00:30:00"
     finally:
         db.close()
 

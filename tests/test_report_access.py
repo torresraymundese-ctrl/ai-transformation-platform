@@ -652,8 +652,35 @@ def test_html_report_renders_every_required_snapshot_section(
     assert radar.select_one("title")
     assert radar.select_one("desc")
     assert len(radar.select("line.radar-axis")) == 6
-    assert radar.select_one("polygon.radar-score")
-    assert radar.select_one("polygon.radar-reference")
+    assert all(
+        polygon.get("fill") == "none"
+        and polygon.get("stroke") == "#d2d2d7"
+        and polygon.get("stroke-width") == "1"
+        for polygon in radar.select("polygon.radar-grid")
+    )
+    assert all(
+        axis.get("stroke") == "#d2d2d7"
+        and axis.get("stroke-width") == "1"
+        for axis in radar.select("line.radar-axis")
+    )
+    assert all(
+        float(label["x"]) >= 62
+        for label in radar.select('text[text-anchor="end"]')
+    )
+    assert all(
+        float(label["x"]) <= 258
+        for label in radar.select('text[text-anchor="start"]')
+    )
+    score_polygon = radar.select_one("polygon.radar-score")
+    assert score_polygon is not None
+    assert score_polygon.get("fill") == "#0071e3"
+    assert score_polygon.get("fill-opacity") == "0.18"
+    assert score_polygon.get("stroke") == "#0071e3"
+    reference_polygon = radar.select_one("polygon.radar-reference")
+    assert reference_polygon is not None
+    assert reference_polygon.get("fill") == "none"
+    assert reference_polygon.get("stroke") == "#bf4800"
+    assert reference_polygon.get("stroke-dasharray") == "5 4"
 
     assert page.select_one("#strengths")
     assert page.select_one("#weaknesses")

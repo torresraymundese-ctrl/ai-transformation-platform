@@ -121,8 +121,8 @@ class AssessmentRulesUnavailable(RuntimeError):
     """Raised when a published rule bundle cannot safely serve a request."""
 
 
-def current_shanghai_date(now_provider=None) -> date:
-    """Return the calendar date in Asia/Shanghai using an injectable clock."""
+def current_shanghai_datetime(now_provider=None) -> datetime:
+    """Return one database-ready Shanghai wall time using an injectable clock."""
     moment = (
         now_provider()
         if now_provider is not None
@@ -134,7 +134,12 @@ def current_shanghai_date(now_provider=None) -> date:
         or moment.utcoffset() is None
     ):
         raise RuntimeError("appointment clock must return an aware datetime")
-    return moment.astimezone(SHANGHAI_ZONE).date()
+    return moment.astimezone(SHANGHAI_ZONE).replace(tzinfo=None, microsecond=0)
+
+
+def current_shanghai_date(now_provider=None) -> date:
+    """Return the calendar date in Asia/Shanghai using an injectable clock."""
+    return current_shanghai_datetime(now_provider).date()
 
 
 def appointment_date_window(now_provider=None):

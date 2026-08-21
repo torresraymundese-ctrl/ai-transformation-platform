@@ -33,7 +33,7 @@ from assessment_validation import (
     AssessmentRulesUnavailable,
     CONSENT_POLICY_VERSION,
     appointment_date_window,
-    current_shanghai_date,
+    current_shanghai_datetime,
     parse_appointment_payload,
     parse_completion_payload,
     parse_preview_payload,
@@ -302,11 +302,12 @@ def assessment_complete():
 def appointment_create():
     require_public_csrf()
     try:
+        submitted_at = current_shanghai_datetime(
+            current_app.config.get("APPOINTMENT_NOW_PROVIDER")
+        )
         appointment_request = parse_appointment_payload(
             request.get_json(silent=True),
-            current_shanghai_date(
-                current_app.config.get("APPOINTMENT_NOW_PROVIDER")
-            ),
+            submitted_at.date(),
         )
     except ValidationError:
         return _invalid_appointment_response()
@@ -331,6 +332,7 @@ def appointment_create():
             appointment_request.preferred_date,
             appointment_request.time_slot,
             appointment_request.note,
+            submitted_at,
         )
     except DataConflictError:
         return jsonify({"error": "appointment conflict"}), 409
@@ -575,8 +577,8 @@ def _radar_context(dimension_rows):
                 "label": row["label"],
                 "x": f"{center + cos(angle) * radius:.1f}",
                 "y": f"{center + sin(angle) * radius:.1f}",
-                "label_x": f"{center + cos(angle) * 126:.1f}",
-                "label_y": f"{center + sin(angle) * 126 + 4:.1f}",
+                "label_x": f"{center + cos(angle) * 112:.1f}",
+                "label_y": f"{center + sin(angle) * 112 + 4:.1f}",
                 "anchor": anchor,
             }
         )
