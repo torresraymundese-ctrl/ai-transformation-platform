@@ -35,6 +35,7 @@ test("analytics transport sends exactly once and swallows async or sync failure"
   assert.equal(asyncCalls[0][0], "/api/v2/events");
   assert.equal(asyncCalls[0][1].method, "POST");
   assert.equal(asyncCalls[0][1].credentials, "same-origin");
+  assert.equal(asyncCalls[0][1].keepalive, true);
   assert.equal(asyncCalls[0][1].headers["X-CSRF-Token"], "csrf-token");
   assert.deepEqual(JSON.parse(asyncCalls[0][1].body), {
     event_name: "home_viewed",
@@ -73,7 +74,7 @@ test("page initialization fires one home event and one event per click", async f
     },
   };
   const fetchImpl = async function (url, options) {
-    calls.push([url, JSON.parse(options.body)]);
+    calls.push([url, JSON.parse(options.body), options]);
     return { ok: false, status: 503 };
   };
 
@@ -85,8 +86,8 @@ test("page initialization fires one home event and one event per click", async f
         assert.equal(selector, "[data-analytics-event]");
         return {
           dataset: {
-            analyticsEvent: "service_inquiry_clicked",
-            analyticsSource: "services",
+            analyticsEvent: "phone_clicked",
+            analyticsSource: "footer",
           },
         };
       },
@@ -94,7 +95,7 @@ test("page initialization fires one home event and one event per click", async f
   });
   await Promise.resolve();
 
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.map(function (call) { return call.slice(0, 2); }), [
     [
       "/api/v2/events",
       { event_name: "home_viewed", metadata: { page: "home" } },
@@ -102,11 +103,13 @@ test("page initialization fires one home event and one event per click", async f
     [
       "/api/v2/events",
       {
-        event_name: "service_inquiry_clicked",
-        metadata: { page: "home", source: "services" },
+        event_name: "phone_clicked",
+        metadata: { page: "home", source: "footer" },
       },
     ],
   ]);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(function (call) { return call[2].keepalive === true; }));
 });
 
 

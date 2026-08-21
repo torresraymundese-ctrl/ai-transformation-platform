@@ -263,6 +263,11 @@ def test_two_connections_serialize_same_key_creation_without_duplicate(client):
         assert [tuple(row) for row in rows] == [
             (results[0][1], "pending", "2026-08-25", "afternoon", "并发幂等")
         ]
+        assert db.execute(
+            "SELECT COUNT(*) FROM analytics_events "
+            "WHERE assessment_id=? AND event_name='appointment_submitted'",
+            (assessment_id,),
+        ).fetchone()[0] == 1
     finally:
         db.close()
 

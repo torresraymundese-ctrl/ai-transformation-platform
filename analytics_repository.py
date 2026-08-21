@@ -9,6 +9,8 @@ import unicodedata
 
 from flask import session
 
+from assessment.reporting import YEAR_1_BY_MATURITY
+from assessment.seed import load_core_catalog_manifest
 from assessment_validation import BRANCH_CODES, CODE_PATTERN, SCENARIO_CODES
 from models import get_db
 from validation import ValidationError
@@ -52,12 +54,44 @@ METADATA_KEYS = frozenset(
 ASSESSMENT_STEPS = frozenset(
     {"profile", "pain", "value_process", "data_systems", "org_delivery", "roi"}
 )
-MATURITY_CODES = frozenset({"explore", "pilot", "scale", "collaborate"})
+MATURITY_CODES = frozenset(YEAR_1_BY_MATURITY)
+PUBLIC_PAGE_CODES = frozenset(
+    {
+        "about",
+        "article",
+        "assessment",
+        "cases",
+        "error",
+        "home",
+        "insights",
+        "report",
+        "services",
+        "site",
+    }
+)
+PUBLIC_SOURCE_CODES = frozenset(
+    {"footer", "service_packages", "website_assessment"}
+)
+_CORE_CATALOG_MANIFEST = load_core_catalog_manifest()
+SUBBRANCH_CODES_BY_BRANCH = {
+    industry["code"]: frozenset(industry["subbranches"])
+    for industry in _CORE_CATALOG_MANIFEST["industries"]
+}
+DEPARTMENT_CODES_BY_BRANCH = {
+    industry["code"]: frozenset(industry["departments"])
+    for industry in _CORE_CATALOG_MANIFEST["industries"]
+}
+SUBBRANCH_CODES = frozenset().union(*SUBBRANCH_CODES_BY_BRANCH.values())
+DEPARTMENT_CODES = frozenset().union(*DEPARTMENT_CODES_BY_BRANCH.values())
 EXACT_CODE_DOMAINS = {
     "step": ASSESSMENT_STEPS,
     "branch_code": BRANCH_CODES,
+    "subbranch_code": SUBBRANCH_CODES,
+    "department_code": DEPARTMENT_CODES,
     "maturity_code": MATURITY_CODES,
     "scenario_code": SCENARIO_CODES,
+    "source": PUBLIC_SOURCE_CODES,
+    "page": PUBLIC_PAGE_CODES,
 }
 STABLE_CODE_FIELDS = frozenset(
     {
@@ -70,10 +104,77 @@ STABLE_CODE_FIELDS = frozenset(
     }
 )
 EMBEDDED_MAINLAND_MOBILE_DIGITS = re.compile(r"(?:86)?1[3-9]\d{9}")
-IPV4_CANDIDATE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
-IPV6_CANDIDATE = re.compile(
-    r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{1,4}:){2,}[0-9a-f:]*[0-9a-f](?![0-9a-f:])"
+IP_CANDIDATE = re.compile(r"(?i)(?<![0-9a-f:.])[0-9a-f:.]{2,}(?![0-9a-f:.])")
+IP_SEPARATOR_TRANSLATION = str.maketrans(
+    {"。": ".", "｡": ".", "：": ":", "∶": ":"}
 )
+
+
+CLIENT_EVENT_SCHEMAS = {
+    "home_viewed": {
+        "required": frozenset({"page"}),
+        "allowed": frozenset({"page"}),
+        "domains": {"page": frozenset({"home"})},
+    },
+    "assessment_started": {
+        "required": frozenset({"branch_code", "page", "source"}),
+        "allowed": frozenset({"branch_code", "page", "source"}),
+        "domains": {
+            "page": frozenset({"assessment"}),
+            "source": frozenset({"website_assessment"}),
+        },
+    },
+    "assessment_step_completed": {
+        "required": frozenset(
+            {
+                "step",
+                "branch_code",
+                "subbranch_code",
+                "department_code",
+                "page",
+                "source",
+            }
+        ),
+        "allowed": frozenset(
+            {
+                "step",
+                "branch_code",
+                "subbranch_code",
+                "department_code",
+                "page",
+                "source",
+            }
+        ),
+        "domains": {
+            "page": frozenset({"assessment"}),
+            "source": frozenset({"website_assessment"}),
+        },
+    },
+    "service_inquiry_clicked": {
+        "required": frozenset({"page", "source"}),
+        "allowed": frozenset({"page", "source"}),
+        "domains": {
+            "page": frozenset({"services"}),
+            "source": frozenset({"service_packages"}),
+        },
+    },
+    "wechat_clicked": {
+        "required": frozenset({"page", "source"}),
+        "allowed": frozenset({"page", "source"}),
+        "domains": {
+            "page": PUBLIC_PAGE_CODES,
+            "source": frozenset({"footer"}),
+        },
+    },
+    "phone_clicked": {
+        "required": frozenset({"page", "source"}),
+        "allowed": frozenset({"page", "source"}),
+        "domains": {
+            "page": PUBLIC_PAGE_CODES,
+            "source": frozenset({"footer"}),
+        },
+    },
+}
 
 
 def parse_client_event_payload(data):
@@ -82,7 +183,35 @@ def parse_client_event_payload(data):
     event_name = data["event_name"]
     if not isinstance(event_name, str) or event_name not in CLIENT_EVENTS:
         raise ValidationError("invalid event payload")
-    return event_name, validate_metadata(data["metadata"])
+    return event_name, validate_client_event_metadata(event_name, data["metadata"])
+
+
+def validate_client_event_metadata(event_name, metadata):
+    schema = CLIENT_EVENT_SCHEMAS.get(event_name)
+    if schema is None:
+        raise ValidationError("invalid event payload")
+    normalized = validate_metadata(metadata)
+    keys = set(normalized)
+    if not schema["required"] <= keys or not keys <= schema["allowed"]:
+        raise ValidationError("invalid event payload")
+    for key, domain in schema["domains"].items():
+        if normalized.get(key) not in domain:
+            raise ValidationError("invalid event payload")
+    branch_code = normalized.get("branch_code")
+    if branch_code is not None:
+        if (
+            "subbranch_code" in normalized
+            and normalized["subbranch_code"]
+            not in SUBBRANCH_CODES_BY_BRANCH[branch_code]
+        ):
+            raise ValidationError("invalid event payload")
+        if (
+            "department_code" in normalized
+            and normalized["department_code"]
+            not in DEPARTMENT_CODES_BY_BRANCH[branch_code]
+        ):
+            raise ValidationError("invalid event payload")
+    return normalized
 
 
 def validate_metadata(metadata):
@@ -98,9 +227,9 @@ def validate_metadata(metadata):
         if key in STABLE_CODE_FIELDS:
             if CODE_PATTERN.fullmatch(value) is None:
                 raise ValidationError("invalid event payload")
-            exact_domain = EXACT_CODE_DOMAINS.get(key)
-            if exact_domain is not None and value not in exact_domain:
-                raise ValidationError("invalid event payload")
+        exact_domain = EXACT_CODE_DOMAINS.get(key)
+        if exact_domain is not None and value not in exact_domain:
+            raise ValidationError("invalid event payload")
         normalized[key] = value
     return normalized
 
@@ -128,21 +257,28 @@ def record_event(
     branch_code=None,
     metadata=None,
 ):
-    normalized = validate_metadata(metadata or {})
-    if branch_code is not None:
-        normalized["branch_code"] = branch_code
-        normalized = validate_metadata(normalized)
-    branch_code = normalized.pop("branch_code", None)
     if assessment_id is None:
         if not isinstance(event_name, str) or event_name not in CLIENT_EVENTS:
             raise ValidationError("invalid event payload")
+        client_metadata = {} if metadata is None else metadata
+        if branch_code is not None:
+            if not isinstance(client_metadata, dict):
+                raise ValidationError("invalid event payload")
+            client_metadata = {**client_metadata, "branch_code": branch_code}
+        normalized = validate_client_event_metadata(event_name, client_metadata)
+        branch_code = normalized.pop("branch_code", None)
     elif (
         not isinstance(event_name, str)
         or event_name not in SERVER_EVENTS
         or type(assessment_id) is not int
         or assessment_id < 1
+        or branch_code is not None
+        or (metadata is not None and metadata != {})
     ):
         raise ValidationError("invalid event payload")
+    else:
+        normalized = {}
+        branch_code = None
 
     db = get_db()
     try:
@@ -218,11 +354,14 @@ def _contains_private_value(value):
 
 
 def _contains_ip_address(value):
-    for pattern in (IPV4_CANDIDATE, IPV6_CANDIDATE):
-        for match in pattern.finditer(value):
-            try:
-                ipaddress.ip_address(match.group(0))
-            except ValueError:
-                continue
-            return True
+    canonical = value.translate(IP_SEPARATOR_TRANSLATION)
+    for match in IP_CANDIDATE.finditer(canonical):
+        candidate = match.group(0)
+        if candidate.count(".") != 3 and candidate.count(":") < 2:
+            continue
+        try:
+            ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        return True
     return False

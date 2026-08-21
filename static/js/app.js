@@ -20,6 +20,7 @@
       return Promise.resolve(fetchImpl(endpoint, {
         method: "POST",
         credentials: "same-origin",
+        keepalive: true,
         headers: {
           "Content-Type": "application/json",
           "X-CSRF-Token": csrfToken,

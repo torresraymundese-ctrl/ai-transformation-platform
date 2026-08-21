@@ -5,10 +5,11 @@
 import os
 from datetime import timedelta
 
-from flask import Flask
+from flask import Flask, request
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import analytics_repository
 from blueprints.admin import bp as admin_bp
 from blueprints.assessment import bp as assessment_bp
 from blueprints.api import bp as api_bp
@@ -53,6 +54,29 @@ DEFAULT_CONFIG = {
     "SCRAPE_RATE_WINDOW": 60 * 60,
 }
 
+PUBLIC_ANALYTICS_BOOTSTRAP_ENDPOINTS = frozenset(
+    {
+        "public.index",
+        "public.services_page",
+        "public.cases_page",
+        "public.assessment_page",
+        "public.insights_page",
+        "public.article_page",
+        "public.about_page",
+        "assessment_v2.assessment_config",
+        "assessment_v2.assessment_report",
+    }
+)
+
+
+def establish_public_analytics_session():
+    """Create the random hashed browser identity before public event POSTs."""
+    if (
+        request.method == "GET"
+        and request.endpoint in PUBLIC_ANALYTICS_BOOTSTRAP_ENDPOINTS
+    ):
+        analytics_repository.session_analytics_id_hash()
+
 
 def create_app(test_config=None):
     """Build an isolated Flask application instance."""
@@ -78,6 +102,7 @@ def create_app(test_config=None):
     flask_app.register_error_handler(RequestEntityTooLarge, request_too_large)
     flask_app.register_error_handler(Exception, unexpected_error)
     flask_app.before_request(protect_admin_routes)
+    flask_app.before_request(establish_public_analytics_session)
     flask_app.after_request(add_security_headers)
     flask_app.after_request(audit_admin_actions)
 

@@ -354,11 +354,20 @@ def analytics_event_create():
         )
     except ValidationError:
         return jsonify({"error": "invalid event payload"}), 400
-    if not consume_rate_limit(
-        "assessment_v2_events",
-        current_app.config["ANALYTICS_EVENT_RATE_LIMIT"],
-        current_app.config["ANALYTICS_EVENT_RATE_WINDOW"],
-    ):
+    try:
+        within_rate_limit = consume_rate_limit(
+            "assessment_v2_events",
+            current_app.config["ANALYTICS_EVENT_RATE_LIMIT"],
+            current_app.config["ANALYTICS_EVENT_RATE_WINDOW"],
+        )
+    except Exception as error:
+        current_app.logger.error(
+            "Analytics rate limit unavailable failure_type=%s endpoint=%s",
+            type(error).__name__,
+            request.endpoint or "unknown",
+        )
+        return jsonify({"error": "analytics temporarily unavailable"}), 503
+    if not within_rate_limit:
         return rate_limit_response(
             current_app.config["ANALYTICS_EVENT_RATE_WINDOW"]
         )
