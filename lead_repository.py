@@ -58,12 +58,9 @@ SCRIPT_OR_STYLE = re.compile(
     r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>"
 )
 MAINLAND_MOBILE = re.compile(r"(?:86)?1[3-9]\d{9}")
-LANDLINE = re.compile(
-    r"(?<!\d)(?:(?:\+?86|0086)[\s-]*)?0\d{2,3}[\s-]*\d{7,8}(?!\d)"
-)
-LOCAL_PHONE = re.compile(r"(?<!\d)\d{7,8}(?!\d)")
-FORMATTED_LOCAL_PHONE = re.compile(
-    r"(?<!\d)\d{3,4}[\s-]+\d{4}(?!\d)"
+LOCAL_PHONE_CANDIDATE = re.compile(r"\d(?:[\s-]*\d)+")
+ASCII_PHONE_LABEL_SUFFIX = re.compile(
+    r"(?i)(?<![a-z0-9_])(?:tel|phone)$"
 )
 INTERNATIONAL_PHONE = re.compile(
     r"(?<!\w)(?:\+|00)\d(?:[\s().-]*\d){6,14}(?!\d)"
@@ -555,9 +552,7 @@ def validate_resolution_note(value, *, required, target_lead=None):
     if MAINLAND_MOBILE.search("".join(digits)):
         raise ValidationError("resolution_note contains a private value")
     if (
-        LANDLINE.search(normalized)
-        or LOCAL_PHONE.search(normalized)
-        or FORMATTED_LOCAL_PHONE.search(normalized)
+        _contains_local_phone_candidate(normalized)
         or INTERNATIONAL_PHONE.search(normalized)
         or LABELED_LOCAL_PHONE.search(normalized)
         or LABELED_WECHAT.search(normalized)
@@ -577,6 +572,40 @@ def validate_resolution_note(value, *, required, target_lead=None):
             if _contains_target_identifier(note_identifier, target_value):
                 raise ValidationError("resolution_note contains a private value")
     return note
+
+
+def _contains_local_phone_candidate(value):
+    """Conservatively reject bounded local-phone digit/separator candidates."""
+    for match in LOCAL_PHONE_CANDIDATE.finditer(value):
+        if _has_ascii_identifier_neighbor(value, match.start(), match.end()):
+            continue
+        candidate_digits = "".join(
+            str(unicodedata.decimal(character))
+            for character in match.group()
+            if unicodedata.decimal(character, None) is not None
+        )
+        if len(candidate_digits) in {7, 8}:
+            return True
+        if candidate_digits.startswith("0") and any(
+            len(candidate_digits) - area_length in {7, 8}
+            for area_length in (3, 4)
+        ):
+            return True
+    return False
+
+
+def _has_ascii_identifier_neighbor(value, start, end):
+    before = value[start - 1] if start else ""
+    after = value[end] if end < len(value) else ""
+    before_is_identifier = before.isascii() and (
+        before.isalnum() or before == "_"
+    )
+    after_is_identifier = after.isascii() and (
+        after.isalnum() or after == "_"
+    )
+    if before_is_identifier and ASCII_PHONE_LABEL_SUFFIX.search(value[:start]):
+        before_is_identifier = False
+    return before_is_identifier or after_is_identifier
 
 
 def _canonical_identifier(value):

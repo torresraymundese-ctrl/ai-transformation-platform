@@ -784,7 +784,15 @@ def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_clie
 
 @pytest.mark.parametrize(
     "private_landline",
-    ("010-1234-5678", "1234-5678", "1234 5678"),
+    (
+        "010-1234-5678",
+        "1234-5678",
+        "1234 5678",
+        "010-123-45678",
+        "010-12-345678",
+        "010 123 45678",
+        "tel010-123-45678",
+    ),
 )
 @pytest.mark.parametrize("workflow", ("completion", "rejection"))
 def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
@@ -840,6 +848,36 @@ def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
     assert _row(
         "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
     )[0] == 1
+
+
+@pytest.mark.parametrize(
+    "non_phone_identifier",
+    ("工单ABC1234-5678已归档", "批次2026-1234-5678已归档"),
+)
+def test_privacy_note_candidate_does_not_consume_adjacent_identifiers(
+    admin_client, non_phone_identifier
+):
+    lead_id, _ = _insert_lead(suffix=f"bounded-{len(non_phone_identifier)}")
+    request_id = _create_request(admin_client, lead_id, "correction")
+    _move_request_to_verifying(admin_client, request_id)
+
+    response = _post(
+        admin_client,
+        "/admin/data-requests",
+        {
+            "action": "complete",
+            "request_id": str(request_id),
+            "resolution_note": non_phone_identifier,
+        },
+    )
+
+    assert response.status_code == 302
+    assert tuple(
+        _row(
+            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
+            (request_id,),
+        )
+    ) == ("completed", non_phone_identifier)
 
 
 def test_privacy_completion_rejects_embedded_one_character_target_name(
@@ -1275,6 +1313,99 @@ def test_won_lead_is_never_automatically_purged(client):
         "SELECT company_name,anonymized_at FROM leads WHERE id=?", (lead_id,)
     )
     assert tuple(lead) == ("protectedwon企业", None)
+
+
+def test_anonymization_clears_attribution_from_every_linked_assessment(client):
+    lead_id, first_assessment_id = _insert_lead(
+        status="not_progressing",
+        retention_expires_at="2026-08-20 10:30:00",
+        suffix="multi-assessment",
+    )
+    db = models.get_db()
+    try:
+        version_id = db.execute(
+            "SELECT rule_version_id FROM assessments WHERE id=?",
+            (first_assessment_id,),
+        ).fetchone()[0]
+        second_assessment_id = db.execute(
+            "INSERT INTO assessments "
+            "(submission_key,lead_id,rule_version_id,answers_json,"
+            "dimension_scores_json,overall_score,report_snapshot_json,"
+            "attribution_json,completed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                f"20000000-0000-4000-8000-{lead_id:012d}",
+                lead_id,
+                version_id,
+                '{"second":"answers-retained"}',
+                '{"business_value":71.5}',
+                71.5,
+                '{"summary":"second-report-retained"}',
+                '{"utm_campaign":"multi-assessment企业 wx_multi 010-12-345678"}',
+                "2026-08-11 09:00:00",
+            ),
+        ).lastrowid
+        db.execute(
+            "UPDATE assessments SET attribution_json=? WHERE id=?",
+            (
+                '{"utm_campaign":"multi-assessment联系人 wx_first '
+                '010-123-45678"}',
+                first_assessment_id,
+            ),
+        )
+        db.execute(
+            "INSERT INTO roi_estimates "
+            "(assessment_id,rule_version_id,recommended_scenarios_json,"
+            "estimate_snapshot_json,created_at) VALUES (?,?,?,?,?)",
+            (
+                second_assessment_id,
+                version_id,
+                '["second-retained"]',
+                '{"midpoint":{"annual_savings":67890}}',
+                "2026-08-11 09:00:00",
+            ),
+        )
+        db.execute(
+            "INSERT INTO analytics_events "
+            "(event_name,assessment_id,analytics_id_hash,metadata_json) "
+            "VALUES (?,?,?,?)",
+            (
+                "report_pdf_downloaded",
+                second_assessment_id,
+                "c" * 64,
+                "{}",
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert lead_repository.purge_expired_leads(now=FIXED_NOW, apply=True) == 1
+
+    assessments = _rows(
+        "SELECT id,attribution_json,answers_json,dimension_scores_json,"
+        "overall_score,report_snapshot_json FROM assessments "
+        "WHERE lead_id=? ORDER BY id",
+        (lead_id,),
+    )
+    assert [row["id"] for row in assessments] == [
+        first_assessment_id,
+        second_assessment_id,
+    ]
+    assert [row["attribution_json"] for row in assessments] == ["{}", "{}"]
+    assert assessments[1]["answers_json"] == '{"second":"answers-retained"}'
+    assert assessments[1]["dimension_scores_json"] == '{"business_value":71.5}'
+    assert assessments[1]["overall_score"] == 71.5
+    assert assessments[1]["report_snapshot_json"] == (
+        '{"summary":"second-report-retained"}'
+    )
+    assert _row(
+        "SELECT COUNT(*) FROM roi_estimates WHERE assessment_id=?",
+        (second_assessment_id,),
+    )[0] == 1
+    assert _row(
+        "SELECT COUNT(*) FROM analytics_events WHERE assessment_id IN (?,?)",
+        (first_assessment_id, second_assessment_id),
+    )[0] == 2
 
 
 def test_purge_cli_defaults_to_dry_run_and_prints_only_counts_and_ids(
