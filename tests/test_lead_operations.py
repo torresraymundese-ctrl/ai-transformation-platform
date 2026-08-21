@@ -697,6 +697,133 @@ def test_privacy_resolution_note_rejects_contact_values(
 
 
 @pytest.mark.parametrize(
+    ("value_kind", "note_template"),
+    (
+        ("company_name", "已向{value}确认处理结果"),
+        ("wechat", "已通过微信 {value} 完成核验"),
+        ("landline", "已通过座机 010-12345678 完成核验"),
+        ("landline", "身份核验结果已电话告知，号码 12345678"),
+        ("landline", "身份核验结果已电话告知，号码 +44 20 7946 0958"),
+        ("landline", "身份核验使用 wechat_secret88 完成"),
+        ("landline", "身份核验使用 wxid_private88 完成"),
+    ),
+)
+def test_privacy_completion_rejects_target_identifiers_and_phone_shapes_atomically(
+    admin_client, value_kind, note_template
+):
+    lead_id, _ = _insert_lead(
+        suffix=f"private-{value_kind}", with_followup=True
+    )
+    lead_before = _row(
+        "SELECT company_name,contact_name,phone_normalized,email,wechat,"
+        "anonymized_at FROM leads WHERE id=?",
+        (lead_id,),
+    )
+    value = lead_before[value_kind] if value_kind != "landline" else ""
+    request_id = _create_request(admin_client, lead_id, "deletion")
+    _move_request_to_verifying(admin_client, request_id)
+
+    response = _post(
+        admin_client,
+        "/admin/data-requests",
+        {
+            "action": "complete",
+            "request_id": str(request_id),
+            "resolution_note": note_template.format(value=value),
+            "confirm_anonymization": "yes",
+        },
+    )
+
+    assert response.status_code == 400
+    assert tuple(
+        _row(
+            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
+            (request_id,),
+        )
+    ) == ("verifying", None)
+    assert tuple(
+        _row(
+            "SELECT company_name,contact_name,phone_normalized,email,wechat,"
+            "anonymized_at FROM leads WHERE id=?",
+            (lead_id,),
+        )
+    ) == tuple(lead_before)
+    assert _row(
+        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
+    )[0] == 1
+
+
+def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_client):
+    lead_id, _ = _insert_lead(suffix="rejection-private")
+    contact_name = _row(
+        "SELECT contact_name FROM leads WHERE id=?", (lead_id,)
+    )[0]
+    request_id = _create_request(admin_client, lead_id, "access")
+    _move_request_to_verifying(admin_client, request_id)
+
+    response = _post(
+        admin_client,
+        "/admin/data-requests",
+        {
+            "action": "transition",
+            "request_id": str(request_id),
+            "new_status": "rejected",
+            "resolution_note": f"无法核验联系人 {contact_name}",
+        },
+    )
+
+    assert response.status_code == 400
+    assert tuple(
+        _row(
+            "SELECT status,resolution_note,completed_at "
+            "FROM data_subject_requests WHERE id=?",
+            (request_id,),
+        )
+    ) == ("verifying", None, None)
+
+
+def test_privacy_completion_rejects_embedded_one_character_target_name(
+    admin_client,
+):
+    lead_id, _ = _insert_lead(suffix="one-character-name", with_followup=True)
+    db = models.get_db()
+    try:
+        db.execute("UPDATE leads SET contact_name='王' WHERE id=?", (lead_id,))
+        db.commit()
+    finally:
+        db.close()
+    request_id = _create_request(admin_client, lead_id, "withdrawal")
+    _move_request_to_verifying(admin_client, request_id)
+
+    response = _post(
+        admin_client,
+        "/admin/data-requests",
+        {
+            "action": "complete",
+            "request_id": str(request_id),
+            "resolution_note": "已由王完成身份核验",
+            "confirm_anonymization": "yes",
+        },
+    )
+
+    assert response.status_code == 400
+    assert tuple(
+        _row(
+            "SELECT status,resolution_note FROM data_subject_requests WHERE id=?",
+            (request_id,),
+        )
+    ) == ("verifying", None)
+    assert tuple(
+        _row(
+            "SELECT contact_name,anonymized_at FROM leads WHERE id=?", (lead_id,)
+        )
+    ) == ("王", None)
+    assert _row(
+        "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
+    )[0] == 1
+
+
+@pytest.mark.parametrize(
     ("request_type", "reason_code"),
     (("withdrawal", "consent_withdrawn"), ("deletion", "deletion_requested")),
 )
@@ -708,6 +835,13 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         suffix=request_type,
         with_followup=True,
         with_appointment=True,
+    )
+    private_values = tuple(
+        _row(
+            "SELECT company_name,contact_name,phone_normalized,email,wechat "
+            "FROM leads WHERE id=?",
+            (lead_id,),
+        )
     )
     request_id = _create_request(admin_client, lead_id, request_type)
     _move_request_to_verifying(admin_client, request_id)
@@ -802,11 +936,16 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         (assessment_id,),
     )[0] == 1
     request_row = _row(
-        "SELECT status,completed_at FROM data_subject_requests WHERE id=?",
+        "SELECT status,completed_at,resolution_note "
+        "FROM data_subject_requests WHERE id=?",
         (request_id,),
     )
     assert request_row["status"] == "completed"
     assert request_row["completed_at"] is not None
+    assert request_row["resolution_note"] == "已完成身份核验并执行请求"
+    assert all(
+        value not in request_row["resolution_note"] for value in private_values
+    )
     reasons = _rows(
         "SELECT note FROM lead_status_history WHERE lead_id=? AND note IS NOT NULL "
         "ORDER BY id",
@@ -969,6 +1108,53 @@ def test_purge_cli_defaults_to_dry_run_and_prints_only_counts_and_ids(
     assert f"ids={lead_id}" in apply_output
     assert "cli-private-marker" not in apply_output
     assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is not None
+
+
+def test_retention_result_reports_exact_ids_selected_by_apply(client):
+    lead_id, _ = _insert_lead(
+        status="not_progressing",
+        retention_expires_at="2026-08-21 10:30:00",
+        suffix="result-api",
+    )
+
+    result = lead_repository.run_retention_purge(now=FIXED_NOW, apply=True)
+
+    assert result.lead_ids == (lead_id,)
+    assert result.count == 1
+    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0]
+
+
+def test_purge_cli_uses_one_shanghai_clock_snapshot_at_expiry_boundary(
+    client, capsys, monkeypatch
+):
+    lead_id, _ = _insert_lead(
+        status="not_progressing",
+        retention_expires_at="2026-08-21 10:30:01",
+        suffix="cli-clock-boundary",
+    )
+    clock_values = iter(
+        (
+            datetime(2026, 8, 21, 10, 30, 0),
+            datetime(2026, 8, 21, 10, 30, 2),
+        )
+    )
+    clock_calls = []
+
+    def advancing_clock():
+        value = next(clock_values)
+        clock_calls.append(value)
+        return value
+
+    monkeypatch.setattr(lead_repository, "current_shanghai_datetime", advancing_clock)
+
+    assert manage.main(["purge-expired-leads", "--apply"]) == 0
+    output = capsys.readouterr().out
+
+    assert len(clock_calls) == 1
+    assert "count=0" in output
+    assert "ids=none" in output
+    assert f"ids={lead_id}" not in output
+    assert _row("SELECT anonymized_at FROM leads WHERE id=?", (lead_id,))[0] is None
 
 
 def test_data_request_page_lists_workflow_without_contact_values_in_errors(

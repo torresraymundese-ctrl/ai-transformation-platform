@@ -26,11 +26,10 @@ def main(argv=None):
         init_db()
         return 0
     if args.command == "purge-expired-leads":
-        lead_ids = lead_repository.expired_lead_ids()
-        count = lead_repository.purge_expired_leads(apply=args.apply)
+        result = lead_repository.run_retention_purge(apply=args.apply)
         mode = "apply" if args.apply else "dry-run"
-        identifiers = ",".join(str(lead_id) for lead_id in lead_ids) or "none"
-        print(f"mode={mode} count={count} ids={identifiers}")
+        identifiers = ",".join(str(lead_id) for lead_id in result.lead_ids) or "none"
+        print(f"mode={mode} count={result.count} ids={identifiers}")
         return 0
     return 2
 

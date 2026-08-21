@@ -1,5 +1,6 @@
 """Lead, consent, privacy-request, and retention persistence."""
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from html import unescape
 import re
@@ -57,6 +58,39 @@ SCRIPT_OR_STYLE = re.compile(
     r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>"
 )
 MAINLAND_MOBILE = re.compile(r"(?:86)?1[3-9]\d{9}")
+LANDLINE = re.compile(
+    r"(?<!\d)(?:(?:\+?86|0086)[\s-]*)?0\d{2,3}[\s-]*\d{7,8}(?!\d)"
+)
+LOCAL_PHONE = re.compile(r"(?<!\d)\d{7,8}(?!\d)")
+INTERNATIONAL_PHONE = re.compile(
+    r"(?<!\w)(?:\+|00)\d(?:[\s().-]*\d){6,14}(?!\d)"
+)
+LABELED_LOCAL_PHONE = re.compile(
+    r"(?i)(?:电话|手机|座机|联系(?:方式)?|tel|phone)"
+    r"\s*(?:号)?\s*[:：=-]?\s*\d{7,8}(?!\d)"
+)
+LABELED_WECHAT = re.compile(
+    r"(?i)(?:微信|wechat|weixin|wx)\s*(?:号|id)?\s*[:：=-]?\s*"
+    r"[a-z][a-z0-9_-]{5,19}\b"
+)
+WECHAT_TOKEN = re.compile(
+    r"(?i)(?<![a-z0-9_-])(?:wxid|wechat|weixin|wx)[_-]"
+    r"[a-z0-9_-]{4,}(?![a-z0-9_-])"
+)
+
+
+@dataclass(frozen=True)
+class RetentionPurgeResult:
+    lead_ids: tuple[int, ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.lead_ids)
+
+
+def current_shanghai_datetime() -> datetime:
+    """Return a timezone-explicit, database-ready Shanghai wall time."""
+    return datetime.now(SHANGHAI).replace(tzinfo=None, microsecond=0)
 
 
 def validate_contact(contact):
@@ -86,7 +120,7 @@ def validate_consent(consent, identity_hash):
 def find_or_create(
     db, contact, source="website_assessment", submitted_at=None
 ):
-    submitted_at = submitted_at or datetime.now().replace(microsecond=0)
+    submitted_at = submitted_at or current_shanghai_datetime()
     timestamp = submitted_at.isoformat(sep=" ")
     retention = (submitted_at + timedelta(days=365)).isoformat(sep=" ")
     company_name, contact_name, phone, email, wechat = validate_contact(contact)
@@ -143,7 +177,7 @@ def find_or_create(
 
 def record_consent(db, lead_id, consent, identity_hash, consented_at=None):
     policy_version, source = validate_consent(consent, identity_hash)
-    timestamp = (consented_at or datetime.now().replace(microsecond=0)).isoformat(
+    timestamp = (consented_at or current_shanghai_datetime()).isoformat(
         sep=" "
     )
     return db.execute(
@@ -415,18 +449,23 @@ def transition_data_subject_request(
 ):
     if new_status not in {"verifying", "rejected"}:
         raise ValidationError("new_status has an invalid value")
-    note = validate_resolution_note(
-        resolution_note, required=new_status == "rejected"
-    )
     timestamp = _timestamp(now)
 
     def operation(db):
         row = db.execute(
-            "SELECT status FROM data_subject_requests WHERE id=?", (request_id,)
+            "SELECT r.status,l.company_name,l.contact_name,l.phone_normalized,"
+            "l.email,l.wechat FROM data_subject_requests r "
+            "JOIN leads l ON l.id=r.lead_id WHERE r.id=?",
+            (request_id,),
         ).fetchone()
         expected = "received" if new_status == "verifying" else "verifying"
         if row is None or row["status"] != expected:
             raise DataConflictError("data request transition conflict")
+        note = validate_resolution_note(
+            resolution_note,
+            required=new_status == "rejected",
+            target_lead=row,
+        )
         completed_at = timestamp if new_status == "rejected" else None
         updated = db.execute(
             "UPDATE data_subject_requests SET status=?,resolution_note=?,"
@@ -453,17 +492,21 @@ def complete_data_subject_request(
     confirm_anonymization=False,
     now=None,
 ):
-    note = validate_resolution_note(resolution_note, required=True)
     timestamp = _timestamp(now)
 
     def operation(db):
         request_row = db.execute(
-            "SELECT lead_id,request_type,status FROM data_subject_requests "
-            "WHERE id=?",
+            "SELECT r.lead_id,r.request_type,r.status,l.company_name,"
+            "l.contact_name,l.phone_normalized,l.email,l.wechat "
+            "FROM data_subject_requests r JOIN leads l ON l.id=r.lead_id "
+            "WHERE r.id=?",
             (request_id,),
         ).fetchone()
         if request_row is None or request_row["status"] != "verifying":
             raise DataConflictError("data request completion conflict")
+        note = validate_resolution_note(
+            resolution_note, required=True, target_lead=request_row
+        )
         reason = PRIVACY_REASON_BY_REQUEST.get(request_row["request_type"])
         if reason is not None:
             if confirm_anonymization is not True:
@@ -486,7 +529,7 @@ def complete_data_subject_request(
     _run_immediate(operation)
 
 
-def validate_resolution_note(value, *, required):
+def validate_resolution_note(value, *, required, target_lead=None):
     if not isinstance(value, str):
         raise ValidationError("resolution_note must be text")
     without_active_blocks = SCRIPT_OR_STYLE.sub("", value)
@@ -497,7 +540,8 @@ def validate_resolution_note(value, *, required):
         raise ValidationError("resolution_note is required")
     if len(note) > 1000:
         raise ValidationError("resolution_note is too long")
-    compact = re.sub(r"\s+", "", unicodedata.normalize("NFKC", note))
+    normalized = unicodedata.normalize("NFKC", note)
+    compact = re.sub(r"\s+", "", normalized)
     if "@" in compact:
         raise ValidationError("resolution_note contains a private value")
     digits = []
@@ -507,7 +551,42 @@ def validate_resolution_note(value, *, required):
             digits.append(str(digit))
     if MAINLAND_MOBILE.search("".join(digits)):
         raise ValidationError("resolution_note contains a private value")
+    if (
+        LANDLINE.search(normalized)
+        or LOCAL_PHONE.search(normalized)
+        or INTERNATIONAL_PHONE.search(normalized)
+        or LABELED_LOCAL_PHONE.search(normalized)
+        or LABELED_WECHAT.search(normalized)
+        or WECHAT_TOKEN.search(normalized)
+    ):
+        raise ValidationError("resolution_note contains a private value")
+    if target_lead is not None:
+        note_identifier = _canonical_identifier(note)
+        for field_name in (
+            "company_name",
+            "contact_name",
+            "phone_normalized",
+            "email",
+            "wechat",
+        ):
+            target_value = target_lead[field_name]
+            if _contains_target_identifier(note_identifier, target_value):
+                raise ValidationError("resolution_note contains a private value")
     return note
+
+
+def _canonical_identifier(value):
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _contains_target_identifier(note_identifier, target_value):
+    target_identifier = _canonical_identifier(target_value)
+    if not target_identifier:
+        return False
+    return target_identifier in note_identifier
 
 
 def anonymize_lead(db, lead_id, reason_code, *, now=None):
@@ -559,22 +638,21 @@ def anonymize_lead(db, lead_id, reason_code, *, now=None):
 
 
 def expired_lead_ids(*, now=None):
-    timestamp = _timestamp(now)
-    db = get_db()
-    try:
-        return tuple(_select_expired_ids(db, timestamp))
-    finally:
-        db.close()
+    return run_retention_purge(now=now, apply=False).lead_ids
 
 
 def purge_expired_leads(*, now=None, apply=False):
     """Preview or atomically anonymize due, unconverted leads."""
+    return run_retention_purge(now=now, apply=apply).count
+
+
+def run_retention_purge(*, now=None, apply=False):
+    """Return the exact IDs selected and optionally anonymized in one snapshot."""
     timestamp = _timestamp(now)
     db = get_db()
     try:
-        if apply:
-            db.execute("BEGIN IMMEDIATE")
-        lead_ids = _select_expired_ids(db, timestamp)
+        db.execute("BEGIN IMMEDIATE" if apply else "BEGIN")
+        lead_ids = tuple(_select_expired_ids(db, timestamp))
         if apply:
             for lead_id in lead_ids:
                 anonymize_lead(
@@ -583,11 +661,10 @@ def purge_expired_leads(*, now=None, apply=False):
                     "retention_expired",
                     now=datetime.fromisoformat(timestamp),
                 )
-            db.commit()
-        return len(lead_ids)
+        db.commit()
+        return RetentionPurgeResult(lead_ids)
     except Exception:
-        if apply:
-            db.rollback()
+        db.rollback()
         raise
     finally:
         db.close()
@@ -639,7 +716,7 @@ def _unchanged_retention(db, lead_id):
 
 def _timestamp(value=None):
     if value is None:
-        value = datetime.now(SHANGHAI)
+        value = current_shanghai_datetime()
     elif callable(value):
         value = value()
     if not isinstance(value, datetime):

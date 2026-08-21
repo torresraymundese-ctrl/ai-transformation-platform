@@ -1,7 +1,5 @@
 """Atomic orchestration for a consented, deterministic assessment report."""
 
-from datetime import datetime
-
 import analytics_repository
 import assessment_repository
 import lead_repository
@@ -67,7 +65,7 @@ def complete_assessment(request, identity_hash):
         except (AssessmentInputError, KeyError, TypeError, ValueError):
             raise ValidationError("assessment has an invalid value") from None
 
-        completed_at = datetime.now().replace(microsecond=0)
+        completed_at = lead_repository.current_shanghai_datetime()
         lead_id = lead_repository.find_or_create(
             db, request.contact, attribution_source, completed_at
         )

@@ -139,6 +139,35 @@ def test_completion_creates_atomic_lead_consent_assessment_roi_and_events(
     assert expires_at - created_at == timedelta(days=365)
 
 
+def test_completion_uses_shanghai_wall_clock_for_exact_365_day_retention(
+    completion_db, monkeypatch
+):
+    shanghai_now = datetime(2026, 8, 21, 0, 30, 0)
+    monkeypatch.setattr(
+        lead_repository, "current_shanghai_datetime", lambda: shanghai_now
+    )
+
+    result = complete_assessment(valid_completion(), "hashed-ip")
+
+    lead = rows(
+        "SELECT created_at,updated_at,retention_expires_at FROM leads WHERE id=?",
+        (result.lead_id,),
+    )[0]
+    assessment = rows(
+        "SELECT completed_at FROM assessments WHERE id=?", (result.assessment_id,)
+    )[0]
+    consent = rows(
+        "SELECT consented_at FROM lead_consents WHERE lead_id=?", (result.lead_id,)
+    )[0]
+    assert dict(lead) == {
+        "created_at": "2026-08-21 00:30:00",
+        "updated_at": "2026-08-21 00:30:00",
+        "retention_expires_at": "2027-08-21 00:30:00",
+    }
+    assert assessment["completed_at"] == "2026-08-21 00:30:00"
+    assert consent["consented_at"] == "2026-08-21 00:30:00"
+
+
 def test_primary_recommendation_supplies_the_single_roi_and_private_snapshot(
     completion_db,
 ):
