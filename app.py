@@ -5,7 +5,7 @@
 import os
 from datetime import timedelta
 
-from flask import Flask, request
+from flask import Flask, g, request
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -54,28 +54,31 @@ DEFAULT_CONFIG = {
     "SCRAPE_RATE_WINDOW": 60 * 60,
 }
 
-PUBLIC_ANALYTICS_BOOTSTRAP_ENDPOINTS = frozenset(
-    {
-        "public.index",
-        "public.services_page",
-        "public.cases_page",
-        "public.assessment_page",
-        "public.insights_page",
-        "public.article_page",
-        "public.about_page",
-        "assessment_v2.assessment_config",
-        "assessment_v2.assessment_report",
-    }
-)
+ANALYTICS_CONFIG_ENDPOINT = "assessment_v2.assessment_config"
 
 
-def establish_public_analytics_session():
-    """Create the random hashed browser identity before public event POSTs."""
+def enable_public_analytics_response():
+    """Mark an analytics-enabled response and establish its hashed identity."""
+    g.public_analytics_response = True
+    analytics_repository.session_analytics_id_hash()
+    return ""
+
+
+def establish_config_analytics_session():
+    """Bootstrap analytics for the stateful assessment config response."""
     if (
         request.method == "GET"
-        and request.endpoint in PUBLIC_ANALYTICS_BOOTSTRAP_ENDPOINTS
+        and request.endpoint == ANALYTICS_CONFIG_ENDPOINT
     ):
-        analytics_repository.session_analytics_id_hash()
+        enable_public_analytics_response()
+
+
+def add_public_analytics_cache_policy(response):
+    if getattr(g, "public_analytics_response", False):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 def create_app(test_config=None):
@@ -88,6 +91,7 @@ def create_app(test_config=None):
 
     flask_app.jinja_env.globals.update(
         csrf_token=csrf_token,
+        enable_public_analytics_response=enable_public_analytics_response,
         svc_emoji=svc_emoji,
     )
     flask_app.jinja_env.filters.update(
@@ -102,7 +106,8 @@ def create_app(test_config=None):
     flask_app.register_error_handler(RequestEntityTooLarge, request_too_large)
     flask_app.register_error_handler(Exception, unexpected_error)
     flask_app.before_request(protect_admin_routes)
-    flask_app.before_request(establish_public_analytics_session)
+    flask_app.before_request(establish_config_analytics_session)
+    flask_app.after_request(add_public_analytics_cache_policy)
     flask_app.after_request(add_security_headers)
     flask_app.after_request(audit_admin_actions)
 

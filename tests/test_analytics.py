@@ -13,6 +13,7 @@ import analytics_repository
 import models
 import report_pdf
 from blueprints import assessment as assessment_blueprint
+from conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 
 
 CLIENT_EVENTS = (
@@ -120,6 +121,12 @@ def _event_quota_count():
         return row[0]
     finally:
         db.close()
+
+
+def _assert_exact_private_no_store(response):
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["Pragma"] == "no-cache"
+    assert response.headers["Expires"] == "0"
 
 
 def _complete_assessment(client):
@@ -530,6 +537,7 @@ def test_successful_config_bootstrap_establishes_analytics_session_hash(
     assert response.status_code == 200
     assert expected_hash.encode() not in response.data
     assert random_bytes.hex().encode() not in response.data
+    _assert_exact_private_no_store(response)
     with client.session_transaction() as current_session:
         assert current_session["analytics_id_hash"] == expected_hash
 
@@ -581,6 +589,131 @@ def test_page_bootstrap_prevents_parallel_first_events_from_splitting_identity(
     assert random_call_count == 1
     hashes = {row["analytics_id_hash"] for row in _analytics_rows()}
     assert hashes == {hashlib.sha256(bytes([1]) * 32).hexdigest()}
+
+
+def test_unmatched_404_bootstraps_private_analytics_and_footer_post(
+    client, monkeypatch
+):
+    headers = _authorize_events(client)
+    random_bytes = b"task-12-unmatched-error-analytics-id"
+    expected_hash = hashlib.sha256(random_bytes).hexdigest()
+    monkeypatch.setattr(
+        analytics_repository.secrets, "token_bytes", lambda size: random_bytes
+    )
+
+    response = client.get("/definitely-unmatched-task-12-page")
+
+    assert response.status_code == 404
+    page = BeautifulSoup(response.data, "html.parser")
+    body = page.select_one(
+        'body[data-analytics-endpoint="/api/v2/events"]'
+        '[data-analytics-csrf-token][data-analytics-page="error"]'
+    )
+    assert body is not None
+    footer_markers = page.select("footer [data-analytics-event]")
+    assert {
+        marker["data-analytics-event"] for marker in footer_markers
+    } == {"wechat_clicked", "phone_clicked"}
+    assert random_bytes.hex().encode() not in response.data
+    assert expected_hash.encode() not in response.data
+    with client.session_transaction() as current_session:
+        assert current_session["analytics_id_hash"] == expected_hash
+    _assert_exact_private_no_store(response)
+
+    phone_marker = page.select_one(
+        'footer [data-analytics-event="phone_clicked"]'
+    )
+    event_response = _post_event(
+        client,
+        phone_marker["data-analytics-event"],
+        {
+            "page": body["data-analytics-page"],
+            "source": phone_marker["data-analytics-source"],
+        },
+        headers=headers,
+    )
+
+    assert event_response.status_code == 204
+    assert len(_analytics_rows()) == 1
+    assert _analytics_rows()[0]["analytics_id_hash"] == expected_hash
+
+
+def test_unmatched_404_prevents_parallel_first_footer_events_splitting_hash(
+    client, monkeypatch
+):
+    headers = _authorize_events(client)
+    random_call_count = 0
+    random_call_lock = Lock()
+
+    def unique_random_bytes(size):
+        nonlocal random_call_count
+        assert size == 32
+        with random_call_lock:
+            random_call_count += 1
+            return bytes([random_call_count]) * size
+
+    monkeypatch.setattr(
+        analytics_repository.secrets, "token_bytes", unique_random_bytes
+    )
+    response = client.get("/another-unmatched-task-12-page")
+    assert response.status_code == 404
+    assert random_call_count == 1
+    _assert_exact_private_no_store(response)
+    session_cookie_name = client.application.config["SESSION_COOKIE_NAME"]
+    session_cookie = client.get_cookie(session_cookie_name)
+    assert session_cookie is not None
+    start = Barrier(2)
+
+    def post_from_independent_browser_connection(event_name):
+        browser = client.application.test_client()
+        browser.set_cookie(session_cookie_name, session_cookie.value)
+        start.wait(timeout=5)
+        result = _post_event(
+            browser,
+            event_name,
+            {"page": "error", "source": "footer"},
+            headers=headers,
+        )
+        return result.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        statuses = list(
+            executor.map(
+                post_from_independent_browser_connection,
+                ("wechat_clicked", "phone_clicked"),
+            )
+        )
+
+    assert statuses == [204, 204]
+    assert random_call_count == 1
+    assert {
+        row["analytics_id_hash"] for row in _analytics_rows()
+    } == {hashlib.sha256(bytes([1]) * 32).hexdigest()}
+
+
+def test_admin_base_shell_does_not_enable_public_analytics(client):
+    login = client.get("/admin/login")
+    login_page = BeautifulSoup(login.data, "html.parser")
+    csrf = login_page.select_one('input[name="csrf_token"]')["value"]
+    authenticated = client.post(
+        "/admin/login",
+        data={
+            "csrf_token": csrf,
+            "username": TEST_ADMIN_USERNAME,
+            "password": TEST_ADMIN_PASSWORD,
+        },
+    )
+    assert authenticated.status_code == 302
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    page = BeautifulSoup(response.data, "html.parser")
+    assert page.select_one("[data-analytics-endpoint]") is None
+    assert not page.select("[data-analytics-event]")
+    assert b"/api/v2/events" not in response.data
+    with client.session_transaction() as current_session:
+        assert "analytics_id_hash" not in current_session
 
 
 def test_session_analytics_identifier_is_safe_without_a_request_session():
@@ -924,6 +1057,8 @@ def test_public_pages_expose_safe_analytics_data_and_external_click_markers(clie
         )
         assert body is not None
         assert re.fullmatch(r"[-_A-Za-z0-9]{20,}", body["data-analytics-csrf-token"])
+    for response in (home, services, assessment, cases, insights, about):
+        _assert_exact_private_no_store(response)
     for page in pages[:3]:
         assert not page.select("[onclick]")
         assert not page.select("script:not([src])")
