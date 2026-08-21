@@ -663,12 +663,17 @@ def test_html_report_renders_every_required_snapshot_section(
         and axis.get("stroke-width") == "1"
         for axis in radar.select("line.radar-axis")
     )
+    view_x, _, view_width, _ = map(float, radar["viewbox"].split())
+    view_right = view_x + view_width
+    chinese_glyph_width = 16
     assert all(
-        float(label["x"]) >= 62
+        float(label["x"]) - len(label.get_text()) * chinese_glyph_width
+        >= view_x
         for label in radar.select('text[text-anchor="end"]')
     )
     assert all(
-        float(label["x"]) <= 258
+        float(label["x"]) + len(label.get_text()) * chinese_glyph_width
+        <= view_right
         for label in radar.select('text[text-anchor="start"]')
     )
     score_polygon = radar.select_one("polygon.radar-score")

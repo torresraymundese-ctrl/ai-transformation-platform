@@ -86,7 +86,7 @@ chown -R ai-platform:ai-platform /opt/ai-platform/data
 
 ```bash
 apt-get update
-apt-get install -y sqlite3 rsync curl \
+apt-get install -y sqlite3 rsync curl python3-venv \
   libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 \
   libharfbuzz-subset0 fonts-noto-cjk
 python3 -m venv /opt/ai-platform/.venv
