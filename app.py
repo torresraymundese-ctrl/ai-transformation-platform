@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
     "ANALYTICS_EVENT_RATE_LIMIT": 120,
     "ANALYTICS_EVENT_RATE_WINDOW": 60 * 60,
     "APPOINTMENT_NOW_PROVIDER": None,
+    "ADMIN_NOW_PROVIDER": None,
     "PRIVACY_PROCESSOR_NAME": os.environ.get(
         "AI_PLATFORM_PRIVACY_PROCESSOR_NAME"
     ),
@@ -74,7 +75,9 @@ def establish_config_analytics_session():
 
 
 def add_public_analytics_cache_policy(response):
-    if getattr(g, "public_analytics_response", False):
+    if getattr(g, "public_analytics_response", False) or getattr(
+        g, "admin_response", False
+    ):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"

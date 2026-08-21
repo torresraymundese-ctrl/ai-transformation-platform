@@ -122,6 +122,35 @@ def get_appointment(db, appointment_id: int):
     ).fetchone()
 
 
+def list_appointments(*, status=None):
+    """Return appointment tasks with their lead contact context."""
+    parameters = ()
+    where = ""
+    if status:
+        where = "WHERE a.status=?"
+        parameters = (status,)
+    db = get_db()
+    try:
+        return db.execute(
+            "SELECT a.*,l.company_name,l.contact_name,l.phone_normalized,"
+            "l.email,l.wechat FROM appointments a "
+            "JOIN leads l ON l.id=a.lead_id "
+            f"{where} ORDER BY a.preferred_date,a.time_slot,a.id",
+            parameters,
+        ).fetchall()
+    finally:
+        db.close()
+
+
+def transition_appointment_status(appointment_id: int, new_status: str) -> None:
+    """Own and close the connection around the existing atomic transition."""
+    db = get_db()
+    try:
+        transition_appointment(db, appointment_id, new_status)
+    finally:
+        db.close()
+
+
 def transition_appointment(db, appointment_id: int, new_status: str) -> None:
     """Apply one allowed workflow edge, or fail without modifying the row."""
     try:

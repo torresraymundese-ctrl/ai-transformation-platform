@@ -1,0 +1,22 @@
+{% extends "admin/base_admin.html" %}
+{% set lead = detail.lead %}
+{% block admin_content %}
+<div class="admin-heading"><h1>{{ lead.company_name }}</h1><a class="btn btn-outline" href="{{ url_for('admin.admin_leads') }}">返回线索</a></div>
+<section class="card admin-section admin-grid">
+  <div><strong>联系人</strong><p>{{ lead.contact_name }}</p></div>
+  <div><strong>手机号</strong><p>{{ lead.phone_normalized or '已匿名化' }}</p></div>
+  <div><strong>邮箱</strong><p>{{ lead.email or '-' }}</p></div>
+  <div><strong>微信</strong><p>{{ lead.wechat or '-' }}</p></div>
+  <div><strong>状态</strong><p>{{ lead.status }}</p></div>
+  <div><strong>来源</strong><p>{{ lead.source or '-' }}</p></div>
+</section>
+{% if not lead.anonymized_at and lead.status != 'won' %}
+<section class="admin-grid">
+  <form class="card admin-section" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="owner"><div class="form-group"><label for="owner_text">负责人文本</label><input id="owner_text" name="owner_text" maxlength="100" value="{{ lead.owner_text or '' }}"></div><button class="btn btn-primary" type="submit">保存负责人</button></form>
+  {% if status_transitions %}<form class="card admin-section" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="status"><div class="form-group"><label for="new_status">流转状态</label><select id="new_status" name="new_status" required>{% for item in status_transitions %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select></div><button class="btn btn-primary" type="submit">更新状态</button></form>{% endif %}
+  <form class="card admin-section" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="followup"><div class="form-group"><label for="followup_note">跟进备注</label><textarea id="followup_note" name="followup_note" maxlength="2000" required></textarea></div><div class="form-group"><label for="next_followup_at">下次跟进时间</label><input id="next_followup_at" name="next_followup_at" type="datetime-local"></div><button class="btn btn-primary" type="submit">记录有效跟进</button></form>
+</section>
+{% endif %}
+<section class="card admin-section"><h2>评估与报告</h2>{% if detail.assessments %}<div class="stack">{% for item in detail.assessments %}<article><p><strong>#{{ item.id }}</strong> {{ item.branch_code }} / {{ item.overall_score }} / {{ item.maturity_code }} / {{ item.completed_at }}</p><pre>{{ item.report_snapshot_json }}</pre></article>{% endfor %}</div>{% else %}<p class="empty">暂无评估</p>{% endif %}</section>
+<section class="card admin-section"><h2>跟进记录</h2>{% if detail.followups %}<ul>{% for item in detail.followups %}<li>{{ item.effective_at }} — {{ item.note }}{% if item.next_followup_at %}（下次 {{ item.next_followup_at }}）{% endif %}</li>{% endfor %}</ul>{% else %}<p class="empty">暂无跟进</p>{% endif %}</section>
+{% endblock %}

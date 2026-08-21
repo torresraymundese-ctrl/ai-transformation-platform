@@ -8,8 +8,8 @@ import time
 from hmac import compare_digest
 
 import bleach
-from flask import (abort, current_app, g, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (abort, current_app, g, jsonify, make_response, redirect,
+                   render_template, request, session, url_for)
 from markupsafe import Markup
 from werkzeug.exceptions import HTTPException
 
@@ -129,61 +129,100 @@ def sanitize_html(value):
 
 
 def invalid_form(error):
-    return render_template(
-        "error.html", title="提交内容无效", message=str(error)
-    ), 400
+    message = (
+        "提交内容不符合要求，请返回检查后重试。"
+        if _is_admin_request()
+        else str(error)
+    )
+    return _render_error("提交内容无效", message, 400)
 
 
 def forbidden(error):
-    return render_template(
-        "error.html",
-        title="操作被拒绝",
-        message="请求缺少有效授权或安全校验，请返回后重试。",
-    ), 403
+    return _render_error(
+        "操作被拒绝",
+        "请求缺少有效授权或安全校验，请返回后重试。",
+        403,
+    )
 
 
 def data_conflict(error):
-    return render_template(
-        "error.html",
-        title="数据冲突",
-        message="该记录与已有数据冲突，请检查唯一编码或关联关系。",
-    ), 409
+    return _render_error(
+        "数据冲突",
+        "该记录与已有数据冲突，请检查当前状态后重试。",
+        409,
+    )
 
 
 def not_found(error):
-    return render_template(
-        "error.html", title="页面未找到", message="你访问的页面不存在或已被移动。"
-    ), 404
+    return _render_error(
+        "页面未找到", "你访问的页面不存在或已被移动。", 404
+    )
 
 
 def request_too_large(error):
     if request.path.startswith("/api/"):
         return jsonify({"error": "request too large"}), 413
-    return render_template(
-        "error.html", title="提交内容过大", message="请缩小内容或附件后重试。"
-    ), 413
+    return _render_error(
+        "提交内容过大", "请缩小内容或附件后重试。", 413
+    )
 
 
 def unexpected_error(error):
     if isinstance(error, HTTPException):
+        if _is_admin_request():
+            return _render_error(
+                "请求无法处理",
+                "当前后台请求无法完成，请检查后重试。",
+                error.code or 500,
+            )
         return error
     current_app.logger.error(
         "Unhandled application error error_type=%s endpoint=%s",
         type(error).__name__,
         request.endpoint or "unknown",
     )
+    return _render_error(
+        "系统暂时无法处理请求",
+        "请稍后重试；如果问题持续存在，请联系平台管理员。",
+        500,
+    )
+
+
+def _is_admin_request():
+    return request.path == "/admin" or request.path.startswith("/admin/")
+
+
+def _render_error(title, message, status_code):
+    template = "admin/error.html" if _is_admin_request() else "error.html"
     return render_template(
-        "error.html",
-        title="系统暂时无法处理请求",
-        message="请稍后重试；如果问题持续存在，请联系平台管理员。",
-    ), 500
+        template,
+        title=title,
+        message=message,
+        admin_authenticated=check_admin_auth() if _is_admin_request() else False,
+    ), status_code
+
+
+def _admin_rate_limit_response(window_seconds):
+    body, status_code = _render_error(
+        "请求过于频繁",
+        "尝试次数过多，请稍后再试。",
+        429,
+    )
+    response = make_response(body, status_code)
+    response.headers["Retry-After"] = str(int(window_seconds))
+    return response
 
 
 def protect_admin_routes():
     if not request.path.startswith("/admin"):
         return None
+    g.admin_response = True
     if not security_configured():
-        return "后台安全配置未完成", 503
+        return _render_error(
+            "后台暂不可用",
+            "后台安全配置未完成。",
+            503,
+        )
     if request.path == "/admin/login":
         if request.method == "POST" and not csrf_is_valid():
             abort(403)
@@ -192,7 +231,9 @@ def protect_admin_routes():
             current_app.config["LOGIN_RATE_LIMIT"],
             current_app.config["LOGIN_RATE_WINDOW"],
         ):
-            return rate_limit_response(current_app.config["LOGIN_RATE_WINDOW"])
+            return _admin_rate_limit_response(
+                current_app.config["LOGIN_RATE_WINDOW"]
+            )
         return None
     if not check_admin_auth():
         return redirect(url_for("admin.admin_login", next=request.path))
@@ -224,7 +265,7 @@ def audit_admin_actions(response):
     }:
         actor = getattr(g, "audit_actor", None) or session.get(
             "admin_username"
-        ) or request.form.get("username", "anonymous")[:80]
+        ) or "anonymous"
         action = (request.endpoint or "unmatched_admin_request").rsplit(".", 1)[-1]
         db = None
         try:

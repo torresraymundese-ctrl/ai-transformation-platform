@@ -1,0 +1,20 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div class="admin-heading"><h1>线索管理</h1></div>
+<section class="card admin-section">
+  <form class="inline-form" method="get">
+    <div class="form-group"><label for="status">状态</label><select id="status" name="status"><option value="">全部</option>{% for item in statuses %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label for="branch">行业分支</label><select id="branch" name="branch"><option value="">全部</option>{% for item in branches %}<option value="{{ item }}" {% if filters.branch == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label for="date_from">开始日期</label><input id="date_from" name="date_from" type="date" value="{{ filters.date_from or '' }}"></div>
+    <div class="form-group"><label for="date_to">结束日期</label><input id="date_to" name="date_to" type="date" value="{{ filters.date_to or '' }}"></div>
+    <button class="btn btn-primary" type="submit">筛选</button>
+  </form>
+</section>
+<section class="card">
+{% if leads %}
+<table><thead><tr><th>企业</th><th>联系人</th><th>状态</th><th>行业</th><th>负责人</th><th>下次跟进</th><th>评估数</th><th></th></tr></thead><tbody>
+{% for lead in leads %}<tr><td>{{ lead.company_name }}</td><td>{{ lead.contact_name }}</td><td>{{ lead.status }}</td><td>{{ lead.latest_branch or '-' }}</td><td>{{ lead.owner_text or '未分配' }}</td><td>{{ lead.next_followup_at or '-' }}</td><td>{{ lead.assessment_count }}</td><td><a href="{{ url_for('admin.admin_lead_detail', lead_id=lead.id) }}">查看</a></td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">暂无匹配线索</p>{% endif %}
+</section>
+{% endblock %}

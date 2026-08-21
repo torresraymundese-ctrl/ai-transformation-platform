@@ -1,0 +1,15 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ title }} - 企业AI转型平台{% endblock %}
+{% block admin_navigation %}{% if admin_authenticated %}{{ super() }}{% endif %}{% endblock %}
+{% block admin_content %}
+<section class="card admin-section" style="max-width:720px;margin:48px auto;text-align:center;">
+  <div style="font-size:46px;margin-bottom:14px;" aria-hidden="true">⚠️</div>
+  <h1 style="margin-bottom:12px;">{{ title }}</h1>
+  <p class="muted" style="line-height:1.8;margin-bottom:24px;">{{ message }}</p>
+  {% if admin_authenticated %}
+  <a class="btn btn-primary" href="{{ url_for('admin.admin_index') }}">返回后台</a>
+  {% else %}
+  <a class="btn btn-primary" href="{{ url_for('admin.admin_login') }}">返回登录</a>
+  {% endif %}
+</section>
+{% endblock %}
