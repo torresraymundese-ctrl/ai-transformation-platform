@@ -21,6 +21,7 @@ from flask import (
     session,
 )
 
+import analytics_repository
 import assessment_repository
 import appointment_repository
 import report_pdf
@@ -344,16 +345,47 @@ def appointment_create():
     )
 
 
+@bp.post("/api/v2/events")
+def analytics_event_create():
+    require_public_csrf()
+    try:
+        event_name, metadata = analytics_repository.parse_client_event_payload(
+            request.get_json(silent=True)
+        )
+    except ValidationError:
+        return jsonify({"error": "invalid event payload"}), 400
+    if not consume_rate_limit(
+        "assessment_v2_events",
+        current_app.config["ANALYTICS_EVENT_RATE_LIMIT"],
+        current_app.config["ANALYTICS_EVENT_RATE_WINDOW"],
+    ):
+        return rate_limit_response(
+            current_app.config["ANALYTICS_EVENT_RATE_WINDOW"]
+        )
+    try:
+        analytics_repository.record_event(event_name, metadata=metadata)
+    except Exception as error:
+        current_app.logger.error(
+            "Analytics event unavailable failure_type=%s endpoint=%s",
+            type(error).__name__,
+            request.endpoint or "unknown",
+        )
+        return jsonify({"error": "analytics temporarily unavailable"}), 503
+    return "", 204
+
+
 @bp.get("/assessment/report/<int:assessment_id>")
 def assessment_report(assessment_id):
     _protect_report_response()
     snapshot = _authorized_report_snapshot(assessment_id)
     if snapshot is None:
         abort(404)
-    return render_template(
+    html = render_template(
         "assessment/report.html",
         **_report_template_context(assessment_id, snapshot, pdf_mode=False),
     )
+    _record_server_event_best_effort("report_viewed", assessment_id)
+    return html
 
 
 @bp.get("/assessment/report/<int:assessment_id>/pdf")
@@ -381,12 +413,26 @@ def assessment_report_pdf(assessment_id):
             title="PDF 暂时无法生成",
             message="在线报告仍可查看，请稍后重试 PDF 下载。",
         ), 503
+    _record_server_event_best_effort("report_pdf_downloaded", assessment_id)
     response = make_response(bytes(pdf))
     response.mimetype = "application/pdf"
     response.headers["Content-Disposition"] = (
         f'attachment; filename="ai-readiness-report-{assessment_id}.pdf"'
     )
     return response
+
+
+def _record_server_event_best_effort(event_name, assessment_id):
+    try:
+        analytics_repository.record_event(
+            event_name, assessment_id=assessment_id
+        )
+    except Exception as error:
+        current_app.logger.error(
+            "Analytics server event unavailable failure_type=%s endpoint=%s",
+            type(error).__name__,
+            request.endpoint or "unknown",
+        )
 
 
 def _protect_report_response():

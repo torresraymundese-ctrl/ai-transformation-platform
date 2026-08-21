@@ -2,6 +2,110 @@
 (function () {
   "use strict";
 
+  const CLICK_EVENTS = new Set([
+    "service_inquiry_clicked",
+    "wechat_clicked",
+    "phone_clicked",
+  ]);
+
+  function sendAnalyticsEvent(fetchImpl, endpoint, csrfToken, eventName, metadata) {
+    if (
+      typeof fetchImpl !== "function" ||
+      typeof endpoint !== "string" ||
+      !endpoint ||
+      typeof csrfToken !== "string" ||
+      !csrfToken
+    ) return Promise.resolve(false);
+    try {
+      return Promise.resolve(fetchImpl(endpoint, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({
+          event_name: eventName,
+          metadata: metadata || {},
+        }),
+      })).then(
+        function (response) { return Boolean(response && response.ok); },
+        function () { return false; }
+      );
+    } catch (_error) {
+      return Promise.resolve(false);
+    }
+  }
+
+  function initializeConversionAnalytics(pageDocument, fetchImpl) {
+    const body = pageDocument && pageDocument.body;
+    if (!body || !body.dataset) return null;
+    const endpoint = body.dataset.analyticsEndpoint || "";
+    const csrfToken = body.dataset.analyticsCsrfToken || "";
+    const page = body.dataset.analyticsPage || "";
+    const track = function (eventName, metadata) {
+      return sendAnalyticsEvent(
+        fetchImpl,
+        endpoint,
+        csrfToken,
+        eventName,
+        metadata
+      );
+    };
+
+    if (typeof window !== "undefined") {
+      window.aiConversionAnalytics = { track: track };
+    }
+    if (page === "home") {
+      void track("home_viewed", { page: "home" });
+    }
+    pageDocument.addEventListener("click", function (event) {
+      const marker = event.target && typeof event.target.closest === "function"
+        ? event.target.closest("[data-analytics-event]")
+        : null;
+      if (!marker || !CLICK_EVENTS.has(marker.dataset.analyticsEvent)) return;
+      const metadata = {};
+      if (page) metadata.page = page;
+      if (marker.dataset.analyticsSource) {
+        metadata.source = marker.dataset.analyticsSource;
+      }
+      void track(marker.dataset.analyticsEvent, metadata);
+    });
+    return { track: track };
+  }
+
+  function toggleFaq(toggle) {
+    const answer = toggle && toggle.nextElementSibling;
+    const arrow = toggle && toggle.querySelector(".faq-arrow");
+    if (!answer || !arrow) return false;
+    const isOpen = answer.classList.toggle("open");
+    arrow.classList.toggle("open", isOpen);
+    toggle.setAttribute("aria-expanded", String(isOpen));
+    return isOpen;
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      initializeConversionAnalytics: initializeConversionAnalytics,
+      sendAnalyticsEvent: sendAnalyticsEvent,
+      toggleFaq: toggleFaq,
+    };
+  }
+
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  initializeConversionAnalytics(
+    document,
+    typeof window.fetch === "function" ? window.fetch.bind(window) : null
+  );
+
+  document.addEventListener("click", function (event) {
+    const toggle = event.target && typeof event.target.closest === "function"
+      ? event.target.closest("[data-faq-toggle]")
+      : null;
+    if (!toggle) return;
+    toggleFaq(toggle);
+  });
+
   const cta = document.getElementById("stickyCta");
   let shown = false;
 

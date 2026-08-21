@@ -86,8 +86,10 @@
       clearStoredStateAndRedirect: clearStoredStateAndRedirect,
       configurationResponseIsCurrent: configurationResponseIsCurrent,
       ensureConfigurationAvailable: ensureConfigurationAvailable,
+      emitAssessmentEvent: emitAssessmentEvent,
       privacySafeAttribution: privacySafeAttribution,
       setMutableControlsBusy: setMutableControlsBusy,
+      trackAssessmentStartOnce: trackAssessmentStartOnce,
       validateContactValues: validateContactValues,
     };
   }
@@ -122,6 +124,7 @@
   let contactGateVisible = false;
   let busyRequestCount = 0;
   let latestConfigurationRequest = 0;
+  const analyticsState = { started: false };
 
   function createSubmissionKey() {
     return crypto.randomUUID();
@@ -202,6 +205,44 @@
     } catch (error) {
       announce("当前浏览器无法保存刷新恢复进度，请不要关闭本页。");
     }
+  }
+
+  function emitAssessmentEvent(tracker, eventName, metadata) {
+    if (typeof tracker !== "function") return Promise.resolve(false);
+    try {
+      return Promise.resolve(tracker(eventName, metadata)).then(
+        function (result) { return result === true; },
+        function () { return false; }
+      );
+    } catch (_error) {
+      return Promise.resolve(false);
+    }
+  }
+
+  function trackAssessmentStartOnce(trackerState, tracker, metadata) {
+    if (trackerState.started) return Promise.resolve(false);
+    trackerState.started = true;
+    return emitAssessmentEvent(tracker, "assessment_started", metadata);
+  }
+
+  function browserAnalyticsTracker(eventName, metadata) {
+    const analytics = window.aiConversionAnalytics;
+    if (!analytics || typeof analytics.track !== "function") {
+      return Promise.resolve(false);
+    }
+    return analytics.track(eventName, metadata);
+  }
+
+  function assessmentEventMetadata(stepName) {
+    const metadata = {
+      step: stepName,
+      page: "assessment",
+      source: "website_assessment",
+    };
+    if (state.branchCode) metadata.branch_code = state.branchCode;
+    if (state.subbranchCode) metadata.subbranch_code = state.subbranchCode;
+    if (state.departmentCode) metadata.department_code = state.departmentCode;
+    return metadata;
   }
 
   function isPlainObject(value) {
@@ -417,6 +458,11 @@
   async function selectBranch(code) {
     if (busyRequestCount > 0) return;
     if (code === state.branchCode && configuration) return;
+    void trackAssessmentStartOnce(
+      analyticsState,
+      browserAnalyticsTracker,
+      { branch_code: code, page: "assessment", source: "website_assessment" }
+    );
     state.branchCode = code;
     state.subbranchCode = "";
     state.departmentCode = "";
@@ -587,6 +633,11 @@
       if (issue.retryConfiguration && state.branchCode) await fetchConfiguration(state.branchCode);
       return;
     }
+    void emitAssessmentEvent(
+      browserAnalyticsTracker,
+      "assessment_step_completed",
+      assessmentEventMetadata(STEPS[state.step])
+    );
     if (state.step < STEPS.length - 1) {
       state.step += 1;
       renderWizard();

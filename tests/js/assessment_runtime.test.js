@@ -159,3 +159,40 @@ test("contact validation trims required values and enforces dotted email", funct
     wechat: "wx-id",
   });
 });
+
+
+test("assessment analytics starts once and never retries a failed user action", async function () {
+  const state = { started: false };
+  const attempts = [];
+  const tracker = function (eventName, metadata) {
+    attempts.push([eventName, metadata]);
+    return Promise.reject(new Error("offline"));
+  };
+
+  const first = await wizard.trackAssessmentStartOnce(
+    state,
+    tracker,
+    { branch_code: "manufacturing" }
+  );
+  const duplicate = await wizard.trackAssessmentStartOnce(
+    state,
+    tracker,
+    { branch_code: "retail" }
+  );
+  const step = await wizard.emitAssessmentEvent(
+    tracker,
+    "assessment_step_completed",
+    { step: "profile", branch_code: "manufacturing" }
+  );
+
+  assert.equal(first, false);
+  assert.equal(duplicate, false);
+  assert.equal(step, false);
+  assert.deepEqual(attempts, [
+    ["assessment_started", { branch_code: "manufacturing" }],
+    [
+      "assessment_step_completed",
+      { step: "profile", branch_code: "manufacturing" },
+    ],
+  ]);
+});

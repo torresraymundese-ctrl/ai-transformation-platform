@@ -8,7 +8,12 @@
 <style>{% block extra_css %}{% endblock %}</style>
 {% block head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body
+  class="{% block body_class %}{% endblock %}"
+  data-analytics-endpoint="{{ url_for('assessment_v2.analytics_event_create') }}"
+  data-analytics-csrf-token="{{ csrf_token() }}"
+  data-analytics-page="{% block analytics_page %}site{% endblock %}"
+>
 
 {% include "components/navigation.html" %}
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import analytics_repository
 from models import get_db
 from repository import DataConflictError
 
@@ -83,6 +84,9 @@ def create_appointment(
                 existing["assessment_id"] == assessment_id
                 and existing["lead_id"] == assessment["lead_id"]
             ):
+                analytics_repository.insert_server_event(
+                    db, "appointment_submitted", assessment_id
+                )
                 db.commit()
                 return existing["id"]
             raise DataConflictError("appointment conflict")
@@ -99,6 +103,9 @@ def create_appointment(
                 note or None,
             ),
         ).lastrowid
+        analytics_repository.insert_server_event(
+            db, "appointment_submitted", assessment_id
+        )
         db.commit()
         return appointment_id
     except sqlite3.IntegrityError:
