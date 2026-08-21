@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from datetime import datetime, timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from bs4 import BeautifulSoup
 import lead_repository
 import manage
 import models
+from validation import ValidationError
 
 
 FIXED_NOW = datetime(2026, 8, 21, 10, 30)
@@ -16,6 +18,31 @@ ADMIN_PRIVATE_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+PHONE_SEPARATOR_VARIANTS = tuple(
+    dict.fromkeys(
+        (
+            "()",
+            ".",
+            "/",
+            "\\",
+            "·",
+            "\u2212",
+            "\ufe0f",
+            *(
+                character
+                for codepoint in range(0x10000)
+                if (
+                    (character := chr(codepoint)).isspace()
+                    or unicodedata.category(character) in {"Pd", "Cf"}
+                )
+            ),
+        )
+    )
+)
+
+
+def _unicode_id(value):
+    return "-".join(f"U+{ord(character):04X}" for character in value)
 
 
 def _assert_admin_private(response):
@@ -792,6 +819,9 @@ def test_privacy_rejection_rejects_target_contact_name_and_rolls_back(admin_clie
         "010-12-345678",
         "010 123 45678",
         "tel010-123-45678",
+        "010\u2010123\u201045678",
+        "010\u2011123\u201145678",
+        "010\u200b123\u200b45678",
     ),
 )
 @pytest.mark.parametrize("workflow", ("completion", "rejection"))
@@ -848,6 +878,45 @@ def test_privacy_note_rejects_separator_formatted_landlines_and_rolls_back(
     assert _row(
         "SELECT COUNT(*) FROM lead_followups WHERE lead_id=?", (lead_id,)
     )[0] == 1
+
+
+@pytest.mark.parametrize(
+    "separator", PHONE_SEPARATOR_VARIANTS, ids=_unicode_id
+)
+@pytest.mark.parametrize("country_prefix", ("", "+86"), ids=("local", "cn"))
+def test_privacy_note_rejects_generated_visual_phone_separators(
+    separator, country_prefix
+):
+    local_number = separator.join("01012345678")
+    prefix = f"{country_prefix}{separator}" if country_prefix else ""
+    private_note = f"核验号码 {prefix}{local_number} 已告知"
+
+    with pytest.raises(ValidationError) as error:
+        lead_repository.validate_resolution_note(private_note, required=True)
+
+    assert str(error.value) == "resolution_note contains a private value"
+    assert private_note not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "separator", PHONE_SEPARATOR_VARIANTS, ids=_unicode_id
+)
+def test_privacy_phone_canonicalization_preserves_bounded_non_phone_identifiers(
+    separator,
+):
+    identifier_note = f"工单ABC{separator.join('12345678')}已归档"
+    batch_note = f"批次{separator.join('202612345678')}已归档"
+
+    assert lead_repository.validate_resolution_note(identifier_note, required=True)
+    assert lead_repository.validate_resolution_note(batch_note, required=True)
+
+
+def test_privacy_phone_scan_ignores_values_in_removed_markup_attributes():
+    marked_up_note = '<span data-order="12345678">工单已归档</span>'
+
+    assert lead_repository.validate_resolution_note(
+        marked_up_note, required=True
+    ) == "工单已归档"
 
 
 @pytest.mark.parametrize(

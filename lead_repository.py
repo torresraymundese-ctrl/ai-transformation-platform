@@ -58,13 +58,12 @@ SCRIPT_OR_STYLE = re.compile(
     r"(?is)<(script|style)\b[^>]*>.*?</\1\s*>"
 )
 MAINLAND_MOBILE = re.compile(r"(?:86)?1[3-9]\d{9}")
-LOCAL_PHONE_CANDIDATE = re.compile(r"\d(?:[\s-]*\d)+")
+PHONE_CANDIDATE = re.compile(r"\d(?:-*\d)+")
 ASCII_PHONE_LABEL_SUFFIX = re.compile(
     r"(?i)(?<![a-z0-9_])(?:tel|phone)$"
 )
-INTERNATIONAL_PHONE = re.compile(
-    r"(?<!\w)(?:\+|00)\d(?:[\s().-]*\d){6,14}(?!\d)"
-)
+PHONE_PUNCTUATION = frozenset("()./\\·•")
+PHONE_MINUS_VARIANTS = frozenset({"˗", "⁒", "−", "➖"})
 LABELED_LOCAL_PHONE = re.compile(
     r"(?i)(?:电话|手机|座机|联系(?:方式)?|tel|phone)"
     r"\s*(?:号)?\s*[:：=-]?\s*\d{7,8}(?!\d)"
@@ -536,6 +535,14 @@ def validate_resolution_note(value, *, required, target_lead=None):
     note = unescape(
         bleach.clean(without_active_blocks, tags=set(), attributes={}, strip=True)
     ).strip()
+    phone_scan_note = unescape(
+        bleach.clean(
+            _stabilize_phone_scan_source(without_active_blocks),
+            tags=set(),
+            attributes={},
+            strip=True,
+        )
+    ).strip()
     if required and not note:
         raise ValidationError("resolution_note is required")
     if len(note) > 1000:
@@ -552,8 +559,8 @@ def validate_resolution_note(value, *, required, target_lead=None):
     if MAINLAND_MOBILE.search("".join(digits)):
         raise ValidationError("resolution_note contains a private value")
     if (
-        _contains_local_phone_candidate(normalized)
-        or INTERNATIONAL_PHONE.search(normalized)
+        _contains_phone_candidate(phone_scan_note)
+        or _contains_phone_candidate(normalized)
         or LABELED_LOCAL_PHONE.search(normalized)
         or LABELED_WECHAT.search(normalized)
         or WECHAT_TOKEN.search(normalized)
@@ -574,24 +581,86 @@ def validate_resolution_note(value, *, required, target_lead=None):
     return note
 
 
-def _contains_local_phone_candidate(value):
-    """Conservatively reject bounded local-phone digit/separator candidates."""
-    for match in LOCAL_PHONE_CANDIDATE.finditer(value):
-        if _has_ascii_identifier_neighbor(value, match.start(), match.end()):
+def _contains_phone_candidate(value):
+    """Conservatively reject bounded phones after visual-separator folding.
+
+    Formatting characters are folded before selecting a maximal digit run so a
+    visually formatted number cannot be split into harmless-looking fragments.
+    This deliberately favours rejecting an ambiguous numeric note over storing
+    a possible contact value.
+    """
+    canonical = _canonicalize_phone_separators(value)
+    for match in PHONE_CANDIDATE.finditer(canonical):
+        if _has_ascii_identifier_neighbor(canonical, match.start(), match.end()):
             continue
         candidate_digits = "".join(
             str(unicodedata.decimal(character))
             for character in match.group()
             if unicodedata.decimal(character, None) is not None
         )
-        if len(candidate_digits) in {7, 8}:
+        if _is_local_phone_digits(candidate_digits):
             return True
-        if candidate_digits.startswith("0") and any(
-            len(candidate_digits) - area_length in {7, 8}
-            for area_length in (3, 4)
+        if candidate_digits.startswith("86") and _is_area_phone_digits(
+            candidate_digits[2:]
         ):
             return True
+        prefix = canonical[: match.start()].rstrip("-")
+        if prefix.endswith("+") and 7 <= len(candidate_digits) <= 15:
+            return True
+        if candidate_digits.startswith("00") and 7 <= len(
+            candidate_digits[2:]
+        ) <= 15:
+            return True
     return False
+
+
+def _canonicalize_phone_separators(value):
+    """Fold visual phone separators while retaining identifier boundaries."""
+    normalized = unicodedata.normalize("NFKC", value)
+    canonical = []
+    for character in normalized:
+        category = unicodedata.category(character)
+        if category == "Cf" or _is_variation_selector(character):
+            continue
+        if (
+            character.isspace()
+            or category == "Pd"
+            or character in PHONE_PUNCTUATION
+            or character in PHONE_MINUS_VARIANTS
+        ):
+            canonical.append("-")
+        else:
+            canonical.append(character)
+    return "".join(canonical)
+
+
+def _stabilize_phone_scan_source(value):
+    """Keep separators meaningful across HTML text sanitization."""
+    stabilized = []
+    for character in value:
+        category = unicodedata.category(character)
+        if category == "Cf" or _is_variation_selector(character):
+            continue
+        stabilized.append(" " if character.isspace() else character)
+    return "".join(stabilized)
+
+
+def _is_variation_selector(character):
+    codepoint = ord(character)
+    return 0xFE00 <= codepoint <= 0xFE0F or 0xE0100 <= codepoint <= 0xE01EF
+
+
+def _is_local_phone_digits(candidate_digits):
+    return len(candidate_digits) in {7, 8} or _is_area_phone_digits(
+        candidate_digits
+    )
+
+
+def _is_area_phone_digits(candidate_digits):
+    return candidate_digits.startswith("0") and any(
+        len(candidate_digits) - area_length in {7, 8}
+        for area_length in (3, 4)
+    )
 
 
 def _has_ascii_identifier_neighbor(value, start, end):
