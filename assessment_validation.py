@@ -176,9 +176,7 @@ def parse_appointment_payload(data, current_date: date) -> AppointmentIntentRequ
         raise ValidationError("invalid appointment payload") from None
     if not current_date <= preferred_date <= current_date + timedelta(days=90):
         raise ValidationError("invalid appointment payload")
-    time_slot = payload["time_slot"]
-    if time_slot not in APPOINTMENT_TIME_SLOTS:
-        raise ValidationError("invalid appointment payload")
+    time_slot = _appointment_slot(payload["time_slot"])
     note = _text(payload.get("note", ""), maximum=500)
     return AppointmentIntentRequest(
         assessment_id=assessment_id,
@@ -187,6 +185,12 @@ def parse_appointment_payload(data, current_date: date) -> AppointmentIntentRequ
         time_slot=time_slot,
         note=note,
     )
+
+
+def _appointment_slot(value):
+    if not isinstance(value, str) or value not in APPOINTMENT_TIME_SLOTS:
+        raise ValidationError("invalid appointment payload")
+    return value
 
 
 def validated_branch_code(value):

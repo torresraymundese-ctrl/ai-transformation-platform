@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
+from threading import Barrier
 import uuid
 
 import models
@@ -218,6 +220,109 @@ def test_cross_assessment_key_replay_is_generic_conflict_and_rolls_back(client):
         db.close()
 
 
+def test_two_connections_serialize_same_key_creation_without_duplicate(client):
+    from appointment_repository import create_appointment
+
+    setup_db = models.get_db()
+    try:
+        assessment_id, _ = _insert_assessment(setup_db)
+    finally:
+        setup_db.close()
+    start = Barrier(2)
+
+    def create_from_independent_connection():
+        db = models.get_db()
+        try:
+            connection_identity = id(db)
+            start.wait(timeout=5)
+            appointment_id = create_appointment(
+                db,
+                assessment_id,
+                SUBMISSION_KEY_1,
+                date(2026, 8, 25),
+                "afternoon",
+                "并发幂等",
+            )
+            return connection_identity, appointment_id
+        finally:
+            db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(create_from_independent_connection) for _ in range(2)
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert len({connection_id for connection_id, _ in results}) == 2
+    assert len({appointment_id for _, appointment_id in results}) == 1
+    db = models.get_db()
+    try:
+        rows = db.execute(
+            "SELECT id,status,preferred_date,time_slot,note FROM appointments"
+        ).fetchall()
+        assert [tuple(row) for row in rows] == [
+            (results[0][1], "pending", "2026-08-25", "afternoon", "并发幂等")
+        ]
+    finally:
+        db.close()
+
+
+def test_two_connections_cas_same_transition_to_one_write_and_one_conflict(client):
+    from appointment_repository import create_appointment, transition_appointment
+
+    setup_db = models.get_db()
+    try:
+        assessment_id, _ = _insert_assessment(setup_db)
+        appointment_id = create_appointment(
+            setup_db,
+            assessment_id,
+            SUBMISSION_KEY_1,
+            date(2026, 8, 25),
+            "afternoon",
+            "",
+        )
+    finally:
+        setup_db.close()
+    start = Barrier(2)
+
+    def confirm_from_independent_connection():
+        db = models.get_db()
+        try:
+            connection_identity = id(db)
+            start.wait(timeout=5)
+            try:
+                transition_appointment(db, appointment_id, "confirmed")
+                outcome = "confirmed"
+            except DataConflictError as error:
+                assert str(error) == "appointment transition conflict"
+                outcome = "conflict"
+            return connection_identity, outcome
+        finally:
+            db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(confirm_from_independent_connection) for _ in range(2)
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert len({connection_id for connection_id, _ in results}) == 2
+    assert sorted(outcome for _, outcome in results) == ["confirmed", "conflict"]
+    db = models.get_db()
+    try:
+        appointment = db.execute(
+            "SELECT status,confirmed_at,completed_at,cancelled_at "
+            "FROM appointments WHERE id=?",
+            (appointment_id,),
+        ).fetchone()
+        assert appointment["status"] == "confirmed"
+        assert appointment["confirmed_at"]
+        assert appointment["completed_at"] is None
+        assert appointment["cancelled_at"] is None
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize(
     ("start_status", "new_status", "timestamp_column"),
     (
@@ -402,7 +507,9 @@ def test_csrf_session_and_shape_rejections_do_not_consume_appointment_quota(clie
     assert _appointment_quota_count() == 0
 
 
-def test_api_rejects_non_allowlisted_or_out_of_domain_json_without_writes(client):
+def test_api_rejects_non_allowlisted_or_out_of_domain_json_without_writes(
+    client, caplog
+):
     _use_shanghai_test_clock(client)
     assessment_id, csrf_token = _complete_assessment(client)
     base = _valid_api_payload(assessment_id)
@@ -436,6 +543,8 @@ def test_api_rejects_non_allowlisted_or_out_of_domain_json_without_writes(client
             dict(base, preferred_date="2026-08-20T00:00:00"),
             dict(base, time_slot="noon"),
             dict(base, time_slot="Morning"),
+            dict(base, time_slot=["private-slot-list-marker"]),
+            dict(base, time_slot={"private-slot-object-marker": "morning"}),
             dict(base, note=None),
             dict(base, note="字" * 501),
         )
@@ -451,8 +560,14 @@ def test_api_rejects_non_allowlisted_or_out_of_domain_json_without_writes(client
     ]
 
     assert {response.status_code for response in responses} == {400}
+    assert all(
+        response.get_json() == {"error": "invalid appointment payload"}
+        for response in responses
+    )
     assert _appointment_count() == 0
     assert _appointment_quota_count() == 0
+    assert "private-slot-list-marker" not in caplog.text
+    assert "private-slot-object-marker" not in caplog.text
 
 
 def test_shanghai_date_window_accepts_today_and_ninetieth_day_inclusive(client):

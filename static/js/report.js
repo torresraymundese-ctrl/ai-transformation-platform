@@ -17,7 +17,10 @@
   });
 
   async function submitAppointmentIntent(target, fetchImpl, formDataFactory) {
-    if (target.getAttribute("aria-busy") === "true") return null;
+    if (
+      target.getAttribute("aria-busy") === "true" ||
+      target.getAttribute("data-submitted") === "true"
+    ) return null;
     const createFormData = formDataFactory || function (element) {
       return new FormData(element);
     };
@@ -55,6 +58,7 @@
       if (!response.ok || result.success !== true) {
         throw new Error("appointment request failed");
       }
+      setAppointmentSubmitted(target);
       feedback.textContent = "预约意向已提交，顾问将在后续联系中确认具体时间。";
       return result;
     } catch (_error) {
@@ -70,6 +74,14 @@
     target.setAttribute("aria-busy", String(isBusy));
     target.querySelectorAll("button, input, textarea").forEach(function (control) {
       control.disabled = isBusy;
+    });
+  }
+
+  function setAppointmentSubmitted(target) {
+    target.setAttribute("aria-busy", "false");
+    target.setAttribute("data-submitted", "true");
+    target.querySelectorAll("button, input, textarea").forEach(function (control) {
+      control.disabled = true;
     });
   }
 })();

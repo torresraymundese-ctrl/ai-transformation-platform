@@ -19,13 +19,30 @@ function fakeForm() {
     return { disabled: false };
   });
   const attributes = {};
-  const feedback = { textContent: "" };
+  const feedbackUpdates = [];
+  const feedback = {};
+  let feedbackText = "";
+  Object.defineProperty(feedback, "textContent", {
+    get: function () { return feedbackText; },
+    set: function (value) {
+      feedbackText = value;
+      feedbackUpdates.push({
+        value: value,
+        busy: attributes["aria-busy"],
+        submitted: attributes["data-submitted"],
+        controlsLocked: controls.every(function (control) {
+          return control.disabled;
+        }),
+      });
+    },
+  });
   const error = { hidden: true, textContent: "" };
   return {
     action: "/api/v2/appointments",
     attributes: attributes,
     controls: controls,
     feedback: feedback,
+    feedbackUpdates: feedbackUpdates,
     error: error,
     getAttribute: function (name) { return attributes[name]; },
     setAttribute: function (name, value) { attributes[name] = value; },
@@ -105,8 +122,26 @@ test("pending submission locks once and success remains locked with live feedbac
   assert.equal(result.appointment_id, 7);
   assert.match(form.feedback.textContent, /已提交/);
   assert.equal(form.error.hidden, true);
-  assert.equal(form.attributes["aria-busy"], "true");
+  assert.equal(form.attributes["aria-busy"], "false");
+  assert.equal(form.attributes["data-submitted"], "true");
   assert.ok(form.controls.every(function (control) { return control.disabled; }));
+  const successUpdate = form.feedbackUpdates.find(function (update) {
+    return /已提交/.test(update.value);
+  });
+  assert.deepEqual(successUpdate, {
+    value: "预约意向已提交，顾问将在后续联系中确认具体时间。",
+    busy: "false",
+    submitted: "true",
+    controlsLocked: true,
+  });
+
+  const afterSuccess = await appointmentForm.submitAppointmentIntent(
+    form,
+    fetchImpl,
+    function () { return fakeData(); }
+  );
+  assert.equal(afterSuccess, null);
+  assert.equal(calls.length, 1);
 });
 
 
