@@ -46,6 +46,7 @@ _RULE_KEYS = {
 _HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
+_NUMERIC_HOST_LABEL = re.compile(r"(?:[0-9]+|0[xX][0-9a-fA-F]+)\Z")
 
 
 @dataclass(frozen=True)
@@ -82,14 +83,26 @@ def _load_mapping_rules() -> dict[str, object]:
         raw = json.loads(MAPPING_RULES_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("invalid legacy content mapping rules") from exc
-    if not isinstance(raw, dict) or set(raw) != _RULE_KEYS or raw.get("version") != 1:
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != _RULE_KEYS
+        or type(raw.get("version")) is not int
+        or raw.get("version") != 1
+    ):
         raise ValueError("invalid legacy content mapping rules")
-    if set(raw.get("allowed_source_tables", ())) != set(SOURCE_TABLES):
-        raise ValueError("invalid legacy content mapping rules source tables")
-    if set(raw.get("allowed_target_types", ())) != set(TARGET_TYPES):
-        raise ValueError("invalid legacy content mapping rules target types")
-    if set(raw.get("allowed_target_groups", ())) != set(SERVICE_GROUPS):
-        raise ValueError("invalid legacy content mapping rules target groups")
+    for key, expected in (
+        ("allowed_source_tables", SOURCE_TABLES),
+        ("allowed_target_types", TARGET_TYPES),
+        ("allowed_target_groups", SERVICE_GROUPS),
+    ):
+        values = raw.get(key)
+        if (
+            not isinstance(values, list)
+            or any(not isinstance(value, str) for value in values)
+            or len(values) != len(set(values))
+            or set(values) != set(expected)
+        ):
+            raise ValueError(f"invalid legacy content mapping rules {key}")
     targets = raw.get("service_code_targets")
     if not isinstance(targets, dict) or set(targets) != set(SERVICE_GROUPS):
         raise ValueError("invalid legacy content mapping rules service targets")
@@ -150,9 +163,12 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
     try:
         ip = ipaddress.ip_address(ascii_host)
     except ValueError:
-        if bracketed_literal or re.fullmatch(r"[0-9.]+", ascii_host):
-            return None
         labels = ascii_host.split(".")
+        if (
+            bracketed_literal
+            or all(_NUMERIC_HOST_LABEL.fullmatch(label) for label in labels)
+        ):
+            return None
         if (
             len(ascii_host) > 253
             or len(labels) < 2

@@ -2,6 +2,7 @@ import json
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
 import hashlib
+from pathlib import Path
 import sqlite3
 import subprocess
 import sys
@@ -511,6 +512,83 @@ def test_cli_dry_run_fails_closed_on_uncheckpointed_wal_without_creating_shm(
     assert not shm_path.exists()
 
 
+def test_cli_dry_run_detects_wal_committed_between_precheck_and_immutable_open(
+    db, capsys, monkeypatch
+):
+    assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() == "delete"
+    db.commit()
+    real_connect = manage.sqlite3.connect
+    writers = []
+    state_after_race = {}
+
+    def connect_with_wal_race(database, *args, **kwargs):
+        if kwargs.get("uri") and "immutable=1" in str(database):
+            writer = real_connect(manage.models.DB_PATH)
+            assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+            writer.execute(
+                "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+                ("WAL race row", "review", "https://example.com/wal-race"),
+            )
+            writer.commit()
+            writers.append(writer)
+            state_after_race.update(
+                _file_fingerprints(Path(manage.models.DB_PATH).resolve().parent)
+            )
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(manage.sqlite3, "connect", connect_with_wal_race)
+    try:
+        assert manage.main(["inventory-content"]) == 1
+        captured = capsys.readouterr()
+
+        assert captured.out == ""
+        assert captured.err == "error=inventory_unavailable\n"
+        assert state_after_race
+        assert _file_fingerprints(Path(manage.models.DB_PATH).resolve().parent) == (
+            state_after_race
+        )
+    finally:
+        for writer in writers:
+            writer.close()
+
+
+def test_cli_dry_run_revalidates_main_database_after_serialization_before_print(
+    db, capsys, monkeypatch
+):
+    assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() == "delete"
+    db.commit()
+    real_serializer = migration.items_to_jsonl
+    state_after_race = {}
+
+    def serialize_then_change_main(items):
+        output = real_serializer(items)
+        writer = sqlite3.connect(manage.models.DB_PATH)
+        try:
+            writer.execute(
+                "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+                ("DELETE race row", "review", "https://example.com/delete-race"),
+            )
+            writer.commit()
+        finally:
+            writer.close()
+        state_after_race.update(
+            _file_fingerprints(Path(manage.models.DB_PATH).resolve().parent)
+        )
+        return output
+
+    monkeypatch.setattr(migration, "items_to_jsonl", serialize_then_change_main)
+
+    assert manage.main(["inventory-content"]) == 1
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "error=inventory_unavailable\n"
+    assert state_after_race
+    assert _file_fingerprints(Path(manage.models.DB_PATH).resolve().parent) == (
+        state_after_race
+    )
+
+
 @pytest.mark.parametrize("rules_payload", (None, "{damaged-json"))
 def test_cli_dry_run_maps_invalid_mapping_rules_to_the_only_generic_error(
     db, tmp_path, capsys, monkeypatch, rules_payload
@@ -527,6 +605,50 @@ def test_cli_dry_run_maps_invalid_mapping_rules_to_the_only_generic_error(
     assert captured.out == ""
     assert captured.err == "error=inventory_unavailable\n"
     assert "private-missing-rules-marker" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "null_sources",
+        "targets_not_list",
+        "groups_duplicate",
+        "source_not_string",
+        "targets_wrong_shape",
+        "target_entry_wrong_shape",
+    ),
+)
+def test_mapping_rule_shape_errors_are_value_errors_and_cli_stays_generic(
+    db, tmp_path, capsys, monkeypatch, mutation
+):
+    assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() == "delete"
+    rules = json.loads(
+        (migration.PROJECT_ROOT / "seed_data" / "legacy_content_mapping_rules.json")
+        .read_text(encoding="utf-8")
+    )
+    if mutation == "null_sources":
+        rules["allowed_source_tables"] = None
+    elif mutation == "targets_not_list":
+        rules["allowed_target_types"] = "service"
+    elif mutation == "groups_duplicate":
+        rules["allowed_target_groups"].append(rules["allowed_target_groups"][0])
+    elif mutation == "source_not_string":
+        rules["allowed_source_tables"][0] = 7
+    elif mutation == "targets_wrong_shape":
+        rules["service_code_targets"] = []
+    else:
+        rules["service_code_targets"]["foundation_workshop"] = []
+    rules_path = tmp_path / f"private-{mutation}-marker.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    monkeypatch.setattr(migration, "MAPPING_RULES_PATH", rules_path)
+
+    with pytest.raises(ValueError, match="mapping rules"):
+        migration.inventory_legacy_content(db)
+    assert manage.main(["inventory-content"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error=inventory_unavailable\n"
+    assert f"private-{mutation}-marker" not in captured.err
 
 
 def test_cli_record_uses_the_existing_writable_connection_seam(
@@ -561,6 +683,13 @@ def test_cli_record_uses_the_existing_writable_connection_seam(
         "https://example.com/c1\x80control",
         "https://[v1.fe80]/path",
         "https://999.999.999.999/path",
+        "https://0x7f.0.0.1/path",
+        "https://1.2.3.0x4/path",
+        "https://0177.0.0.1/path",
+        "https://127.1/path",
+        "https://2130706433/path",
+        "https://0x7f000001/path",
+        "https://1.2.3.004/path",
     ),
 )
 def test_article_url_that_cannot_safely_persist_fails_closed(db, unsafe_url):
@@ -589,6 +718,8 @@ def test_article_url_that_cannot_safely_persist_fails_closed(db, unsafe_url):
             "https://[2001:4860:4860::8888]/path",
         ),
         ("https://例子.测试/路径", "https://xn--fsqu00a.xn--0zwm56d/路径"),
+        ("https://v2.example.com/path", "https://v2.example.com/path"),
+        ("https://123.example.com/path", "https://123.example.com/path"),
     ),
 )
 def test_real_ip_literals_and_idna_domains_remain_clean(
@@ -625,6 +756,8 @@ def test_cli_record_handles_mixed_valid_and_invalid_urls_atomically(
         "https://example.com/@user",
         "https://[v1.fe80]/path",
         "https://999.999.999.999/path",
+        "https://0x7f.0.0.1/path",
+        "https://1.2.3.0x4/path",
     )
     invalid_ids = [
         db.execute(
