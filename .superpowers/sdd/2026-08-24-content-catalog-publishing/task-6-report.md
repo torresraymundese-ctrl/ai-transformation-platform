@@ -889,3 +889,148 @@ report-only append. No full suite, network access, dependency installation,
 production server, Nginx, or real database was used. The original full-suite
 outcome remains **UNKNOWN** and the historical PyPI-network violation remains
 **CONFIRMED**.
+
+## Fix1g — exact Unicode text gate and governed block completion
+
+Fix1g started from controller baseline
+`19a3dea15bc9014592d6b11f2e4a79ab2445aa3f`.  It stayed within Task 6:
+no Task 7 work, full suite, network access, dependency installation,
+production server, Nginx, or real database was used. Every pytest command
+used the assigned `..\\..\\.venv\\Scripts\\python.exe`, process-scoped
+`PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps`,
+`-p no:cacheprovider`, and its own `pytest-task6-fix1g-*` basetemp. The
+overlay reported pypdf `6.10.0`.
+
+### TDD RED evidence
+
+The first behavior RED was run before production edits:
+
+```text
+$env:PYTHONPATH=(Resolve-Path '.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps').Path
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py tests\\test_content_migrations.py -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1g-red-core-001 -k "formally_published_governed_block_types_render_through_safe_public_http or public_projection_fails_closed_for_nonexact_persisted_block_sort_order or immediate_publish_rejects_unicode_whitespace_scenario_input_and_keeps_current_public or due_publish_rejects_unicode_whitespace_input_keeps_old_page_and_isolates_healthy_item or formal_scenario_publish_rejects_unicode_whitespace_in_every_other_live_text_source or formal_industry_publish_rejects_unicode_whitespace_in_every_live_text_source or public_scenario_projection_requires_exact_persisted_input_sort_order or scenario_input_rows_require_an_exact_integer_sort_order or scenario_input_rows_reject_unicode_whitespace_and_raw_overlong_text"
+26 failed, 3 passed, 184 deselected in 18.15s
+tool exit_code=1
+```
+
+It proved real missing behavior: SQLite `trim` accepted NBSP/tab/newline/fullwidth
+whitespace for immediate and due scenario publication, allowing a bad draft to
+replace a healthy revision; REAL/TEXT block and input orders remained public;
+007 accepted those malformed input rows and a 301-character raw value ending in
+space; and legal heading/metric/steps/download/CTA fields disappeared from the
+public renderer. The industry pain/department/company-size Unicode tests already
+passed because that separate gate was already Python-`strip` based.
+
+The additional formal legacy-input-order RED was:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1g-red-input-order-002 -k "formal_publish_rejects_legacy_nonexact_input_sort_order"
+2 failed, 173 deselected in 1.96s
+tool exit_code=1
+```
+
+Both REAL and TEXT legacy input `sort_order` values could otherwise publish.
+
+### Fix and GREEN evidence
+
+`content_validation.is_exact_nonblank_text` is a dependency-free, generic
+Python predicate used by both public projection and publication validation.
+`public_input_texts` adds the revision-bound input rules: exact `str`, Python
+`strip()` nonblank, original length 1..300, exact non-bool Python `int`
+sort order >=1, unique/increasing stable order. Migration 007 now encodes the
+same Python whitespace set in its unreleased SQLite CHECK, retains its
+revision ownership/immutability contract, and requires an INTEGER sort value.
+The test-only corruption helper explicitly bypasses that schema only to prove
+the application gate fails closed for legacy malformed rows; direct migration
+tests prove the schema boundary independently.
+
+`_blocks` now selects and exact-validates `sort_order` >=0, so one REAL/TEXT
+persisted order invalidates the entire industry/scenario projection. The
+governed block macro now safely renders contract-allowed title/body fields for
+all seven types: heading, rich_text, image_text, metric, steps, download, and
+CTA. Rich HTML continues through the existing `safe_html` path; no user
+contract was narrowed and media URL behavior was unchanged.
+
+```text
+pytest-task6-fix1g-green-core-003
+31 passed, 184 deselected in 17.72s
+tool exit_code=0
+
+pytest-task6-fix1g-green-blank-input-007
+10 passed, 165 deselected in 6.28s
+tool exit_code=0
+
+pytest-task6-fix1g-green-input-range-008
+5 passed, 171 deselected in 3.37s
+tool exit_code=0
+
+pytest-task6-fix1g-focused-publishing-validation-004
+112 passed in 19.33s
+tool exit_code=0
+
+pytest-task6-fix1g-focused-migrations-seed-005
+56 passed in 26.42s
+tool exit_code=0
+
+pytest-task6-fix1g-focused-public-009
+176 passed in 93.84s (0:01:33)
+tool exit_code=0
+
+pytest-task6-fix1g-final-focused-010
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py tests\\test_content_publishing.py tests\\test_content_validation.py tests\\test_content_migrations.py tests\\test_content_seed.py tests\\test_v2_migrations.py tests\\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1g-final-focused-010
+352 passed in 143.10s (0:02:23)
+tool exit_code=0
+```
+
+An intermediate full public-file run, `pytest-task6-fix1g-focused-public-006`,
+returned `1 failed, 174 passed in 93.30s`, exit 1. The only failure was the
+pre-existing blank-input test still expecting a direct SQLite error after the
+test helper had been intentionally changed to create a legacy malformed row.
+The assertion was corrected to exercise formal publication/old-revision
+preservation; the focused public `-009` result above is the final evidence.
+
+### Static checks and self-review
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile content_validation.py catalog_content_repository.py publishing_repository.py tests\\test_public_catalog.py tests\\test_content_migrations.py
+PYCOMPILE_EXIT=0
+
+assigned interpreter: ..\\..\\.venv\\Scripts\\python.exe
+PYTHONPATH: .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps
+pypdf=6.10.0
+ENV_EVIDENCE_EXIT=0
+
+git diff --check 19a3dea15bc9014592d6b11f2e4a79ab2445aa3f
+DIFF_CHECK_EXIT=0
+
+rg -n '\\b(execute|executemany|executescript|cursor)\\s*\\(' blueprints\\public_catalog.py
+BLUEPRINT_SQL_GUARD=PASS
+
+..\\..\\.venv\\Scripts\\python.exe -c "import re; from pathlib import Path; sql=Path('migrations/007_scenario_public_inputs.sql').read_text(encoding='utf-8'); actual={int(value) for value in re.findall(r'char\\((\\d+)\\)', sql)}; expected={codepoint for codepoint in range(0x110000) if chr(codepoint).isspace()}; print('migration_whitespace_exact=' + str(actual == expected)); print('count=' + str(len(actual))); assert actual == expected"
+migration_whitespace_exact=True
+count=29
+tool exit_code=0
+```
+
+Self-review covered public/read and formal/due gate equivalence for all live
+core names, revision-owned inputs, and published deliverables; archived target
+blocking; raw input range/order constraints; one-invalid-block fail-closed
+list/detail consistency; all legal governed block fields and safe HTML/media
+boundaries; trusted public URL behavior; and no public internal/admin/contact
+leak. No share-image/resource MIME scope was expanded.
+
+### Fix1g changed files
+
+- `content_validation.py`
+- `catalog_content_repository.py`
+- `publishing_repository.py`
+- `migrations/007_scenario_public_inputs.sql`
+- `templates/components/content_blocks.html`
+- `tests/test_public_catalog.py`
+- `tests/test_content_migrations.py`
+- this report
+
+Known limitations remain unchanged: the original sole full-suite outcome is
+**UNKNOWN** (no full rerun); the historical PyPI network use is **CONFIRMED**;
+and frozen `data_process_foundation` remains intentionally private owing to its
+disclosed product-data limitation. This Fix1g used only the existing offline
+overlay and disposable SQLite databases.

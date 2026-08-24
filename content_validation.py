@@ -43,6 +43,37 @@ class ContentValidationError(ValueError):
         super().__init__(code)
 
 
+def is_exact_nonblank_text(value, *, maximum=None):
+    """Return whether a persisted public text value has the exact safe shape."""
+    return (
+        type(value) is str
+        and bool(value.strip())
+        and (maximum is None or len(value) <= maximum)
+    )
+
+
+def public_input_texts(rows):
+    """Return stable public inputs, or None when any persisted row is malformed."""
+    values = []
+    previous_order = 0
+    seen_orders = set()
+    for row in rows:
+        input_text = row["input_text"]
+        sort_order = row["sort_order"]
+        if (
+            not is_exact_nonblank_text(input_text, maximum=300)
+            or type(sort_order) is not int
+            or sort_order < 1
+            or sort_order in seen_orders
+            or sort_order <= previous_order
+        ):
+            return None
+        values.append(input_text)
+        seen_orders.add(sort_order)
+        previous_order = sort_order
+    return tuple(values) if values else None
+
+
 def _require_text(value, maximum, code):
     if type(value) is not str or not value.strip() or len(value) > maximum:
         raise ContentValidationError(code)

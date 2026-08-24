@@ -11,7 +11,12 @@ from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import format_shanghai
 from content_json import ContentJsonError, decode_database_json
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
-from content_validation import ContentValidationError, validate_content_draft
+from content_validation import (
+    ContentValidationError,
+    is_exact_nonblank_text,
+    public_input_texts,
+    validate_content_draft,
+)
 from media_validation import ATTACHMENT_MIMES, IMAGE_MIMES
 
 
@@ -461,7 +466,7 @@ def validate_for_publication(db, content_id, now):
 def _nonblank_strings(value):
     return (
         type(value) is list and value
-        and all(type(item) is str and item.strip() for item in value)
+        and all(is_exact_nonblank_text(item) for item in value)
     )
 
 
@@ -496,7 +501,7 @@ def _has_only_exact_published_names(db, table, where_sql, arguments):
         arguments,
     ).fetchall()
     return bool(rows) and all(
-        type(row["name"]) is str and row["name"].strip() for row in rows
+        is_exact_nonblank_text(row["name"]) for row in rows
     )
 
 
@@ -508,8 +513,7 @@ def _validate_industry_publication(db, content_id, draft, now):
     if (
         industry is None
         or industry["status"] != "published"
-        or type(industry["name"]) is not str
-        or not industry["name"].strip()
+        or not is_exact_nonblank_text(industry["name"])
         or not draft.blocks
         or not any(_meaningful_html(block.body_html) for block in draft.blocks)
         or not _has_only_exact_published_names(db, "pain_points", "industry_id=?", (industry_id,))
@@ -550,30 +554,54 @@ def _validate_scenario_publication(db, content_id, draft):
         raise ContentValidationError("scenario_public_incomplete")
     if not _valid_range(scenario["min_weeks"], scenario["max_weeks"]):
         raise ContentValidationError("scenario_public_incomplete")
-    relation_checks = (
-        ("SELECT 1 FROM scenario_branches WHERE scenario_id=?",
-         "SELECT 1 FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
-         "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
-         "AND (ib.status<>'published' OR i.status<>'published' OR typeof(i.name)<>'text' OR trim(i.name)='')"),
-        ("SELECT 1 FROM scenario_departments WHERE scenario_id=?",
-         "SELECT 1 FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
-         "WHERE link.scenario_id=? AND (d.status<>'published' OR typeof(d.name)<>'text' OR trim(d.name)='')"),
-        ("SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
-         "WHERE link.scenario_id=? AND p.status='published' AND trim(p.name)<>''",
-         "SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
-         "WHERE link.scenario_id=? AND (p.status<>'published' OR typeof(p.name)<>'text' OR trim(p.name)='')"),
-        ("SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? "
-         "AND typeof(input_text)='text' AND trim(input_text)<>''",
-         "SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? "
-         "AND (typeof(input_text)<>'text' OR trim(input_text)='')"),
-        ("SELECT 1 FROM content_maturity_levels WHERE content_item_id=?",
-         "SELECT 1 FROM content_maturity_levels WHERE content_item_id=? "
-         "AND (maturity_code NOT IN ('explore','pilot','scale','collaborate'))"),
+    industry_rows = db.execute(
+        "SELECT i.name,i.status AS industry_status,ib.status AS branch_status "
+        "FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+        "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? ORDER BY ib.id",
+        (scenario_id,),
+    ).fetchall()
+    department_rows = db.execute(
+        "SELECT d.name,d.status FROM scenario_departments link "
+        "JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? ORDER BY d.id",
+        (scenario_id,),
+    ).fetchall()
+    pain_rows = db.execute(
+        "SELECT p.name,p.status FROM scenario_pains link "
+        "JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? ORDER BY p.id",
+        (scenario_id,),
+    ).fetchall()
+    input_rows = db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs "
+        "WHERE content_item_id=? ORDER BY sort_order,id",
+        (content_id,),
+    ).fetchall()
+    maturity_codes = tuple(
+        row["maturity_code"] for row in db.execute(
+            "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
+            "ORDER BY sort_order,maturity_code", (content_id,)
+        )
     )
-    if any(
-        db.execute(valid, (scenario_id if index < 3 else content_id,)).fetchone() is None
-        or db.execute(invalid, (scenario_id if index < 3 else content_id,)).fetchone() is not None
-        for index, (valid, invalid) in enumerate(relation_checks)
+    if (
+        not industry_rows
+        or any(
+            row["branch_status"] != "published"
+            or row["industry_status"] != "published"
+            or not is_exact_nonblank_text(row["name"])
+            for row in industry_rows
+        )
+        or not department_rows
+        or any(
+            row["status"] != "published" or not is_exact_nonblank_text(row["name"])
+            for row in department_rows
+        )
+        or not pain_rows
+        or any(
+            row["status"] != "published" or not is_exact_nonblank_text(row["name"])
+            for row in pain_rows
+        )
+        or public_input_texts(input_rows) is None
+        or not maturity_codes
+        or any(code not in {"explore", "pilot", "scale", "collaborate"} for code in maturity_codes)
     ):
         raise ContentValidationError("scenario_public_incomplete")
     if not draft.blocks or not any(_meaningful_html(block.body_html) for block in draft.blocks):
@@ -581,7 +609,7 @@ def _validate_scenario_publication(db, content_id, draft):
     for service in rows:
         if (
             service["service_id"] is None or service["service_status"] != "published"
-            or type(service["service_name"]) is not str or not service["service_name"].strip()
+            or not is_exact_nonblank_text(service["service_name"])
             or not _valid_range(service["min_budget"], service["max_budget"])
             or not _valid_range(service["service_min_weeks"], service["service_max_weeks"])
         ):
@@ -592,15 +620,13 @@ def _validate_scenario_publication(db, content_id, draft):
         )
         if not all(_nonblank_strings(values) for values in source_lists):
             raise ContentValidationError("scenario_public_incomplete")
-        if db.execute(
-            "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
-            "AND typeof(title)='text' AND trim(title)<>''", (service["service_id"],)
-        ).fetchone() is None:
-            raise ContentValidationError("scenario_public_incomplete")
-        if db.execute(
-            "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
-            "AND (typeof(title)<>'text' OR trim(title)='')", (service["service_id"],)
-        ).fetchone() is not None:
+        deliverables = db.execute(
+            "SELECT title FROM service_deliverables WHERE service_id=? AND status='published' "
+            "ORDER BY sort_order,id", (service["service_id"],)
+        ).fetchall()
+        if not deliverables or not all(
+            is_exact_nonblank_text(row["title"]) for row in deliverables
+        ):
             raise ContentValidationError("scenario_public_incomplete")
 
 

@@ -244,13 +244,13 @@ def _publish_all_governed_blocks(db):
         content_group_id=row["content_group_id"], extension={"scenario_id": row["scenario_id"]},
         maturity_codes=("explore",),
         blocks=(
-            ContentBlock("heading", title="REVIEW-HEADING", settings={"level": 2}),
+            ContentBlock("heading", title="REVIEW-HEADING", body_html="<p>REVIEW-HEADING-BODY</p>", settings={"level": 2}),
             ContentBlock("rich_text", title="REVIEW-RICH-TITLE", body_html="<p>REVIEW-RICH</p>", settings={}),
             ContentBlock("image_text", title="REVIEW-IMAGE", body_html="<p>REVIEW-IMAGE-BODY</p>", settings={"alignment": "left", "alt_text": "REVIEW-ALT"}, media_asset_id=image_id),
-            ContentBlock("metric", title="REVIEW-METRIC-TITLE", settings={"value": "REVIEW-METRIC", "unit": "项"}),
-            ContentBlock("steps", title="REVIEW-STEPS", settings={"items": ("REVIEW-STEP-ONE", "REVIEW-STEP-TWO")}),
-            ContentBlock("download", title="REVIEW-DOWNLOAD-TITLE", settings={"label": "REVIEW-DOWNLOAD"}, media_asset_id=download_id),
-            ContentBlock("cta", title="REVIEW-CTA-TITLE", settings={"label": "REVIEW-CTA", "url": "/assessment", "style": "primary"}),
+            ContentBlock("metric", title="REVIEW-METRIC-TITLE", body_html="<p>REVIEW-METRIC-BODY</p>", settings={"value": "REVIEW-METRIC", "unit": "项"}),
+            ContentBlock("steps", title="REVIEW-STEPS", body_html="<p>REVIEW-STEPS-BODY</p>", settings={"items": ("REVIEW-STEP-ONE", "REVIEW-STEP-TWO")}),
+            ContentBlock("download", title="REVIEW-DOWNLOAD-TITLE", body_html="<p>REVIEW-DOWNLOAD-BODY</p>", settings={"label": "REVIEW-DOWNLOAD"}, media_asset_id=download_id),
+            ContentBlock("cta", title="REVIEW-CTA-TITLE", body_html="<p>REVIEW-CTA-BODY</p>", settings={"label": "REVIEW-CTA", "url": "/assessment", "style": "primary"}),
         ),
     )
     lock_version = save_content_draft(row["id"], row["lock_version"], draft, actor="test-admin", now=NOW_DATETIME)
@@ -301,7 +301,13 @@ def test_formally_published_governed_block_types_render_through_safe_public_http
     assert {node["data-content-block"] for node in document.select("[data-content-block]")} >= {
         "heading", "rich_text", "image_text", "metric", "steps", "download", "cta"
     }
-    for marker in ("REVIEW-HEADING", "REVIEW-RICH", "REVIEW-IMAGE-BODY", "REVIEW-METRIC", "REVIEW-STEP-ONE", "REVIEW-DOWNLOAD", "REVIEW-CTA"):
+    for marker in (
+        "REVIEW-HEADING", "REVIEW-HEADING-BODY", "REVIEW-RICH-TITLE", "REVIEW-RICH",
+        "REVIEW-IMAGE", "REVIEW-IMAGE-BODY", "REVIEW-METRIC-TITLE", "REVIEW-METRIC",
+        "REVIEW-METRIC-BODY", "REVIEW-STEPS", "REVIEW-STEPS-BODY", "REVIEW-STEP-ONE",
+        "REVIEW-DOWNLOAD-TITLE", "REVIEW-DOWNLOAD-BODY", "REVIEW-DOWNLOAD",
+        "REVIEW-CTA-TITLE", "REVIEW-CTA-BODY", "REVIEW-CTA",
+    ):
         assert marker.encode() in response.data
     assert document.select_one(f'img[src="/media/{image_id}/image"]')["alt"] == "REVIEW-ALT"
     assert document.select_one(f'a[href="/media/{download_id}/download"]') is not None
@@ -380,6 +386,7 @@ def test_public_block_projection_rejects_nonexact_settings_and_media_types(block
     row = {
         "block_type": block_type, "title": "标题", "body_html": "<p>正文</p>",
         "settings_json": json.dumps(settings), "media_asset_id": media_asset_id,
+        "sort_order": 0,
     }
 
     assert catalog._public_block(row) is None
@@ -472,7 +479,12 @@ def _corrupt_one_scenario_text_source(db, scenario_id, revision_id, source, valu
             (value, scenario_id),
         )
     elif source == "input":
-        if type(value) is not str:
+        legacy_value = (
+            type(value) is not str
+            or not value.strip()
+            or len(value) > 300
+        )
+        if legacy_value:
             db.execute("PRAGMA ignore_check_constraints=ON")
         try:
             db.execute(
@@ -481,8 +493,18 @@ def _corrupt_one_scenario_text_source(db, scenario_id, revision_id, source, valu
                 (value, revision_id),
             )
         finally:
-            if type(value) is not str:
+            if legacy_value:
                 db.execute("PRAGMA ignore_check_constraints=OFF")
+    elif source == "input_sort_order":
+        db.execute("PRAGMA ignore_check_constraints=ON")
+        try:
+            db.execute(
+                "UPDATE scenario_public_inputs SET sort_order=? WHERE id=(SELECT id FROM "
+                "scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+                (value, revision_id),
+            )
+        finally:
+            db.execute("PRAGMA ignore_check_constraints=OFF")
     elif source == "deliverable":
         db.execute(
             "UPDATE service_deliverables SET title=? WHERE id=(SELECT sd.id FROM "
@@ -519,12 +541,6 @@ def test_scenario_formal_publication_rejects_each_mixed_invalid_required_text_so
     current, revision_id, lock_version = _saved_scenario_revision(db)
     before = client.get("/scenarios/mfg-knowledge-assistant")
     assert before.status_code == 200
-    if source == "input" and value == " ":
-        with pytest.raises(sqlite3.IntegrityError):
-            _corrupt_one_scenario_text_source(
-                db, current["scenario_id"], revision_id, source, value
-            )
-        return
     _corrupt_one_scenario_text_source(
         db, current["scenario_id"], revision_id, source, value
     )
@@ -659,6 +675,182 @@ def test_public_projection_fails_closed_when_any_persisted_block_cannot_be_proje
     assert "mfg_knowledge_assistant" not in {
         card["data-scenario-code"] for card in page(listing).select("[data-scenario-code]")
     }
+
+
+@pytest.mark.parametrize(("entry_type", "slug", "detail_path", "list_path", "card_selector", "code"), (
+    ("scenario", "mfg-knowledge-assistant", "/scenarios/mfg-knowledge-assistant", "/scenarios", "[data-scenario-code]", "mfg_knowledge_assistant"),
+    ("industry", "manufacturing", "/industries/manufacturing", "/industries", "[data-industry-code]", "manufacturing"),
+))
+@pytest.mark.parametrize("bad_order", (1.5, "not-an-integer"), ids=("real", "text"))
+def test_public_projection_fails_closed_for_nonexact_persisted_block_sort_order(
+    client, db, entry_type, slug, detail_path, list_path, card_selector, code, bad_order
+):
+    revision = db.execute(
+        "SELECT id FROM content_items WHERE entry_type=? AND status='draft' AND slug=?",
+        (entry_type, slug),
+    ).fetchone()
+    db.execute(
+        "UPDATE content_blocks SET sort_order=? WHERE id=(SELECT id FROM content_blocks "
+        "WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+        (bad_order, revision["id"]),
+    )
+    db.commit()
+    publish_catalog(db)
+
+    assert client.get(detail_path).status_code == 404
+    assert code not in {
+        card.get(f"data-{entry_type}-code")
+        for card in page(client.get(list_path)).select(card_selector)
+    }
+
+
+def test_service_save_rejects_nonexact_block_sort_order(db):
+    row = db.execute(
+        "SELECT id,lock_version FROM content_items WHERE entry_type='scenario' "
+        "AND status='draft' ORDER BY id LIMIT 1"
+    ).fetchone()
+    draft = publishing_repository.load_content_draft(db, row["id"])
+    invalid_block = replace(draft.blocks[0], sort_order=1.5)
+
+    with pytest.raises(ContentValidationError) as error:
+        save_content_draft(
+            row["id"], row["lock_version"], replace(draft, blocks=(invalid_block,)),
+            actor="test-admin", now=NOW_DATETIME,
+        )
+
+    assert error.value.code == "block_order_invalid"
+
+
+_UNICODE_PUBLIC_WHITESPACE = ("\u00a0", "\t", "\n", "\u3000")
+_INVALID_PUBLIC_INPUTS = _UNICODE_PUBLIC_WHITESPACE + ("x" * 300 + " ",)
+
+
+@pytest.mark.parametrize("value", _INVALID_PUBLIC_INPUTS, ids=("nbsp", "tab", "newline", "fullwidth", "raw-overlong"))
+def test_immediate_publish_rejects_unicode_whitespace_scenario_input_and_keeps_current_public(
+    client, db, value
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, "input", value
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize("value", _UNICODE_PUBLIC_WHITESPACE, ids=("nbsp", "tab", "newline", "fullwidth"))
+def test_due_publish_rejects_unicode_whitespace_input_keeps_old_page_and_isolates_healthy_item(
+    client, db, value
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    due = NOW_DATETIME + timedelta(hours=1)
+    schedule_content(revision_id, lock_version, due, actor="test-admin", now=NOW_DATETIME)
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, "input", value
+    )
+    healthy = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='retail_ai_service' "
+        "AND ci.status='published'"
+    ).fetchone()
+    healthy_revision = copy_revision(healthy["id"], actor="test-admin", now=NOW_DATETIME)
+    schedule_content(healthy_revision, 1, due, actor="test-admin", now=NOW_DATETIME)
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert healthy_revision in result.published_ids
+    assert (revision_id, "validation_failed") in result.failures
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=4)
+    assert db.execute("SELECT publish_at FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_due_failed'",
+        (revision_id,),
+    ).fetchone()[0] == 1
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize(("source", "value"), (
+    ("industry", "\u00a0"), ("department", "\t"),
+    ("pain", "\n"), ("deliverable", "\u3000"),
+))
+def test_formal_scenario_publish_rejects_unicode_whitespace_in_every_other_live_text_source(
+    db, source, value
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, source, value
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+
+
+@pytest.mark.parametrize(("source", "value"), (
+    ("pain", "\u00a0"), ("department", "\t"), ("company_size", "\n"),
+))
+def test_formal_industry_publish_rejects_unicode_whitespace_in_every_live_text_source(
+    db, source, value
+):
+    current, revision_id = _saved_industry_revision(db)
+    _corrupt_one_industry_text_source(db, current["industry_id"], source, value)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "industry_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=1)
+
+
+@pytest.mark.parametrize("bad_order", (1.5, "not-an-integer"), ids=("real", "text"))
+def test_public_scenario_projection_requires_exact_persisted_input_sort_order(client, db, bad_order):
+    revision = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' "
+        "AND ci.status='draft'"
+    ).fetchone()
+    db.execute("PRAGMA ignore_check_constraints=ON")
+    try:
+        db.execute(
+            "UPDATE scenario_public_inputs SET sort_order=? WHERE id=(SELECT id FROM "
+            "scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+            (bad_order, revision["id"]),
+        )
+    finally:
+        db.execute("PRAGMA ignore_check_constraints=OFF")
+    db.commit()
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"]
+        for card in page(client.get("/scenarios")).select("[data-scenario-code]")
+    }
+
+
+@pytest.mark.parametrize("bad_order", (1.5, "not-an-integer"), ids=("real", "text"))
+def test_formal_publish_rejects_legacy_nonexact_input_sort_order_and_keeps_current_public(
+    client, db, bad_order
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, "input_sort_order", bad_order
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
 
 
 @pytest.mark.parametrize("bad_settings", (

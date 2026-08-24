@@ -441,6 +441,36 @@ def test_scenario_input_rows_require_a_positive_sort_order(db):
         )
 
 
+@pytest.mark.parametrize("sort_order", (1.5, "not-an-integer"), ids=("real", "text"))
+def test_scenario_input_rows_require_an_exact_integer_sort_order(db, sort_order):
+    scenario_item = insert_item(
+        db, insert_group(db, "scenario", "scenario-input-exact-sort-order"),
+        entry_type="scenario", slug="scenario-input-exact-sort-order",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,'场景输入',?)",
+            (scenario_item, sort_order),
+        )
+
+
+@pytest.mark.parametrize("input_text", (
+    "\u00a0", "\t", "\n", "\u3000", "x" * 300 + " ",
+), ids=("nbsp", "tab", "newline", "fullwidth", "raw-length-over-300"))
+def test_scenario_input_rows_reject_unicode_whitespace_and_raw_overlong_text(db, input_text):
+    scenario_item = insert_item(
+        db, insert_group(db, "scenario", "scenario-input-exact-text"),
+        entry_type="scenario", slug="scenario-input-exact-text",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,?,1)",
+            (scenario_item, input_text),
+        )
+
+
 def test_scenario_input_rows_reject_blob_text_even_with_a_valid_draft_owner(db):
     scenario_item = insert_item(
         db, insert_group(db, "scenario", "scenario-input-blob"),

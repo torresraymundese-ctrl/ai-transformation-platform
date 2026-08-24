@@ -12,7 +12,7 @@ from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import as_shanghai, format_shanghai
 from content_json import ContentJsonError, decode_database_json
 from content_contracts import ContentDraft
-from content_validation import ContentValidationError, _safe_cta
+from content_validation import ContentValidationError, _safe_cta, is_exact_nonblank_text, public_input_texts
 from pagination import Page, PageRequest
 import publishing_repository
 import publishing_service
@@ -325,6 +325,8 @@ def _resolution(db, entry_type, slug, now):
 
 def _public_block(row):
     """Expose only the reviewed block fields required by the public renderer."""
+    if type(row["sort_order"]) is not int or row["sort_order"] < 0:
+        return None
     try:
         settings = decode_database_json(row["settings_json"])
     except ContentJsonError:
@@ -386,7 +388,7 @@ def _public_block(row):
 def _blocks(db, content_id):
     blocks = []
     for row in db.execute(
-        "SELECT block_type,title,body_html,settings_json,media_asset_id FROM content_blocks "
+        "SELECT block_type,title,body_html,settings_json,media_asset_id,sort_order FROM content_blocks "
         "WHERE content_item_id=? ORDER BY sort_order,id", (content_id,)
     ):
         block = _public_block(row)
@@ -422,7 +424,7 @@ def _services_for_scenario(db, scenario_id):
 
 
 def _nonblank_values(values):
-    return bool(values) and all(type(value) is str and value.strip() for value in values)
+    return bool(values) and all(is_exact_nonblank_text(value) for value in values)
 
 
 def _exact_nonblank_json_list(value):
@@ -456,7 +458,7 @@ def _valid_services(services):
         return False
     for service in services:
         if (
-            type(service["public_name"]) is not str or not service["public_name"].strip()
+            not is_exact_nonblank_text(service["public_name"])
             or not _valid_range(service["min_budget"], service["max_budget"])
             or not _valid_range(service["min_weeks"], service["max_weeks"])
             or not _nonblank_values(service["steps"])
@@ -486,10 +488,11 @@ def _scenario_authority(db, scenario_id):
 
 
 def _scenario_inputs(db, content_id):
-    return _names(
-        db, "SELECT input_text FROM scenario_public_inputs "
+    rows = db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs "
         "WHERE content_item_id=? ORDER BY sort_order,id", (content_id,)
-    )
+    ).fetchall()
+    return public_input_texts(rows)
 
 
 def _public_risks(authority):
@@ -592,7 +595,7 @@ def _industry_projection(db, item, redirect, now):
         "SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id "
         "WHERE g.id=? AND i.status='published'", (item["content_group_id"],)
     ).fetchone()
-    if row is None or type(row["name"]) is not str or not row["name"].strip():
+    if row is None or not is_exact_nonblank_text(row["name"]):
         return None
     blocks = _blocks(db, item["id"])
     pains = _names(
