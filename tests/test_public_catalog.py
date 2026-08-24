@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 import hashlib
 import json
+import sqlite3
 
 import pytest
 from bs4 import BeautifulSoup
@@ -310,6 +311,7 @@ def test_formally_published_block_media_urls_stream_real_matching_files(client, 
     ("download", {"label": {"not": "text"}}, None),
     ("cta", {"label": ["not text"], "url": "/assessment", "style": "primary"}, None),
     ("image_text", {"alignment": "left", "alt_text": "图"}, -1),
+    ("image_text", {"alignment": ["left"], "alt_text": "图"}, None),
 ))
 def test_public_block_projection_rejects_nonexact_settings_and_media_types(block_type, settings, media_asset_id):
     row = {
@@ -370,13 +372,18 @@ def _break_scenario_public_source(db, scenario_id, revision_id, source):
     elif source == "maturity":
         db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (revision_id,))
     elif source == "input":
-        db.execute("UPDATE scenario_public_inputs SET status='archived' WHERE scenario_id=?", (scenario_id,))
+        db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=?", (revision_id,))
     elif source == "service":
         db.execute("UPDATE services SET min_weeks=0 WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario_id,))
     elif source == "prerequisite":
         db.execute("UPDATE services SET prerequisites_json='[\"\"]' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario_id,))
     elif source == "output":
-        db.execute("UPDATE service_deliverables SET title=' ' WHERE id=(SELECT sd.id FROM service_deliverables sd JOIN scenario_services ss ON ss.service_id=sd.service_id WHERE ss.scenario_id=? LIMIT 1)", (scenario_id,))
+        db.execute(
+            "UPDATE service_deliverables SET title=' ' WHERE service_id IN "
+            "(SELECT service_id FROM scenario_services WHERE scenario_id=?) "
+            "AND status='published'",
+            (scenario_id,),
+        )
     elif source == "risk":
         db.execute("UPDATE scenarios SET risk_codes_json='[\"unknown\"]' WHERE id=?", (scenario_id,))
     elif source == "narrative":
@@ -420,6 +427,87 @@ def test_due_scenario_with_later_missing_input_fails_without_archiving_current_r
     assert db.execute("SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'", (revision_id,)).fetchone()[0] == 0
 
 
+def test_draft_input_damage_does_not_change_current_public_revision(published_catalog, db):
+    current, revision_id, _ = _saved_scenario_revision(db)
+    before = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    before_inputs = [item.get_text(strip=True) for item in before.select('[data-content-section="inputs"] li')]
+    db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=?", (revision_id,))
+    db.commit()
+
+    after = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+
+    assert [item.get_text(strip=True) for item in after.select('[data-content-section="inputs"] li')] == before_inputs
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+
+
+def test_copied_inputs_are_revision_bound_and_published_rows_are_immutable(db):
+    current, revision_id, _ = _saved_scenario_revision(db)
+    previous = db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id",
+        (current["id"],),
+    ).fetchall()
+    copied = db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id",
+        (revision_id,),
+    ).fetchall()
+
+    assert copied == previous
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("UPDATE scenario_public_inputs SET input_text='不可修改' WHERE content_item_id=?", (current["id"],))
+
+
+def test_archived_historical_deliverable_does_not_block_valid_published_replacement(db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    service_id = db.execute(
+        "SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1", (current["scenario_id"],)
+    ).fetchone()[0]
+    db.execute(
+        "INSERT INTO service_deliverables (code,service_id,title,status,sort_order) "
+        "VALUES ('test:replacement-deliverable',?,'保留交付物','published',999)",
+        (service_id,),
+    )
+    db.execute(
+        "UPDATE service_deliverables SET status='archived' WHERE id=("
+        "SELECT id FROM service_deliverables WHERE service_id=? AND status='published' ORDER BY id LIMIT 1)",
+        (service_id,),
+    )
+    db.commit()
+
+    publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] == "published"
+
+
+@pytest.mark.parametrize("source", ("steps", "acceptance", "budget", "core_name", "narrative", "malformed_json"))
+def test_public_scenario_fails_closed_for_incomplete_or_malformed_required_data(client, db, source):
+    scenario = db.execute("SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'").fetchone()
+    if source == "steps":
+        db.execute("UPDATE services SET implementation_steps_json='[null]' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
+    elif source == "acceptance":
+        db.execute("UPDATE services SET acceptance_json='[\"\"]' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
+    elif source == "budget":
+        db.execute("UPDATE services SET min_budget=0 WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
+    elif source == "core_name":
+        db.execute("UPDATE departments SET name=' ' WHERE id=(SELECT department_id FROM scenario_departments WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
+    elif source == "narrative":
+        db.execute("UPDATE content_blocks SET body_html='<p> </p>' WHERE content_item_id=(SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id WHERE g.scenario_id=? LIMIT 1)", (scenario["id"],))
+    else:
+        db.execute("UPDATE services SET implementation_steps_json='{' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
+    db.commit()
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+
+
+def test_all_seeded_scenario_drafts_pass_the_formal_publish_gate(db):
+    rows = db.execute("SELECT id,lock_version FROM content_items WHERE entry_type='scenario' AND status='draft' ORDER BY id").fetchall()
+
+    results = [publish_content(row["id"], row["lock_version"], actor="test-admin", now=NOW_DATETIME) for row in rows]
+
+    assert len(results) == 13
+    assert db.execute("SELECT COUNT(*) FROM content_items WHERE entry_type='scenario' AND status='published'").fetchone()[0] == 13
+
+
 @pytest.mark.parametrize("target", ("industry", "department", "pain"))
 def test_archived_related_core_rows_are_omitted_from_public_cards_and_details(published_catalog, db, target):
     scenario = db.execute("SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'").fetchone()
@@ -438,9 +526,30 @@ def test_archived_related_core_rows_are_omitted_from_public_cards_and_details(pu
     db.commit()
 
     card = page(published_catalog.get("/scenarios"))
-    detail = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    detail = published_catalog.get("/scenarios/mfg-knowledge-assistant")
     assert marker not in card.get_text()
-    assert marker not in detail.get_text()
+    if target == "pain":
+        assert detail.status_code == 200
+        assert marker not in page(detail).get_text()
+    else:
+        remaining = db.execute(
+            "SELECT COUNT(*) FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+            "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+            "AND ib.status='published' AND i.status='published' AND trim(i.name)<>''"
+            if target == "industry" else
+            "SELECT COUNT(*) FROM scenario_departments sd JOIN departments d ON d.id=sd.department_id "
+            "WHERE sd.scenario_id=? AND d.status='published' AND trim(d.name)<>''",
+            (scenario["id"],),
+        ).fetchone()[0]
+        if remaining:
+            assert detail.status_code == 200
+            assert marker not in page(detail).get_text()
+        else:
+            assert detail.status_code == 404
+            assert "mfg_knowledge_assistant" not in {
+                node["data-scenario-code"] for node in card.select("[data-scenario-code]")
+            }
+            return
     cards = catalog.public_scenarios(catalog.ScenarioFilters(), catalog.PageRequest(1, 20), NOW_DATETIME)
     matched = next(item for item in cards.items if item.code == "mfg_knowledge_assistant")
     if target == "industry":
@@ -448,7 +557,7 @@ def test_archived_related_core_rows_are_omitted_from_public_cards_and_details(pu
     elif target == "department":
         assert marker not in matched.departments
     else:
-        assert marker not in detail.select_one('[data-content-section="pains"]').get_text()
+        assert marker not in page(detail).get_text()
 
 
 def test_archived_industry_branch_cannot_match_public_industry_filter(published_catalog, db):
@@ -463,6 +572,17 @@ def test_archived_industry_branch_cannot_match_public_industry_filter(published_
     assert "mfg_knowledge_assistant" not in {
         card["data-scenario-code"] for card in document.select("[data-scenario-code]")
     }
+
+
+@pytest.mark.parametrize("kind,table", (("industry", "industries"), ("department", "departments")))
+def test_archived_core_codes_are_rejected_by_public_filter_parser(db, kind, table):
+    row = db.execute(f"SELECT code FROM {table} WHERE status='published' ORDER BY id LIMIT 1").fetchone()
+    db.execute(f"UPDATE {table} SET status='archived' WHERE code=?", (row["code"],))
+    db.commit()
+
+    filters = catalog.parse_public_scenario_filters({kind: row["code"]})
+
+    assert getattr(filters, kind) == ""
 
 
 @pytest.mark.parametrize("path", ("/industries", "/scenarios"))

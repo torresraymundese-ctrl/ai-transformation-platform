@@ -43,7 +43,7 @@ def load_scenario_input_seed():
     return payload
 
 
-def seed_scenario_public_inputs(db):
+def _validated_scenario_public_inputs():
     payload = load_scenario_input_seed()
     entries = payload.get("scenarios")
     manifest_codes = {entry["code"] for entry in load_core_catalog_manifest()["scenarios"]}
@@ -52,21 +52,32 @@ def seed_scenario_public_inputs(db):
     by_code = {entry.get("code"): entry.get("inputs") for entry in entries}
     if len(by_code) != len(entries) or set(by_code) != manifest_codes:
         raise ContentSeedError("scenario input seed codes differ from frozen catalog")
-    for code, inputs in by_code.items():
+    for inputs in by_code.values():
         if (
             type(inputs) is not list or not inputs
             or any(type(value) is not str or not value.strip() for value in inputs)
         ):
             raise ContentSeedError("scenario input seed values are invalid")
+    return by_code
+
+
+def seed_scenario_public_inputs(db):
+    by_code = _validated_scenario_public_inputs()
+    prepared = []
+    for code, inputs in by_code.items():
         row = db.execute(
-            "SELECT id FROM scenarios WHERE code=? AND status='published'", (code,)
+            "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+            "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code=? AND ci.status='draft'",
+            (code,),
         ).fetchone()
         if row is None:
-            raise ContentSeedError("scenario input seed target is unavailable")
+            continue
+        prepared.append((row["id"], tuple(value.strip() for value in inputs)))
+    for content_item_id, inputs in prepared:
         db.executemany(
             "INSERT OR IGNORE INTO scenario_public_inputs "
-            "(scenario_id,input_text,status,sort_order) VALUES (?,?,'published',?)",
-            [(row["id"], value.strip(), index) for index, value in enumerate(inputs)],
+            "(content_item_id,input_text,sort_order) VALUES (?,?,?)",
+            [(content_item_id, value, index) for index, value in enumerate(inputs)],
         )
 
 
@@ -147,7 +158,6 @@ def seed_content_defaults(db, now):
     ).fetchone() is None:
         return
     instant = as_shanghai(now)
-    seed_scenario_public_inputs(db)
     payload = load_content_seed()
     prepared = _validated_entries(db, payload)
     for kind, identity_column, core_row, entry in prepared:
@@ -174,3 +184,4 @@ def seed_content_defaults(db, now):
             actor=SEED_SOURCE,
             now=instant,
         )
+    seed_scenario_public_inputs(db)

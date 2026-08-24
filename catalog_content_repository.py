@@ -1,7 +1,10 @@
 """Read models and transaction services for the core content catalog."""
 
 from dataclasses import dataclass
+from html import unescape
 import json
+from numbers import Real
+import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -254,7 +257,18 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
         "FROM scenarios s JOIN content_groups g ON g.scenario_id=s.id "
         "JOIN content_items ci ON ci.content_group_id=g.id",
     ]
-    conditions = ["s.status='published'", clause]
+    conditions = [
+        "s.status='published'", clause,
+        "EXISTS (SELECT 1 FROM scenario_branches visible_branch "
+        "JOIN industry_branches visible_industry_branch ON visible_industry_branch.id=visible_branch.industry_branch_id "
+        "JOIN industries visible_industry ON visible_industry.id=visible_industry_branch.industry_id "
+        "WHERE visible_branch.scenario_id=s.id AND visible_industry_branch.status='published' "
+        "AND visible_industry.status='published' AND trim(visible_industry.name)<>'')",
+        "EXISTS (SELECT 1 FROM scenario_departments visible_department_link "
+        "JOIN departments visible_department ON visible_department.id=visible_department_link.department_id "
+        "WHERE visible_department_link.scenario_id=s.id AND visible_department.status='published' "
+        "AND trim(visible_department.name)<>'')",
+    ]
     parameters = list(arguments)
     if filters.industry:
         joins.append("JOIN scenario_branches filter_branch ON filter_branch.scenario_id=s.id "
@@ -353,7 +367,8 @@ def _public_block(row):
     ):
         return None
     if block_type == "image_text" and (
-        settings["alignment"] not in {"left", "right"}
+        type(settings["alignment"]) is not str
+        or settings["alignment"] not in {"left", "right"}
         or type(settings["alt_text"]) is not str
     ):
         return None
@@ -404,9 +419,12 @@ def _services_for_scenario(db, scenario_id):
     result = []
     for row in rows:
         values = dict(row)
-        values["steps"] = tuple(json.loads(values.pop("implementation_steps_json") or "[]"))
-        values["prerequisites"] = tuple(json.loads(values.pop("prerequisites_json") or "[]"))
-        values["acceptance"] = tuple(json.loads(values.pop("acceptance_json") or "[]"))
+        try:
+            values["steps"] = tuple(json.loads(values.pop("implementation_steps_json") or "[]"))
+            values["prerequisites"] = tuple(json.loads(values.pop("prerequisites_json") or "[]"))
+            values["acceptance"] = tuple(json.loads(values.pop("acceptance_json") or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            return ()
         values["deliverables"] = _names(
             db, "SELECT title FROM service_deliverables WHERE service_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)
         )
@@ -414,9 +432,52 @@ def _services_for_scenario(db, scenario_id):
     return tuple(result)
 
 
+def _nonblank_values(values):
+    return bool(values) and all(type(value) is str and value.strip() for value in values)
+
+
+def _valid_range(minimum, maximum):
+    return (
+        type(minimum) is not bool and type(maximum) is not bool
+        and isinstance(minimum, Real) and isinstance(maximum, Real)
+        and minimum > 0 and minimum <= maximum
+    )
+
+
+def _meaningful_blocks(blocks):
+    return bool(blocks) and any(
+        type(block["body_html"]) is str
+        and unescape(re.sub(r"<[^>]*>", "", block["body_html"])).strip()
+        for block in blocks
+    )
+
+
+def _valid_services(services):
+    if not services:
+        return False
+    for service in services:
+        if (
+            type(service["public_name"]) is not str or not service["public_name"].strip()
+            or not _valid_range(service["min_budget"], service["max_budget"])
+            or not _valid_range(service["min_weeks"], service["max_weeks"])
+            or not _nonblank_values(service["steps"])
+            or not _nonblank_values(service["prerequisites"])
+            or not _nonblank_values(service["acceptance"])
+            or not _nonblank_values(service["deliverables"])
+        ):
+            return False
+    return True
+
+
 def _scenario_authority(db, scenario_id):
     row = db.execute("SELECT * FROM scenarios WHERE id=? AND status='published'", (scenario_id,)).fetchone()
     if row is None:
+        return None
+    try:
+        risk_codes = tuple(json.loads(row["risk_codes_json"]))
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not all(type(code) is str for code in risk_codes):
         return None
     return ScenarioAuthority(
         scenario_id=row["id"], code=row["code"], category_code=row["category_code"],
@@ -424,15 +485,14 @@ def _scenario_authority(db, scenario_id):
         minimum_data=row["minimum_data"], minimum_systems=row["minimum_systems"],
         minimum_organization=row["minimum_organization"], minimum_delivery=row["minimum_delivery"],
         integration_level=row["integration_level"], min_weeks=row["min_weeks"], max_weeks=row["max_weeks"],
-        risk_codes=tuple(json.loads(row["risk_codes_json"])), fallback_only=bool(row["fallback_only"]),
+        risk_codes=risk_codes, fallback_only=bool(row["fallback_only"]),
     )
 
 
-def _scenario_inputs(db, scenario_id):
+def _scenario_inputs(db, content_id):
     return _names(
         db, "SELECT input_text FROM scenario_public_inputs "
-        "WHERE scenario_id=? AND status='published' AND trim(input_text)<>'' "
-        "ORDER BY sort_order,id", (scenario_id,)
+        "WHERE content_item_id=? AND trim(input_text)<>'' ORDER BY sort_order,id", (content_id,)
     )
 
 
@@ -493,9 +553,10 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         if authority is None:
             return None
         services = _services_for_scenario(db, authority.scenario_id)
+        blocks = _blocks(db, item["id"])
         departments = _names(db, "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id", (authority.scenario_id,))
         pains = _names(db, "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id", (authority.scenario_id,))
-        inputs = _scenario_inputs(db, authority.scenario_id)
+        inputs = _scenario_inputs(db, item["id"])
         prerequisites = tuple(value for service in services for value in service["prerequisites"])
         outputs = tuple(value for service in services for value in service["deliverables"])
         steps = tuple(value for service in services for value in service["steps"])
@@ -506,18 +567,26 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         risks = _public_risks(authority)
         timeline = tuple((service["min_weeks"], service["max_weeks"]) for service in services)
         budget = tuple((service["min_budget"], service["max_budget"]) for service in services)
+        industries = _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id", (authority.scenario_id,))
+        maturity_codes = _names(db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],))
         if not all((
-            services, departments, inputs, prerequisites, outputs, steps, metrics, risks,
-            timeline, budget,
+            industries, departments, _nonblank_values(industries), _nonblank_values(departments),
+            (not pains or _nonblank_values(pains)), _nonblank_values(inputs),
+            _meaningful_blocks(blocks), _valid_services(services), prerequisites, outputs, steps,
+            _nonblank_values(prerequisites), _nonblank_values(outputs), _nonblank_values(steps),
+            _nonblank_values(tuple(metric["value"] for metric in metrics)), risks,
+            all(_nonblank_values((risk["label"], risk["description"])) for risk in risks),
+            maturity_codes, all(code in MATURITY_LABELS for code in maturity_codes), timeline, budget,
+            all(_valid_range(*value) for value in timeline), all(_valid_range(*value) for value in budget),
         )):
             return None
         return MappingProxyType({
             "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
-            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": _blocks(db, item["id"]),
-            "industries": _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id", (authority.scenario_id,)),
+            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": blocks,
+            "industries": industries,
             "departments": departments,
             "pains": pains,
-            "maturity": tuple(MATURITY_LABELS[code] for code in _names(db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],))),
+            "maturity": tuple(MATURITY_LABELS[code] for code in maturity_codes),
             "services": services,
             "prerequisites": prerequisites,
             "inputs": inputs,

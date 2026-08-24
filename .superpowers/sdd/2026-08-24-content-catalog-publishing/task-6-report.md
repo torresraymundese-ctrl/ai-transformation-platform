@@ -216,3 +216,75 @@ The first post-freeze public partition initially reported `202 passed, 1 failed 
 Correction: the retained final public partition result is `203 passed in 104.80s (0:01:44)`, `PYTEST_EXIT=0`. The first related partition finished `4 failed, 191 passed in 66.16s`, `PYTEST_EXIT=1`; the failures were three generic scenario publishing fixtures that lacked the now-required nonblank narrative plus a `006` migration expectation. The fixtures now use shared complete-scenario narrative data and migration/schema assertions include `007`; the exact targeted GREEN was `4 passed in 2.10s` with `pytest-task6-fix1b-green-related-targeted-001`.
 
 `pytest-task6-fix1b-related-002` was started after that correction but the host retained only progress beyond 36%; its terminal summary and exit are irretrievable. It is explicitly UNKNOWN and was not rerun. Controller-side fresh offline related-partition verification is required; no PASS claim is made for `related-002`.
+
+## Fix1c — revision-bound scenario inputs and semantic fail-closed correction
+
+**Status: DONE_WITH_CONCERNS.** This Task-6-only correction preserves the original full-suite outcome as UNKNOWN and the historical PyPI-network violation above.  No full suite, network access, installation, production server, Nginx, or real database was used.
+
+### Implementation scope
+
+- `007_scenario_public_inputs` is still unreleased and now binds input rows to `content_item_id`, with a content-item FK, revision/order unique constraint and draft-parent immutability triggers.  `copy_revision` atomically copies those server-owned rows.  The content seed is fully validated before writes, targets only the currently frozen draft revision, is idempotent, and does not overwrite an operator-edited draft input.
+- Scenario publication requires revision-owned nonblank inputs, meaningful sanitized narrative HTML, valid risks/ranges/lists/services/deliverables, and published nonblank core associations.  Historical archived deliverables do not block a valid published replacement.
+- Public reads reject malformed JSON, blank core names, empty narrative, invalid ranges/lists, missing maturity/inputs/services/risks and no-longer-visible required industry/department data with private 404.  Archived associations are omitted when another valid value remains; list queries exclude cards that would otherwise lead to a detail lacking a required industry or department.
+- The public block projection rejects non-string image alignment before set membership.  Filter parsing accepts only currently published industry/department codes.
+
+### TDD and offline evidence
+
+All Fix1c pytest commands used the assigned project interpreter, `PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps` (offline pypdf 6.10.0 overlay), `-p no:cacheprovider`, and a fresh `pytest-task6-fix1c-*` basetemp.
+
+Initial revision-binding transition RED:
+
+```text
+pytest-task6-fix1c-red-revision-inputs-001
+2 failed, 44 passed in 27.47s
+```
+
+The old tests addressed the removed stable-key/status columns.  After updating them to damage only the copied draft revision, the formal immediate/due publication guards were GREEN:
+
+```text
+pytest-task6-fix1c-green-revision-inputs-001
+12 passed in 7.44s
+```
+
+The image-alignment type RED was `1 failed, 4 passed in 0.30s` (`pytest-task6-fix1c-red-alignment-001`); the exact-type GREEN was `5 passed in 0.09s` (`pytest-task6-fix1c-green-alignment-001`).  The semantic read-time matrix RED was `7 failed in 4.23s`: invalid steps, acceptance, budget, blank core name and whitespace-only narrative returned 200, and malformed service JSON raised a 500.  The implementation subsequently made those cases private 404s.
+
+Additional seed/schema RED exposed the intended new FK in old test teardown: `7 passed, 26 errors in 17.38s`; the shared cleanup now removes revision-owned input rows before content items.  Seed and migration GREEN:
+
+```text
+pytest-task6-fix1c-green-seed-migrations-007
+33 passed in 17.55s
+TASK6_PYTEST_EXIT=0
+```
+
+The related publishing fixture RED was `4 failed, 30 passed in 22.78s`: four generic publishing tests created scenario revisions without required revision-owned inputs.  A shared complete-scenario fixture now inserts the server-owned draft input without weakening the invariant.  Its exact targeted GREEN:
+
+```text
+pytest-task6-fix1c-green-fixtures-targeted-003
+4 passed in 3.83s
+TASK6_PYTEST_EXIT=0
+```
+
+The last standalone public focused retry emitted 53 passing progress dots with no `F`/`E`, but the host omitted its final pytest summary and target exit marker.  Per instruction it was not rerun and is recorded UNKNOWN, not PASS.
+
+### Required partitions and static checks
+
+The public/analytics/cache/smoke partition was started once with `pytest-task6-fix1c-public-analytics-cache-smoke-001`; its process ended naturally but the host retained only progress dots and no final summary/exit marker.  It is UNKNOWN and was not rerun.  The related content/security/media partition was started once with `pytest-task6-fix1c-related-content-security-001`; it exposed the four generic scenario-fixture failures documented above.  It was not rerun after the targeted fixture GREEN, per the one-run instruction; controller-side fresh offline partition verification remains required.
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile catalog_content_repository.py publishing_repository.py publishing_service.py content_seed.py tests\\test_public_catalog.py tests\\test_content_seed.py tests\\test_content_migrations.py tests\\test_content_publishing.py
+exit: 0
+
+git diff --check
+exit: 0
+
+rg -n '\\b(execute|executemany|executescript|cursor)\\s*\\(' blueprints\\public_catalog.py
+BLUEPRINT_DIRECT_SQL_GUARD=PASS (no matches)
+```
+
+### Changed files and self-review
+
+- `catalog_content_repository.py`, `publishing_repository.py`, `publishing_service.py`, `content_seed.py`, and `migrations/007_scenario_public_inputs.sql`
+- `tests/test_public_catalog.py`, `tests/test_content_seed.py`, `tests/test_content_migrations.py`, and `tests/test_content_publishing.py`
+- this report
+
+Reviewed: exact revision ownership/order/immutability; transactional copy and due publication; nonblank/numeric/JSON fail-closed checks; live versus archived association handling; published-code filter parsing; exact block scalar handling; no direct Blueprint SQL; and public card/detail consistency for required relations.  Known limitations remain the original full-suite UNKNOWN, the historical dependency-network violation, and the two Fix1c partition outcomes above requiring fresh controller verification.

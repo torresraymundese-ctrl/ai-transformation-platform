@@ -1,8 +1,10 @@
 """SQLite repository for content aggregates; caller owns every transaction."""
 
 from dataclasses import replace
+from html import unescape
 import json
 from numbers import Real
+import re
 import sqlite3
 
 from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
@@ -461,6 +463,12 @@ def _valid_range(minimum, maximum):
     )
 
 
+def _meaningful_html(value):
+    return type(value) is str and bool(
+        unescape(re.sub(r"<[^>]*>", "", value)).strip()
+    )
+
+
 def _scenario_source_rows(db, scenario_id):
     return db.execute(
         "SELECT s.*,svc.id AS service_id,svc.public_name AS service_name,svc.min_budget,svc.max_budget,"
@@ -492,30 +500,26 @@ def _validate_scenario_publication(db, content_id, draft):
         ("SELECT 1 FROM scenario_branches WHERE scenario_id=?",
          "SELECT 1 FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
          "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
-         "AND (ib.status<>'published' OR i.status<>'published')"),
+         "AND (ib.status<>'published' OR i.status<>'published' OR trim(i.name)='')"),
         ("SELECT 1 FROM scenario_departments WHERE scenario_id=?",
          "SELECT 1 FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
-         "WHERE link.scenario_id=? AND d.status<>'published'"),
-        ("SELECT 1 FROM scenario_pains WHERE scenario_id=?",
+         "WHERE link.scenario_id=? AND (d.status<>'published' OR trim(d.name)='')"),
+        ("SELECT 1 WHERE ? IS NOT NULL",
          "SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
-         "WHERE link.scenario_id=? AND p.status<>'published'"),
-        ("SELECT 1 FROM scenario_public_inputs WHERE scenario_id=? AND status='published' "
-         "AND trim(input_text)<>''",
-         "SELECT 1 FROM scenario_public_inputs WHERE scenario_id=? "
-         "AND (status<>'published' OR trim(input_text)='')"),
+         "WHERE link.scenario_id=? AND (p.status<>'published' OR trim(p.name)='')"),
+        ("SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? AND trim(input_text)<>''",
+         "SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? AND trim(input_text)=''"),
         ("SELECT 1 FROM content_maturity_levels WHERE content_item_id=?",
          "SELECT 1 FROM content_maturity_levels WHERE content_item_id=? "
          "AND (maturity_code NOT IN ('explore','pilot','scale','collaborate'))"),
     )
     if any(
-        db.execute(valid, (scenario_id if index < 4 else content_id,)).fetchone() is None
-        or db.execute(invalid, (scenario_id if index < 4 else content_id,)).fetchone() is not None
+        db.execute(valid, (scenario_id if index < 3 else content_id,)).fetchone() is None
+        or db.execute(invalid, (scenario_id if index < 3 else content_id,)).fetchone() is not None
         for index, (valid, invalid) in enumerate(relation_checks)
     ):
         raise ContentValidationError("scenario_public_incomplete")
-    if not draft.blocks or not any(
-        type(block.body_html) is str and block.body_html.strip() for block in draft.blocks
-    ):
+    if not draft.blocks or not any(_meaningful_html(block.body_html) for block in draft.blocks):
         raise ContentValidationError("scenario_public_incomplete")
     for service in rows:
         if (
@@ -538,11 +542,6 @@ def _validate_scenario_publication(db, content_id, draft):
             "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
             "AND trim(title)<>''", (service["service_id"],)
         ).fetchone() is None:
-            raise ContentValidationError("scenario_public_incomplete")
-        if db.execute(
-            "SELECT 1 FROM service_deliverables WHERE service_id=? "
-            "AND (status<>'published' OR trim(title)='')", (service["service_id"],)
-        ).fetchone() is not None:
             raise ContentValidationError("scenario_public_incomplete")
 
 

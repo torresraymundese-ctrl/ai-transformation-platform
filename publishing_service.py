@@ -84,13 +84,21 @@ def copy_revision(content_id: int, *, actor: str, now=None) -> int:
                 extension[column] = None
             draft = replace(draft, extension=extension)
         draft = replace(draft, publish_at=None)
-        return repository._insert_content_draft(
+        copied_id = repository._insert_content_draft(
             db,
             draft,
             actor=actor,
             now=instant,
             event_code="content_revision_copied",
         )
+        if draft.entry_type == "scenario":
+            db.execute(
+                "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) "
+                "SELECT ?,input_text,sort_order FROM scenario_public_inputs "
+                "WHERE content_item_id=? ORDER BY sort_order,id",
+                (copied_id, content_id),
+            )
+        return copied_id
 
     return _write_transaction(operation)
 

@@ -64,6 +64,7 @@ def _remove_task5_seed_aggregates(db):
     item_marks = ",".join("?" for _ in item_ids)
     for table, owner in (
         ("content_maturity_levels", "content_item_id"),
+        ("scenario_public_inputs", "content_item_id"),
         ("content_blocks", "content_item_id"),
         ("industry_content", "content_item_id"),
         ("scenario_content", "content_item_id"),
@@ -397,7 +398,7 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
             "settings_json", "media_asset_id", "sort_order",
         },
         "scenario_public_inputs": {
-            "id", "scenario_id", "input_text", "status", "sort_order",
+            "id", "content_item_id", "input_text", "sort_order",
         },
         "industry_content": {"id", "content_item_id", "industry_id"},
         "scenario_content": {"id", "content_item_id", "scenario_id"},
@@ -484,6 +485,9 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
             ("content_item_id", "content_items", "id", "NO ACTION"),
             ("media_asset_id", "media_assets", "id", "NO ACTION"),
         },
+        "scenario_public_inputs": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+        },
         "industry_content": {
             ("content_item_id", "content_items", "id", "NO ACTION"),
             ("industry_id", "industries", "id", "NO ACTION"),
@@ -567,9 +571,12 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         ("content_items", "one_public_slug_per_type"): (
             1, 1, ("entry_type", "slug"), "where status = 'published'",
         ),
-        ("content_items", "content_items_group_status"): (
-            0, 0, ("content_group_id", "status"), None,
-        ),
+            ("content_items", "content_items_group_status"): (
+                0, 0, ("content_group_id", "status"), None,
+            ),
+            ("scenario_public_inputs", "scenario_public_inputs_revision_order"): (
+                0, 0, ("content_item_id", "sort_order", "id"), None,
+            ),
     }
     for (table, name), (unique, partial, index_columns, predicate) in expected_indexes.items():
         assert named_index(db, table, name) == (unique, partial, index_columns)
@@ -639,7 +646,10 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         "protect_case_metrics_delete",
         "protect_content_maturity_insert",
         "protect_content_maturity_update",
-        "protect_content_maturity_delete",
+            "protect_content_maturity_delete",
+            "protect_scenario_public_inputs_insert",
+            "protect_scenario_public_inputs_update",
+            "protect_scenario_public_inputs_delete",
         "protect_scenario_cases_insert",
         "protect_scenario_cases_update",
         "protect_scenario_cases_delete",

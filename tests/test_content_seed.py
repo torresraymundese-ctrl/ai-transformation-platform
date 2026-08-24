@@ -3,10 +3,12 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+import content_seed
 import models
+import pytest
 from assessment.seed import load_core_catalog_manifest
 from content_clock import SHANGHAI
-from content_seed import CATALOG_SEED_PATH, seed_content_defaults
+from content_seed import CATALOG_SEED_PATH, ContentSeedError, seed_content_defaults
 
 
 NOW = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
@@ -110,3 +112,33 @@ def test_seed_never_revives_archive_or_creates_a_second_draft(db):
         (item["content_group_id"],),
     ).fetchall()
     assert [row["status"] for row in states] == ["archived"]
+
+
+def test_scenario_input_seed_prevalidates_every_entry_before_inserting(db, monkeypatch):
+    payload = content_seed.load_scenario_input_seed()
+    payload["scenarios"][-1]["inputs"] = [" "]
+    before = db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0]
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    with pytest.raises(ContentSeedError, match="scenario input seed values are invalid"):
+        content_seed.seed_scenario_public_inputs(db)
+
+    assert db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0] == before
+
+
+def test_scenario_input_seed_is_idempotent_and_preserves_draft_operator_input(db):
+    draft = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
+    ).fetchone()[0]
+    db.execute(
+        "UPDATE scenario_public_inputs SET input_text='运营审核后的输入' "
+        "WHERE content_item_id=? AND sort_order=0", (draft,)
+    )
+    db.commit()
+
+    seed_content_defaults(db, now=NOW)
+
+    assert db.execute(
+        "SELECT input_text FROM scenario_public_inputs WHERE content_item_id=? AND sort_order=0", (draft,)
+    ).fetchone()[0] == "运营审核后的输入"

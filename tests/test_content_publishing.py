@@ -64,6 +64,7 @@ def _remove_task5_seed_aggregates(db):
         ("industry_cases", "industry_content_item_id"),
         ("industry_resources", "industry_content_item_id"),
         ("content_maturity_levels", "content_item_id"),
+        ("scenario_public_inputs", "content_item_id"),
         ("content_blocks", "content_item_id"),
         ("industry_content", "content_item_id"),
         ("scenario_content", "content_item_id"),
@@ -212,10 +213,21 @@ def _ready_media(db, storage_name="ready-media.pdf", mime="application/pdf"):
 
 def _complete_scenario_draft(draft):
     """Give generic publishing tests the minimum public scenario narrative."""
-    return replace(
-        draft,
-        blocks=(ContentBlock("rich_text", body_html="<p>完整公开场景说明。</p>"),),
+    if draft.blocks:
+        return draft
+    return replace(draft, blocks=(ContentBlock("rich_text", body_html="<p>完整公开场景说明。</p>"),))
+
+
+def _create_complete_scenario_draft(db, draft, *, actor="admin"):
+    """Create a scenario aggregate that includes server-owned public inputs."""
+    content_id = create_content_draft(_complete_scenario_draft(draft), actor=actor, now=NOW)
+    db.execute(
+        "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) "
+        "VALUES (?,'受控测试输入',0)",
+        (content_id,),
     )
+    db.commit()
+    return content_id
 
 
 def _refresh_source(db, content_id, *, expected_lock_version=1, now=NOW):
@@ -280,7 +292,7 @@ def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
             "SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 2"
         )
     ]
-    first = _complete_scenario_draft(ContentDraft(
+    first = ContentDraft(
         entry_type="scenario",
         slug="identity-one",
         title="稳定场景身份",
@@ -289,8 +301,8 @@ def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
         seo_description="验证内容组和场景核心身份之间的稳定约束。",
         extension={"scenario_id": scenario_ids[0]},
         maturity_codes=("explore",),
-    ))
-    first_id = create_content_draft(first, actor="admin", now=NOW)
+    )
+    first_id = _create_complete_scenario_draft(db, first)
     publish_content(first_id, 1, actor="admin", now=NOW)
     group_id = _row(db, first_id)["content_group_id"]
     mismatched = replace(
@@ -368,7 +380,7 @@ def test_copy_preserves_media_maturity_and_relations(db):
         relations=(ContentRelation("scenario_resource", target_group),),
         maturity_codes=("explore", "pilot"),
     )
-    original = create_content_draft(aggregate, actor="admin", now=NOW)
+    original = _create_complete_scenario_draft(db, aggregate)
     publish_content(original, 1, actor="admin", now=NOW)
 
     copied_id = copy_revision(original, actor="admin", now=NOW)
@@ -598,7 +610,7 @@ def test_due_failure_is_isolated_and_records_only_safe_reason(db):
     scenario_id = db.execute(
         "SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 1"
     ).fetchone()[0]
-    owner = _complete_scenario_draft(ContentDraft(
+    owner = ContentDraft(
         entry_type="scenario",
         slug="due-owner",
         title="定时场景内容",
@@ -608,8 +620,8 @@ def test_due_failure_is_isolated_and_records_only_safe_reason(db):
         extension={"scenario_id": scenario_id},
         relations=(ContentRelation("scenario_resource", target_group, 0),),
         maturity_codes=("pilot",),
-    ))
-    invalid = create_content_draft(owner, actor="admin", now=NOW)
+    )
+    invalid = _create_complete_scenario_draft(db, owner)
     valid = create_content_draft(_announcement("due-valid"), actor="admin", now=NOW)
     due = NOW + timedelta(hours=1)
     schedule_content(invalid, 1, due, actor="admin", now=NOW)
@@ -1055,9 +1067,11 @@ def test_all_six_relation_types_survive_revision_copy(db):
             relations=(ContentRelation(relation_type, target_group),),
             maturity_codes=("explore",) if owner_type == "scenario" else (),
         )
-        if owner_type == "scenario":
-            draft = _complete_scenario_draft(draft)
-        original = create_content_draft(draft, actor="admin", now=NOW)
+        original = (
+            _create_complete_scenario_draft(db, draft)
+            if owner_type == "scenario"
+            else create_content_draft(draft, actor="admin", now=NOW)
+        )
         publish_content(original, 1, actor="admin", now=NOW)
         copied_id = copy_revision(original, actor="admin", now=NOW)
         copied = publishing_repository.load_content_draft(db, copied_id)
