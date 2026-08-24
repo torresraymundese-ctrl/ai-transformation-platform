@@ -218,8 +218,10 @@ def test_public_base_url_is_required_https_origin(tmp_path, monkeypatch):
     "https://example.test:bad",
     "https://:443",
     "https://example.test:0",
+    "https://example.test:",
+    "https://[2001:db8::1]:",
     "https://example.test\n",
-), ids=("empty-query", "empty-fragment", "bad-port", "empty-host", "zero-port", "control"))
+), ids=("empty-query", "empty-fragment", "bad-port", "empty-host", "zero-port", "empty-dns-port", "empty-ipv6-port", "control"))
 def test_public_base_url_rejects_noncanonical_https_origins(tmp_path, monkeypatch, value):
     """Catch parser normalization that accepts an input other than a strict origin."""
     monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
@@ -251,13 +253,34 @@ def test_public_base_url_rejects_invalid_hostname_shape(tmp_path, monkeypatch, v
 
 
 @pytest.mark.parametrize("value", (
+    "https://exam\u034fple.test",
+    "https://[v1.example]",
+    "https://xn--a.test",
+    "https://[fe80::1%25en0]",
+    "https://example.test:0443",
+), ids=("idna-maps-nothing", "ipvfuture", "invalid-a-label", "ipv6-zone", "leading-zero-port"))
+def test_public_base_url_rejects_ambiguous_authority_forms(tmp_path, monkeypatch, value):
+    """Catch loose urlsplit authority parsing that cannot form a strict HTTPS origin."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    with pytest.raises(ValueError):
+        app_module.create_app({
+            "TESTING": False,
+            "SECRET_KEY": "test",
+            "PUBLIC_BASE_URL": value,
+            "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+        })
+
+
+@pytest.mark.parametrize("value", (
     "https://example.test",
     "https://example.test:1",
+    "https://example.test:443",
     "https://example.test:8443",
     "https://example.test:65535",
     "https://[2001:db8::1]:8443",
     "https://192.0.2.1:8443",
     "https://例子.测试",
+    "https://xn--fsqu00a.xn--0zwm56d",
 ))
 def test_public_base_url_accepts_exact_https_origins(tmp_path, monkeypatch, value):
     monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)

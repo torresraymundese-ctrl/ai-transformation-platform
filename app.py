@@ -144,28 +144,81 @@ def media_download_url(asset_id):
     return url_for("media.published_download", asset_id=asset_id)
 
 
-def _valid_public_hostname(hostname):
-    """Validate a configured origin host without resolving or contacting it."""
-    if type(hostname) is not str or not hostname:
-        return False
+def _validated_dns_idn_host(raw_host):
+    """Return a non-lossy DNS/IDN host spelling, without resolving it."""
     try:
-        ipaddress.ip_address(hostname)
-        return True
-    except ValueError:
-        pass
-    try:
-        ascii_hostname = hostname.encode("idna").decode("ascii").lower()
+        ascii_host = raw_host.encode("idna").decode("ascii")
+        decoded_host = ascii_host.encode("ascii").decode("idna")
+        reencoded_host = decoded_host.encode("idna").decode("ascii")
     except UnicodeError:
-        return False
+        return None
     if (
-        not ascii_hostname or len(ascii_hostname) > 253
-        or ascii_hostname.startswith(".") or ascii_hostname.endswith(".")
+        raw_host != (ascii_host if raw_host.isascii() else decoded_host)
+        or ascii_host != reencoded_host
+        or any(unicodedata.category(character).startswith("C") for character in decoded_host)
+        or not ascii_host or len(ascii_host) > 253
+        or ascii_host.startswith(".") or ascii_host.endswith(".")
     ):
-        return False
-    return all(
+        return None
+    if not all(
         1 <= len(label) <= 63 and _HOST_LABEL.fullmatch(label)
-        for label in ascii_hostname.split(".")
-    )
+        for label in ascii_host.split(".")
+    ):
+        return None
+    return raw_host
+
+
+def _strict_public_authority(raw_netloc):
+    """Validate and reconstruct a literal public-origin authority locally."""
+    if type(raw_netloc) is not str or not raw_netloc or "@" in raw_netloc:
+        return None
+    if raw_netloc.startswith("["):
+        closing = raw_netloc.find("]")
+        if closing < 2:
+            return None
+        raw_host = raw_netloc[1:closing]
+        remainder = raw_netloc[closing + 1:]
+        if remainder:
+            if not remainder.startswith(":"):
+                return None
+            remainder = remainder[1:]
+        else:
+            remainder = None
+        if "%" in raw_host:
+            return None
+        try:
+            host = f"[{ipaddress.IPv6Address(raw_host)}]"
+        except ValueError:
+            return None
+    else:
+        if "[" in raw_netloc or "]" in raw_netloc:
+            return None
+        raw_host, separator, remainder = raw_netloc.rpartition(":")
+        if not separator:
+            raw_host, remainder = raw_netloc, None
+        elif not raw_host or ":" in raw_host:
+            return None
+        try:
+            host = str(ipaddress.IPv4Address(raw_host))
+            if host != raw_host:
+                return None
+        except ValueError:
+            if re.fullmatch(r"[0-9.]+", raw_host):
+                return None
+            host = _validated_dns_idn_host(raw_host)
+            if host is None:
+                return None
+    if remainder is None:
+        return host
+    if (
+        not remainder or not remainder.isascii() or not remainder.isdecimal()
+        or (len(remainder) > 1 and remainder.startswith("0"))
+    ):
+        return None
+    port = int(remainder, 10)
+    if not 1 <= port <= 65535 or str(port) != remainder:
+        return None
+    return f"{host}:{port}"
 
 
 def _strict_public_base_url(value):
@@ -176,15 +229,14 @@ def _strict_public_base_url(value):
         raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
     try:
         parts = urlsplit(value)
-        port = parts.port
     except ValueError as error:
         raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin") from error
-    origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    authority = _strict_public_authority(parts.netloc)
+    origin = urlunsplit(("https", authority or "", "", "", ""))
     if (
-        parts.scheme != "https" or not parts.netloc
-        or not _valid_public_hostname(parts.hostname)
+        parts.scheme != "https" or authority is None
         or parts.username is not None or parts.password is not None
-        or port == 0 or parts.path or parts.query or parts.fragment or value != origin
+        or parts.path or parts.query or parts.fragment or value != origin
     ):
         raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
     return origin

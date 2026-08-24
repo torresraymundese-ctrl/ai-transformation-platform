@@ -389,6 +389,36 @@ def test_admin_publish_heading_without_title_renders_its_safe_body_without_none(
     assert document.select('[data-content-block="heading"]') == []
 
 
+def test_admin_publish_whitespace_heading_title_keeps_body_without_an_empty_heading(admin_client, db):
+    """Catch a truthy whitespace title creating an empty public heading element."""
+    item = _first(db)
+    response = admin_client.post(
+        f"/admin/catalog/scenario/{item['scenario_id']}",
+        data=_valid_form(
+            item,
+            action="publish",
+            **{
+                "blocks-0-type": "heading",
+                "blocks-0-title": "   ",
+                "blocks-0-body": "<p>WHITESPACE-HEADING-BODY</p>",
+                "blocks-0-heading_level": "2",
+            },
+        ),
+    )
+
+    assert response.status_code == 302
+    assert db.execute(
+        "SELECT title FROM content_blocks WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1",
+        (item["id"],),
+    ).fetchone()[0] == "   "
+    public = admin_client.get(f"/scenarios/{item['slug']}")
+    document = BeautifulSoup(public.data, "html.parser")
+    assert public.status_code == 200
+    assert b"WHITESPACE-HEADING-BODY" in public.data
+    assert b">None<" not in public.data
+    assert document.select('[data-content-block="heading"]') == []
+
+
 def test_save_rejects_media_outside_ready_choices_without_mutation(admin_client, db):
     item = _first(db)
     pending_id = _pending_media(db)

@@ -1303,3 +1303,109 @@ this report-only append.
 The original full-suite outcome remains **UNKNOWN** and was not rerun. The
 historical PyPI-network violation remains **CONFIRMED**, and the frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1i — strict origin authority and whitespace heading visibility
+
+Fix1i began from clean baseline
+`10b05f25f7144f5ac3d06377699122a66e5eff00`. It made no Task 7 change and
+used only local Flask clients and temporary SQLite databases. No full suite,
+network access, dependency installation, production server, Nginx, or real
+database was used.
+
+The assigned interpreter and explicitly process-scoped offline overlay were:
+
+```text
+interpreter=D:\...\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe
+python=3.12.13
+PYTHONPATH=D:\...\core-assessment-report\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps
+pypdf=6.10.0
+```
+
+### TDD evidence
+
+Before Fix1i production edits, the authority/heading behavior RED was run with
+the assigned interpreter, `-p no:cacheprovider`, and unique basetemp
+`pytest-task6-fix1i-red-authority-heading-001`:
+
+```text
+tests/test_public_catalog.py::test_public_base_url_rejects_noncanonical_https_origins
+tests/test_public_catalog.py::test_public_base_url_rejects_ambiguous_authority_forms
+tests/test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+tests/test_catalog_content_admin.py::test_admin_publish_heading_without_title_renders_its_safe_body_without_none
+tests/test_catalog_content_admin.py::test_admin_publish_whitespace_heading_title_keeps_body_without_an_empty_heading
+8 failed, 16 passed in 3.04s
+tool exit_code=1
+```
+
+The failures proved that empty DNS/IPv6 ports, U+034F IDNA loss, IPvFuture,
+invalid A-labels, IPv6 zones, and a noncanonical leading-zero port passed the
+old configured-origin check; the admin publish-to-public HTTP flow also emitted
+an empty heading for a whitespace-only title.
+
+The first GREEN attempt (`pytest-task6-fix1i-green-authority-heading-002`)
+exposed one implementation defect: the valid bracketed IPv6 `:8443` suffix was
+not stripped before decimal-port validation (`1 failed, 28 passed in 2.09s`,
+exit 1). The narrow correction was made before continuing. The complete GREEN
+then returned:
+
+```text
+pytest-task6-fix1i-green-authority-heading-003
+29 passed in 1.93s
+tool exit_code=0
+
+pytest-task6-fix1i-public-admin-004
+5 passed in 3.41s
+tool exit_code=0
+```
+
+The configured-origin boundary now parses the raw authority locally and
+reconstructs it exactly: empty/noncanonical ports are rejected; bracketed hosts
+must be literal zone-free IPv6; DNS/IDN labels require encode, decode, and
+re-encode validation with lossless Unicode spelling; IPvFuture and invalid
+A-labels are rejected. It makes no DNS lookup or global-address decision and
+still never derives public origins from Host/X-Forwarded-Host. Valid Unicode
+IDN, punycode, IPv4, IPv6, and ports 1/443/8443/65535 remain covered.
+
+Optional block titles remain stored raw. Public rendering now suppresses only
+titles whose Python `strip()` is empty, uniformly across the existing optional
+title slots; meaningful body HTML retains its existing sanitization path. The
+real admin POST test proves a whitespace heading has no empty heading element
+while its safe body remains visible.
+
+After code freeze, the required responsibility set ran once with a fresh,
+unique basetemp and direct retained tool result:
+
+```text
+pytest-task6-fix1i-responsibility-final-005
+tests/test_public_catalog.py tests/test_catalog_content_admin.py tests/test_content_seed.py tests/test_content_migrations.py tests/test_app_factory_and_migrations.py tests/test_content_publishing.py tests/test_content_validation.py tests/test_media_service.py tests/test_media_http.py tests/test_v2_migrations.py
+517 passed in 238.35s (0:03:58)
+tool exit_code=0
+```
+
+### Static checks, scope review, and inventory
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile app.py tests\\test_public_catalog.py tests\\test_catalog_content_admin.py
+PYCOMPILE_EXIT=0
+
+git diff --check
+DIFF_CHECK_EXIT=0
+
+Blueprint direct-SQL guard: blueprints\\public_catalog.py = PASS
+Blueprint direct-SQL guard: blueprints\\admin\\catalog.py = PASS
+```
+
+Fix1i changed only:
+
+- `app.py`
+- `templates/components/content_blocks.html`
+- `tests/test_public_catalog.py`
+- `tests/test_catalog_content_admin.py`
+- this report
+
+Self-review confirmed no public read-model, publication, analytics,
+private-cache, media-MIME, frozen seed-data, visual-token, Task 7, ledger, or
+external task-card behavior was broadened. The sole historical full-suite
+outcome remains **UNKNOWN** and was not rerun; the historical PyPI-network
+violation remains **CONFIRMED**; the frozen `data_process_foundation`
+product-data limitation remains unchanged.
