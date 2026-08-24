@@ -35,3 +35,14 @@ def admin_client(client):
         session["admin_username"] = TEST_ADMIN_USERNAME
         session["csrf_token"] = "test-csrf-token"
     return client
+
+
+@pytest.fixture()
+def db(client):
+    """Open the client fixture's disposable database with foreign keys enabled."""
+    connection = models.get_db()
+    connection.execute("PRAGMA foreign_keys=ON")
+    try:
+        yield connection
+    finally:
+        connection.close()

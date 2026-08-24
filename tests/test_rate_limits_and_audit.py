@@ -107,15 +107,12 @@ def test_short_rate_limit_window_cannot_delete_an_active_long_window(
     assert client.post("/api/assessment", json=VALID_ASSESSMENT).status_code == 429
 
 
-def test_scrape_rate_limit_blocks_repeated_external_jobs(admin_client, monkeypatch):
-    """An administrator must not trigger unbounded external scrape jobs."""
-    import scraper
-
-    monkeypatch.setattr(scraper, "run_scraper", lambda: 0)
+def test_scrape_rate_limit_still_bounds_repeated_retired_ingestion_requests(admin_client):
+    """The retired endpoint must keep its existing request-rate boundary."""
     admin_client.application.config.update(SCRAPE_RATE_LIMIT=1, SCRAPE_RATE_WINDOW=3600)
     headers = {"X-CSRF-Token": "test-csrf-token"}
 
-    assert admin_client.post("/admin/scrape", headers=headers).status_code == 200
+    assert admin_client.post("/admin/scrape", headers=headers).status_code == 410
     blocked = admin_client.post("/admin/scrape", headers=headers)
 
     assert blocked.status_code == 429
