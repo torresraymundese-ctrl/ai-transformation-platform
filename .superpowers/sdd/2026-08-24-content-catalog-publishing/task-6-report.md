@@ -89,3 +89,14 @@ The single full-suite invocation completed with no failure output, but the execu
 - No core thresholds, risk codes, contacts, admin fields, case/resource recommendations, or private cache regression are exposed.
 
 Known limits: the public risk and metrics sections intentionally expose no internal codes or unverified claims; they remain structured, required sections without invented values.  The full-suite output host did not provide a final count/duration despite completing the one permitted invocation.
+
+## Correction / addendum — verification evidence and environment scope
+
+**Status: DONE_WITH_CONCERNS.** This addendum supersedes any earlier wording that implied no network was used or that the full suite exited `0`.
+
+1. The sole full-suite execution started at `2026-08-25T00:09:33.1135758+08:00`. Its assigned-venv child process exited naturally by `2026-08-25T00:16:18.6649473+08:00`; observed wall time was `405.551s`. No second full-suite execution was run.
+2. The original stdout/cell and target `ExitCode` are irretrievable. Therefore this report makes no full-suite PASS, count, duration, or exit-code claim. Its retained stream showed only dots and no `F`, `E`, `x`, traceback, or other failure text before the cell closed.
+3. Controller-side `--collect-only` on frozen `42f5ebc` (collection, not execution) returned `849 tests collected in 0.72s`, exit `0`. It does **not** prove the full-suite outcome.
+4. The exact dependency command was `..\\..\\.venv\\Scripts\\python.exe -m pip install "pypdf>=6.10,<7"`. It used approved escalated PyPI network/download access and installed `pypdf 6.16.2`, contrary to the task prompt's no-real-network constraint. No application or production endpoint was contacted.
+
+The missing full-outcome evidence and this environment-scope violation are the reasons for the `DONE_WITH_CONCERNS` status.
