@@ -140,6 +140,7 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
         return None
     if parsed.username is not None or parsed.password is not None:
         return None
+    bracketed_literal = parsed.netloc.startswith("[")
     try:
         ascii_host = parsed.hostname.encode("idna").decode("ascii").lower()
     except UnicodeError:
@@ -149,6 +150,8 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
     try:
         ip = ipaddress.ip_address(ascii_host)
     except ValueError:
+        if bracketed_literal or re.fullmatch(r"[0-9.]+", ascii_host):
+            return None
         labels = ascii_host.split(".")
         if (
             len(ascii_host) > 253
@@ -157,7 +160,7 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
         ):
             return None
     else:
-        if not ip.is_global:
+        if not ip.is_global or (ip.version == 6 and not bracketed_literal):
             return None
         if ip.version == 6:
             ascii_host = f"[{ascii_host}]"

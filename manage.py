@@ -14,7 +14,13 @@ from models import init_db
 
 def _open_inventory_readonly():
     database_path = Path(models.DB_PATH).resolve(strict=True)
-    connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+    for suffix in ("-wal", "-journal"):
+        sidecar = database_path.with_name(f"{database_path.name}{suffix}")
+        if sidecar.exists() and sidecar.stat().st_size:
+            raise sqlite3.OperationalError("inventory database is not self-contained")
+    connection = sqlite3.connect(
+        f"{database_path.as_uri()}?mode=ro&immutable=1", uri=True
+    )
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA query_only=ON")
     return connection
@@ -63,7 +69,7 @@ def main(argv=None):
             output = legacy_content_migration.items_to_jsonl(items)
             if output:
                 print(output)
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error, ValueError):
             print("error=inventory_unavailable", file=sys.stderr)
             return 1
         finally:

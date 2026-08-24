@@ -1,7 +1,10 @@
 import json
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
+import hashlib
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -369,6 +372,7 @@ def test_cli_defaults_to_zero_write_jsonl_and_never_outputs_contacts_config_or_s
         ("安全输出文章", "来源", f"https://example.com/safe?token={secret_markers[2]}"),
     )
     db.commit()
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     before = _legacy_counts(db)
 
     assert manage.main(["inventory-content"]) == 0
@@ -453,6 +457,78 @@ def test_cli_dry_run_missing_database_fails_generically_without_creating_paths(
     assert str(missing_db) not in captured.err
 
 
+def _file_fingerprints(directory):
+    return {
+        path.name: (path.stat().st_size, hashlib.sha256(path.read_bytes()).hexdigest())
+        for path in directory.iterdir()
+        if path.is_file()
+    }
+
+
+def test_cli_dry_run_fails_closed_on_uncheckpointed_wal_without_creating_shm(
+    tmp_path, capsys, monkeypatch
+):
+    database_path = tmp_path / "wal-platform.db"
+    with sqlite3.connect(database_path) as setup:
+        assert setup.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        setup.execute("CREATE TABLE snapshot_probe (value TEXT NOT NULL)")
+        setup.execute("INSERT INTO snapshot_probe VALUES ('main-only')")
+        setup.commit()
+        setup.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    setup.close()
+    crash_writer = (
+        "import os, sqlite3, sys\n"
+        "db=sqlite3.connect(sys.argv[1])\n"
+        "db.execute('PRAGMA wal_autocheckpoint=0')\n"
+        "db.execute(\"INSERT INTO snapshot_probe VALUES ('wal-only')\")\n"
+        "db.commit()\n"
+        "os._exit(0)\n"
+    )
+    subprocess.run(
+        [sys.executable, "-c", crash_writer, str(database_path)],
+        check=True,
+    )
+    wal_path = database_path.with_name(f"{database_path.name}-wal")
+    shm_path = database_path.with_name(f"{database_path.name}-shm")
+    assert wal_path.exists() and wal_path.stat().st_size > 0
+    shm_path.unlink(missing_ok=True)
+    immutable = sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    try:
+        assert immutable.execute("SELECT value FROM snapshot_probe").fetchall() == [
+            ("main-only",)
+        ]
+    finally:
+        immutable.close()
+    before = _file_fingerprints(tmp_path)
+    monkeypatch.setattr(manage.models, "DB_PATH", str(database_path))
+
+    assert manage.main(["inventory-content"]) == 1
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "error=inventory_unavailable\n"
+    assert _file_fingerprints(tmp_path) == before
+    assert not shm_path.exists()
+
+
+@pytest.mark.parametrize("rules_payload", (None, "{damaged-json"))
+def test_cli_dry_run_maps_invalid_mapping_rules_to_the_only_generic_error(
+    db, tmp_path, capsys, monkeypatch, rules_payload
+):
+    assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() == "delete"
+    missing_rules = tmp_path / "private-missing-rules-marker.json"
+    if rules_payload is not None:
+        missing_rules.write_text(rules_payload, encoding="utf-8")
+    monkeypatch.setattr(migration, "MAPPING_RULES_PATH", missing_rules)
+
+    assert manage.main(["inventory-content"]) == 1
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "error=inventory_unavailable\n"
+    assert "private-missing-rules-marker" not in captured.err
+
+
 def test_cli_record_uses_the_existing_writable_connection_seam(
     db, capsys, monkeypatch
 ):
@@ -483,6 +559,8 @@ def test_cli_record_uses_the_existing_writable_connection_seam(
         " https://example.com/leading-space",
         "https://example.com/delete\x7fcontrol",
         "https://example.com/c1\x80control",
+        "https://[v1.fe80]/path",
+        "https://999.999.999.999/path",
     ),
 )
 def test_article_url_that_cannot_safely_persist_fails_closed(db, unsafe_url):
@@ -502,6 +580,35 @@ def test_article_url_that_cannot_safely_persist_fails_closed(db, unsafe_url):
     )
 
 
+@pytest.mark.parametrize(
+    ("source_url", "expected_display"),
+    (
+        ("https://8.8.8.8/path", "https://8.8.8.8/path"),
+        (
+            "https://[2001:4860:4860::8888]/path",
+            "https://[2001:4860:4860::8888]/path",
+        ),
+        ("https://例子.测试/路径", "https://xn--fsqu00a.xn--0zwm56d/路径"),
+    ),
+)
+def test_real_ip_literals_and_idna_domains_remain_clean(
+    db, source_url, expected_display
+):
+    article_id = db.execute(
+        "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+        ("合法公共 URL", "来源", source_url),
+    ).lastrowid
+    db.commit()
+
+    item = _item(migration.inventory_legacy_content(db), "articles", article_id)
+
+    assert (item.action, item.reason_code) == (
+        "clean",
+        "article_source_requires_check",
+    )
+    assert item.target_preview["source_url_display"] == expected_display
+
+
 def test_cli_record_handles_mixed_valid_and_invalid_urls_atomically(
     db, capsys, monkeypatch
 ):
@@ -516,6 +623,8 @@ def test_cli_record_handles_mixed_valid_and_invalid_urls_atomically(
         "https://bad_.example/path",
         "https://example.com/%zz",
         "https://example.com/@user",
+        "https://[v1.fe80]/path",
+        "https://999.999.999.999/path",
     )
     invalid_ids = [
         db.execute(
