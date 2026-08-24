@@ -490,11 +490,14 @@ def _scenario_source_rows(db, scenario_id):
     ).fetchall()
 
 
-def _has_published_named_row(db, table, where_sql, arguments):
-    return db.execute(
-        f"SELECT 1 FROM {table} WHERE status='published' AND trim(name)<>'' AND {where_sql}",
+def _has_only_exact_published_names(db, table, where_sql, arguments):
+    rows = db.execute(
+        f"SELECT name FROM {table} WHERE status='published' AND {where_sql}",
         arguments,
-    ).fetchone() is not None
+    ).fetchall()
+    return bool(rows) and all(
+        type(row["name"]) is str and row["name"].strip() for row in rows
+    )
 
 
 def _validate_industry_publication(db, content_id, draft, now):
@@ -509,9 +512,9 @@ def _validate_industry_publication(db, content_id, draft, now):
         or not industry["name"].strip()
         or not draft.blocks
         or not any(_meaningful_html(block.body_html) for block in draft.blocks)
-        or not _has_published_named_row(db, "pain_points", "industry_id=?", (industry_id,))
-        or not _has_published_named_row(db, "departments", "industry_id=?", (industry_id,))
-        or not _has_published_named_row(db, "company_sizes", "1=1", ())
+        or not _has_only_exact_published_names(db, "pain_points", "industry_id=?", (industry_id,))
+        or not _has_only_exact_published_names(db, "departments", "industry_id=?", (industry_id,))
+        or not _has_only_exact_published_names(db, "company_sizes", "1=1", ())
     ):
         raise ContentValidationError("industry_public_incomplete")
     timestamp = format_shanghai(now)
@@ -551,16 +554,18 @@ def _validate_scenario_publication(db, content_id, draft):
         ("SELECT 1 FROM scenario_branches WHERE scenario_id=?",
          "SELECT 1 FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
          "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
-         "AND (ib.status<>'published' OR i.status<>'published' OR trim(i.name)='')"),
+         "AND (ib.status<>'published' OR i.status<>'published' OR typeof(i.name)<>'text' OR trim(i.name)='')"),
         ("SELECT 1 FROM scenario_departments WHERE scenario_id=?",
          "SELECT 1 FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
-         "WHERE link.scenario_id=? AND (d.status<>'published' OR trim(d.name)='')"),
+         "WHERE link.scenario_id=? AND (d.status<>'published' OR typeof(d.name)<>'text' OR trim(d.name)='')"),
         ("SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
          "WHERE link.scenario_id=? AND p.status='published' AND trim(p.name)<>''",
          "SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
-         "WHERE link.scenario_id=? AND (p.status<>'published' OR trim(p.name)='')"),
-        ("SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? AND trim(input_text)<>''",
-         "SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? AND trim(input_text)=''"),
+         "WHERE link.scenario_id=? AND (p.status<>'published' OR typeof(p.name)<>'text' OR trim(p.name)='')"),
+        ("SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? "
+         "AND typeof(input_text)='text' AND trim(input_text)<>''",
+         "SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? "
+         "AND (typeof(input_text)<>'text' OR trim(input_text)='')"),
         ("SELECT 1 FROM content_maturity_levels WHERE content_item_id=?",
          "SELECT 1 FROM content_maturity_levels WHERE content_item_id=? "
          "AND (maturity_code NOT IN ('explore','pilot','scale','collaborate'))"),
@@ -589,12 +594,12 @@ def _validate_scenario_publication(db, content_id, draft):
             raise ContentValidationError("scenario_public_incomplete")
         if db.execute(
             "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
-            "AND trim(title)<>''", (service["service_id"],)
+            "AND typeof(title)='text' AND trim(title)<>''", (service["service_id"],)
         ).fetchone() is None:
             raise ContentValidationError("scenario_public_incomplete")
         if db.execute(
             "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
-            "AND trim(title)=''", (service["service_id"],)
+            "AND (typeof(title)<>'text' OR trim(title)='')", (service["service_id"],)
         ).fetchone() is not None:
             raise ContentValidationError("scenario_public_incomplete")
 

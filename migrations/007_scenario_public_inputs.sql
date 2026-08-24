@@ -1,7 +1,9 @@
 CREATE TABLE scenario_public_inputs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content_item_id INTEGER NOT NULL,
-    input_text TEXT NOT NULL CHECK(length(trim(input_text)) BETWEEN 1 AND 300),
+    input_text TEXT NOT NULL CHECK(
+        typeof(input_text)='text' AND length(trim(input_text)) BETWEEN 1 AND 300
+    ),
     sort_order INTEGER NOT NULL CHECK(sort_order >= 1),
     UNIQUE(content_item_id, sort_order),
     FOREIGN KEY (content_item_id) REFERENCES content_items(id)

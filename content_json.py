@@ -17,8 +17,15 @@ def _container_depth(value):
     while pending:
         current, depth = pending.pop()
         maximum = max(maximum, depth)
-        if type(current) is dict:
-            pending.extend((child, depth + 1) for child in current.values())
+        if type(current) is str:
+            try:
+                current.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise ContentJsonError("content_json_invalid") from error
+        elif type(current) is dict:
+            for key, child in current.items():
+                pending.append((key, depth + 1))
+                pending.append((child, depth + 1))
         elif type(current) is list:
             pending.extend((child, depth + 1) for child in current)
     return maximum

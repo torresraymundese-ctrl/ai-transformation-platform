@@ -14,6 +14,7 @@ import blueprints.public_catalog as public_catalog_blueprint
 import catalog_content_repository as catalog
 from content_clock import SHANGHAI
 from content_contracts import ContentBlock, ContentDraft
+from content_json import ContentJsonError, decode_database_json
 from content_validation import ContentValidationError
 import media_service
 import publishing_repository
@@ -443,6 +444,332 @@ def _assert_unpublished_revision(db, current_id, revision_id, *, lock_version=No
         "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'",
         (revision_id,),
     ).fetchone()[0] == 0
+
+
+def _corrupt_one_scenario_text_source(db, scenario_id, revision_id, source, value):
+    """Keep a valid peer value and corrupt one required public text source."""
+    if source == "industry":
+        branch = db.execute(
+            "SELECT ib.id AS branch_id,i.id AS industry_id FROM industry_branches ib "
+            "JOIN industries i ON i.id=ib.industry_id WHERE i.code='retail' "
+            "AND ib.status='published' ORDER BY ib.id LIMIT 1"
+        ).fetchone()
+        db.execute(
+            "INSERT OR IGNORE INTO scenario_branches(scenario_id,industry_branch_id) VALUES (?,?)",
+            (scenario_id, branch["branch_id"]),
+        )
+        db.execute("UPDATE industries SET name=? WHERE id=?", (value, branch["industry_id"]))
+    elif source == "department":
+        db.execute(
+            "UPDATE departments SET name=? WHERE id=(SELECT department_id FROM "
+            "scenario_departments WHERE scenario_id=? ORDER BY department_id LIMIT 1)",
+            (value, scenario_id),
+        )
+    elif source == "pain":
+        db.execute(
+            "UPDATE pain_points SET name=? WHERE id=(SELECT pain_point_id FROM "
+            "scenario_pains WHERE scenario_id=? ORDER BY pain_point_id LIMIT 1)",
+            (value, scenario_id),
+        )
+    elif source == "input":
+        if type(value) is not str:
+            db.execute("PRAGMA ignore_check_constraints=ON")
+        try:
+            db.execute(
+                "UPDATE scenario_public_inputs SET input_text=? WHERE id=(SELECT id FROM "
+                "scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+                (value, revision_id),
+            )
+        finally:
+            if type(value) is not str:
+                db.execute("PRAGMA ignore_check_constraints=OFF")
+    elif source == "deliverable":
+        db.execute(
+            "UPDATE service_deliverables SET title=? WHERE id=(SELECT sd.id FROM "
+            "service_deliverables sd JOIN scenario_services ss ON ss.service_id=sd.service_id "
+            "WHERE ss.scenario_id=? AND sd.status='published' ORDER BY sd.id LIMIT 1)",
+            (value, scenario_id),
+        )
+    else:
+        raise AssertionError(source)
+    db.commit()
+
+
+def _corrupt_one_industry_text_source(db, industry_id, source, value):
+    table = {
+        "pain": ("pain_points", "industry_id=?"),
+        "department": ("departments", "industry_id=?"),
+        "company_size": ("company_sizes", "1=1"),
+    }[source]
+    table_name, predicate = table
+    parameters = (industry_id,) if source != "company_size" else ()
+    row = db.execute(
+        f"SELECT id FROM {table_name} WHERE status='published' AND {predicate} ORDER BY id LIMIT 1",
+        parameters,
+    ).fetchone()
+    db.execute(f"UPDATE {table_name} SET name=? WHERE id=?", (value, row["id"]))
+    db.commit()
+
+
+@pytest.mark.parametrize("source", ("industry", "department", "pain", "input", "deliverable"))
+@pytest.mark.parametrize("value", (sqlite3.Binary(b"not-text"), " "), ids=("blob", "blank"))
+def test_scenario_formal_publication_rejects_each_mixed_invalid_required_text_source(
+    client, db, source, value
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    before = client.get("/scenarios/mfg-knowledge-assistant")
+    assert before.status_code == 200
+    if source == "input" and value == " ":
+        with pytest.raises(sqlite3.IntegrityError):
+            _corrupt_one_scenario_text_source(
+                db, current["scenario_id"], revision_id, source, value
+            )
+        return
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, source, value
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    if source == "input":
+        assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize("source", ("pain", "department", "company_size"))
+@pytest.mark.parametrize("value", (sqlite3.Binary(b"not-text"), " "), ids=("blob", "blank"))
+def test_industry_formal_publication_rejects_each_mixed_invalid_required_text_source(
+    db, source, value
+):
+    current, revision_id = _saved_industry_revision(db)
+    _corrupt_one_industry_text_source(db, current["industry_id"], source, value)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "industry_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=1)
+
+
+def test_due_scenario_with_blob_input_keeps_old_public_revision_and_isolates_batch_failure(client, db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    due = NOW_DATETIME + timedelta(hours=1)
+    schedule_content(revision_id, lock_version, due, actor="test-admin", now=NOW_DATETIME)
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, "input", sqlite3.Binary(b"not-text")
+    )
+    healthy = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='retail_ai_service' "
+        "AND ci.status='published'"
+    ).fetchone()
+    healthy_revision = copy_revision(healthy["id"], actor="test-admin", now=NOW_DATETIME)
+    schedule_content(healthy_revision, 1, due, actor="test-admin", now=NOW_DATETIME)
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert healthy_revision in result.published_ids
+    assert (revision_id, "validation_failed") in result.failures
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=4)
+    assert db.execute("SELECT publish_at FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_due_failed'",
+        (revision_id,),
+    ).fetchone()[0] == 1
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize("source", ("industry", "department", "pain", "input", "deliverable"))
+def test_public_scenario_read_gate_rejects_a_mixed_blob_required_text_source(client, db, source):
+    scenario = db.execute(
+        "SELECT s.id,ci.id AS content_item_id FROM scenarios s JOIN content_groups g "
+        "ON g.scenario_id=s.id JOIN content_items ci ON ci.content_group_id=g.id "
+        "WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
+    ).fetchone()
+    _corrupt_one_scenario_text_source(
+        db, scenario["id"], scenario["content_item_id"], source, sqlite3.Binary(b"not-text")
+    )
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    document = page(client.get("/scenarios"))
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"] for card in document.select("[data-scenario-code]")
+    }
+
+
+@pytest.mark.parametrize("source", ("pain", "department", "company_size"))
+def test_public_industry_read_gate_rejects_a_mixed_blob_required_text_source(client, db, source):
+    industry = db.execute("SELECT id FROM industries WHERE code='manufacturing'").fetchone()
+    _corrupt_one_industry_text_source(
+        db, industry["id"], source, sqlite3.Binary(b"not-text")
+    )
+    publish_catalog(db)
+
+    document = page(client.get("/industries"))
+    assert "manufacturing" not in {
+        card["data-industry-code"] for card in document.select("[data-industry-code]")
+    }
+    assert client.get("/industries/manufacturing").status_code == 404
+
+
+def test_archived_invalid_industry_text_row_does_not_block_a_complete_replacement(db):
+    current, revision_id = _saved_industry_revision(db)
+    row = db.execute(
+        "SELECT id FROM pain_points WHERE industry_id=? AND status='published' ORDER BY id LIMIT 1",
+        (current["industry_id"],),
+    ).fetchone()
+    db.execute(
+        "UPDATE pain_points SET name=?,status='archived' WHERE id=?",
+        (sqlite3.Binary(b"not-text"), row["id"]),
+    )
+    db.commit()
+
+    publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] == "published"
+
+
+@pytest.mark.parametrize("bad_settings", (
+    sqlite3.Binary(b"{}"),
+    '{"unreviewed":"extra"}',
+), ids=("blob", "wrong_schema"))
+def test_public_projection_fails_closed_when_any_persisted_block_cannot_be_projected(
+    client, db, bad_settings
+):
+    revision = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' "
+        "AND ci.status='draft'"
+    ).fetchone()
+    db.execute(
+        "INSERT INTO content_blocks(content_item_id,block_type,title,body_html,settings_json,media_asset_id,sort_order) "
+        "VALUES (?,'rich_text','无效持久化块','<p>不会公开</p>',?,NULL,99)",
+        (revision["id"], bad_settings),
+    )
+    db.commit()
+    publish_catalog(db)
+
+    detail = client.get("/scenarios/mfg-knowledge-assistant")
+    listing = client.get("/scenarios")
+
+    assert detail.status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"] for card in page(listing).select("[data-scenario-code]")
+    }
+
+
+@pytest.mark.parametrize("bad_settings", (
+    sqlite3.Binary(b"{}"),
+    '{"unreviewed":"extra"}',
+), ids=("blob", "wrong_schema"))
+def test_formal_publish_rejects_any_unprojectable_persisted_block_before_archiving_current(
+    db, bad_settings
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    db.execute(
+        "INSERT INTO content_blocks(content_item_id,block_type,title,body_html,settings_json,media_asset_id,sort_order) "
+        "VALUES (?,'rich_text','无效持久化块','<p>不会公开</p>',?,NULL,99)",
+        (revision_id, bad_settings),
+    )
+    db.commit()
+
+    with pytest.raises(ContentValidationError):
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+
+
+@pytest.mark.parametrize("raw", (
+    r'"\ud800"',
+    r'{"\ud800":"ok"}',
+    r'{"items":["\ud800"]}',
+))
+def test_bounded_database_json_rejects_lone_surrogates_in_every_text_position(raw):
+    with pytest.raises(ContentJsonError):
+        decode_database_json(raw)
+
+
+def _write_surrogate_block_settings(db, revision_id):
+    db.execute(
+        "UPDATE content_blocks SET block_type='steps',settings_json=? WHERE content_item_id=?",
+        (r'{"items":["\ud800"]}', revision_id),
+    )
+    db.commit()
+
+
+def test_formal_publish_rejects_surrogate_block_settings_without_archiving_current_revision(db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _write_surrogate_block_settings(db, revision_id)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "content_json_invalid"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+
+
+def test_due_surrogate_block_failure_is_validation_failed_and_does_not_stop_a_healthy_item(client, db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    due = NOW_DATETIME + timedelta(hours=1)
+    schedule_content(revision_id, lock_version, due, actor="test-admin", now=NOW_DATETIME)
+    _write_surrogate_block_settings(db, revision_id)
+    healthy = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='retail_ai_service' "
+        "AND ci.status='published'"
+    ).fetchone()
+    healthy_revision = copy_revision(healthy["id"], actor="test-admin", now=NOW_DATETIME)
+    schedule_content(healthy_revision, 1, due, actor="test-admin", now=NOW_DATETIME)
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert healthy_revision in result.published_ids
+    assert (revision_id, "validation_failed") in result.failures
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=4)
+    assert db.execute("SELECT publish_at FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_due_failed'",
+        (revision_id,),
+    ).fetchone()[0] == 1
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize("source", (
+    "implementation_steps_json", "prerequisites_json", "acceptance_json",
+))
+def test_surrogate_service_json_is_private_and_rejected_by_formal_publication(client, db, source):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _replace_scenario_json_source(
+        db, current["scenario_id"], revision_id, source, r'["\ud800"]'
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "content_json_invalid"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    db.execute(
+        "UPDATE content_items SET status='archived',archived_at=?,updated_at=? WHERE id=?",
+        (NOW, NOW, current["id"]),
+    )
+    db.execute(
+        "UPDATE content_items SET status='published',published_at=? WHERE id=?",
+        (NOW, revision_id),
+    )
+    db.commit()
+    detail = client.get("/scenarios/mfg-knowledge-assistant")
+    listing = client.get("/scenarios")
+    assert detail.status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"] for card in page(listing).select("[data-scenario-code]")
+    }
+
+
+def test_bounded_database_json_keeps_normal_chinese_and_emoji_text():
+    assert decode_database_json('{"items":["中文😀"]}') == {"items": ["中文😀"]}
 
 
 def test_industry_with_blank_overview_cannot_replace_a_healthy_public_revision(db):

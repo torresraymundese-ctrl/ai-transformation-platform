@@ -390,8 +390,9 @@ def _blocks(db, content_id):
         "WHERE content_item_id=? ORDER BY sort_order,id", (content_id,)
     ):
         block = _public_block(row)
-        if block is not None:
-            blocks.append(block)
+        if block is None:
+            return None
+        blocks.append(block)
     return tuple(blocks)
 
 

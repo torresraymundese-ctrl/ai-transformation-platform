@@ -441,6 +441,19 @@ def test_scenario_input_rows_require_a_positive_sort_order(db):
         )
 
 
+def test_scenario_input_rows_reject_blob_text_even_with_a_valid_draft_owner(db):
+    scenario_item = insert_item(
+        db, insert_group(db, "scenario", "scenario-input-blob"),
+        entry_type="scenario", slug="scenario-input-blob",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,?,1)",
+            (scenario_item, sqlite3.Binary(b"not-text")),
+        )
+
+
 def test_007_upgrade_backfills_published_revision_without_a_draft_and_copy_keeps_inputs(tmp_path, monkeypatch):
     legacy_migrations = tmp_path / "migrations-through-006"
     legacy_migrations.mkdir()

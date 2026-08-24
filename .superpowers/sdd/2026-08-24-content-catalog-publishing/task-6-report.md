@@ -686,3 +686,160 @@ boundary and all related Python modules/tests,
 production server, Nginx, or real database was used. The original full-suite
 outcome remains **UNKNOWN** and the historical PyPI-network violation remains
 **CONFIRMED**.
+
+## Fix1f — exact-text publication/read alignment, total block fail-closed, and surrogate JSON correction
+
+**Status: DONE_WITH_CONCERNS.** This is a Task-6-only correction from clean
+baseline `a4ad3cb8c1cb836be397cec0d60771dab7df6438`. It did not run a full
+suite, access a network, install/uninstall dependencies, contact a production
+server/Nginx, or use a real database. All test state used temporary SQLite
+databases with local Flask clients/mocks. The original full-suite outcome
+remains **UNKNOWN**, and the historical PyPI-network violation remains
+**CONFIRMED**.
+
+### Offline environment
+
+Every Fix1f pytest command used the assigned interpreter, process-scoped
+offline overlay, `-p no:cacheprovider`, and a unique
+`pytest-task6-fix1f-*` basetemp:
+
+```text
+PYTHON=..\\..\\.venv\\Scripts\\python.exe
+PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps
+PYPDF_VERSION=6.10.0
+PYPDF_SOURCE=...\\.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps\\pypdf\\__init__.py
+TASK6_ENV_EXIT=0
+```
+
+### TDD / root-cause evidence
+
+The genuine initial behavior RED was:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py tests\\test_content_migrations.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-red-core-001 -k "scenario_formal_publication_rejects_each_mixed_invalid_required_text_source or industry_formal_publication_rejects_each_mixed_invalid_required_text_source or due_scenario_with_blob_input_keeps_old_public_revision_and_isolates_batch_failure or public_projection_fails_closed_when_any_persisted_block_cannot_be_projected or bounded_database_json_rejects_lone_surrogates_in_every_text_position or formal_publish_rejects_surrogate_block_settings_without_archiving_current_revision or due_surrogate_block_failure_is_validation_failed_and_does_not_stop_a_healthy_item or surrogate_service_json_is_private_and_rejected_by_formal_publication or bounded_database_json_keeps_normal_chinese_and_emoji_text or scenario_input_rows_reject_blob_text_even_with_a_valid_draft_owner"
+23 failed, 6 passed, 144 deselected in 16.95s
+TASK6_PYTEST_EXIT=1
+```
+
+It proved the specified missing behavior, rather than a test/import error:
+
+- publication SQL used `trim(...)`/existence checks, so mixed valid+BLOB
+  published pains, departments, company sizes, scenario relations, inputs,
+  and deliverables could replace a healthy revision;
+- `_blocks` skipped an invalid persisted second block, leaving the remaining
+  block to make the detail return 200;
+- JSON decoding accepted a lone surrogate. A formal block publication then
+  escaped as `UnicodeEncodeError`, and its due job interrupted before the
+  normal `validation_failed` handling;
+- 007 accepted a BLOB input value despite TEXT affinity.
+
+The original RED also included one test setup branch which attempted to write
+a blank `scenario_public_inputs.input_text`. The pre-existing nonblank CHECK
+correctly rejected that write before publication. The test was narrowed to
+assert that schema boundary directly; BLOB legacy-state tests deliberately use
+temporary SQLite `ignore_check_constraints` only to prove the application
+publication gate remains defensive for already-persisted malformed rows.
+
+The first complete selected GREEN after the minimal implementation was:
+
+```text
+pytest-task6-fix1f-green-core-003
+29 passed, 144 deselected in 15.59s
+TASK6_PYTEST_EXIT=0
+```
+
+The change makes publication and read semantics agree:
+
+- industry publication now requires every relevant published pain,
+  department, and global company-size `name` to be exact `str` and nonblank;
+  archived malformed rows are ignored;
+- scenario publication requires exact nonblank names for all live associated
+  industry/department/pain targets, exact revision-bound inputs, and exact
+  nonblank published deliverable titles (with at least one valid
+  deliverable). Existing target-status rules remain intact;
+- unreleased migration 007 now enforces `typeof(input_text)='text'` before
+  its existing trimmed nonblank/length check;
+- any block which cannot be exact-projected invalidates its complete public
+  industry/scenario projection instead of disappearing silently;
+- the bounded shared JSON decoder iteratively strict-UTF-8-validates decoded
+  strings in top-level scalars, mapping keys, values, and list members. It
+  maps only supported decoding/encoding errors to `ContentJsonError`, without
+  catching `MemoryError` or `BaseException`.
+
+Tests include immediate and scheduled publication transaction assertions:
+old revision preservation, draft lock values, no accidental
+`content_published` event, due `content_due_failed` audit/cleared schedule,
+and a simultaneously scheduled healthy item still publishing. They cover
+mixed good+BLOB/blank values, direct public detail/list private-404 behavior,
+archived malformed industry rows, valid Chinese/emoji JSON, all three service
+JSON sources, and a valid public control.
+
+### Focused GREEN evidence
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-focused-public-final-008
+149 passed in 89.94s (0:01:29)
+TASK6_PYTEST_EXIT=0
+
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_content_publishing.py tests\\test_content_migrations.py tests\\test_content_seed.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-focused-publishing-migration-seed-005
+79 passed in 44.73s
+TASK6_PYTEST_EXIT=0
+
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_media_http.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-focused-media-006
+24 passed in 17.01s
+TASK6_PYTEST_EXIT=0
+
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_app_factory_and_migrations.py tests\\test_v2_migrations.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-focused-factory-v2-010
+12 passed in 5.34s
+TASK6_PYTEST_EXIT=0
+
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-focused-block-due-012 -k "formal_publish_rejects_any_unprojectable_persisted_block_before_archiving_current or due_surrogate_block_failure_is_validation_failed_and_does_not_stop_a_healthy_item"
+3 passed, 148 deselected in 2.81s
+TASK6_PYTEST_EXIT=0
+```
+
+After code/test freeze, the complete affected non-full focused set was run in
+a direct retained pytest session:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py tests\\test_content_publishing.py tests\\test_media_http.py tests\\test_content_migrations.py tests\\test_content_seed.py tests\\test_v2_migrations.py tests\\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1f-final-focused-013
+266 passed in 173.06s (0:02:53)
+TASK6_PYTEST_EXIT=0
+```
+
+### Static checks and self-review
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile content_json.py catalog_content_repository.py publishing_repository.py publishing_service.py media_service.py tests\\test_public_catalog.py tests\\test_content_migrations.py tests\\test_content_publishing.py tests\\test_content_seed.py tests\\test_media_http.py tests\\test_app_factory_and_migrations.py tests\\test_v2_migrations.py
+TASK6_PYCOMPILE_EXIT=0
+
+git diff --check a4ad3cb8c1cb836be397cec0d60771dab7df6438
+TASK6_DIFF_CHECK_EXIT=0
+
+rg -n '\\b(execute|executemany|executescript|cursor)\\s*\\(' blueprints\\public_catalog.py
+BLUEPRINT_DIRECT_SQL_GUARD=PASS
+```
+
+Self-review confirmed exact-value checks before publication state transitions;
+scheduled failure atomicity; read-time all-or-nothing governed-block handling;
+UTF-8/depth/length JSON bounds; published/archived target rules; stable
+existing list/detail behavior; 007 ownership and input constraints; no direct
+SQL in the public Blueprint; and no public/admin/contact/internal-data leak.
+This correction does not alter frozen assessment core data (including the
+disclosed `data_process_foundation` limitation), media MIME policy, share/
+resource MIME scope, visual tokens, Task 7, ledger, or external task card.
+
+### Changed files
+
+- `content_json.py`
+- `catalog_content_repository.py`
+- `publishing_repository.py`
+- `migrations/007_scenario_public_inputs.sql`
+- `tests/test_public_catalog.py`
+- `tests/test_content_migrations.py`
+- this report
+
+Known limitations remain: no full-suite rerun (the original outcome is
+**UNKNOWN**), the historical PyPI-network violation is **CONFIRMED**, and the
+frozen fallback `data_process_foundation` has no pain relation and remains
+intentionally private rather than receiving invented product data.
