@@ -11,6 +11,7 @@ import sys
 import lead_repository
 import legacy_content_migration
 import models
+import publishing_service
 from models import init_db
 
 
@@ -98,6 +99,10 @@ def main(argv=None):
         action="store_true",
         help="Apply the anonymization (default is dry-run)",
     )
+    publish_due = subcommands.add_parser(
+        "publish-due-content",
+        help="Atomically publish due content revisions",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
@@ -131,6 +136,21 @@ def main(argv=None):
         mode = "apply" if args.apply else "dry-run"
         identifiers = ",".join(str(lead_id) for lead_id in result.lead_ids) or "none"
         print(f"mode={mode} count={result.count} ids={identifiers}")
+        return 0
+    if args.command == "publish-due-content":
+        try:
+            result = publishing_service.publish_due_content()
+        except (OSError, sqlite3.Error, ValueError):
+            print("error=publish_due_unavailable", file=sys.stderr)
+            return 1
+        published_ids = ",".join(str(item) for item in result.published_ids) or "none"
+        failures = ",".join(
+            f"{content_id}:{code}" for content_id, code in result.failures
+        ) or "none"
+        print(
+            f"published_count={result.published_count} published_ids={published_ids} "
+            f"failed_count={result.failed_count} failures={failures}"
+        )
         return 0
     return 2
 
