@@ -90,3 +90,22 @@ API、报告、预约、线索、管理员相关分区 `202 passed in 118.18s`�
 
 现有最小后台只支持共享账号下的线索、跟进、预约和隐私请求闭环。最终设计系统、
 响应式视觉、动效、SEO、性能和视觉回归属于第三子项目。
+
+## 旧内容审阅清单（5A）
+
+在已经执行 `python manage.py migrate` 的本地副本中运行：
+
+```powershell
+python manage.py inventory-content --format jsonl
+python manage.py inventory-content --format jsonl --record
+```
+
+默认命令是零写入 dry-run，只读取旧 `services`、`cases`、`articles` 和
+`announcements`，逐行输出确定性的 JSONL 审阅项。`--record` 只在一个事务中
+新增或更新 `legacy_content_reviews`；它不会请求网络、创建目标内容、发布内容、
+修改或删除旧行。相同来源校验和会保留已有人工决定和来源检查；来源校验和变化时，
+旧决定与旧检查保留为历史证据但不再匹配当前校验和，并写入 `review_stale_at`。
+
+清单不读取线索、站点配置或密钥。来源 URL 只展示去掉认证信息、查询参数和片段的
+规范化 scheme/IDNA host/path；完整规范化 URL 仅以 SHA-256 记录。来源可达性检查和
+经人工批准后的草稿转换属于后续任务，本命令不会把迁移内容自动发布。

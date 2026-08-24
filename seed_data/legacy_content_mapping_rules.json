@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "allowed_source_tables": ["services", "cases", "articles", "announcements"],
+  "allowed_target_types": ["service", "case", "resource", "announcement"],
+  "allowed_target_groups": [
+    "foundation_workshop",
+    "knowledge_assistant_pilot",
+    "customer_growth_pilot",
+    "workflow_automation",
+    "data_insight",
+    "industry_integration"
+  ],
+  "service_code_targets": {
+    "foundation_workshop": {"target_type": "service", "target_group": "foundation_workshop"},
+    "knowledge_assistant_pilot": {"target_type": "service", "target_group": "knowledge_assistant_pilot"},
+    "customer_growth_pilot": {"target_type": "service", "target_group": "customer_growth_pilot"},
+    "workflow_automation": {"target_type": "service", "target_group": "workflow_automation"},
+    "data_insight": {"target_type": "service", "target_group": "data_insight"},
+    "industry_integration": {"target_type": "service", "target_group": "industry_integration"}
+  }
+}
