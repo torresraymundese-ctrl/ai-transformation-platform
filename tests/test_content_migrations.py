@@ -1,12 +1,15 @@
 import hashlib
 import sqlite3
+from pathlib import Path
 
 import pytest
 
+import migrations
 import models
 
 
 SHANGHAI_TIME = "2026-08-24 12:34:56"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_CONTENT_TABLES = {
     "content_groups",
@@ -45,6 +48,32 @@ def database_tables(db):
 
 def columns(db, table):
     return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def foreign_keys(db, table):
+    return {
+        (row[3], row[2], row[4], row[6])
+        for row in db.execute(f"PRAGMA foreign_key_list({table})")
+    }
+
+
+def named_index(db, table, name):
+    index_row = next(
+        row for row in db.execute(f"PRAGMA index_list({table})") if row[1] == name
+    )
+    index_columns = tuple(
+        row[2] for row in db.execute(f"PRAGMA index_info({name})")
+    )
+    return index_row[2], index_row[4], index_columns
+
+
+def exact_rows(db, table, where="1=1", parameters=()):
+    return [
+        tuple(row)
+        for row in db.execute(
+            f"SELECT * FROM {table} WHERE {where} ORDER BY id", parameters
+        )
+    ]
 
 
 def frozen_catalog_counts(db):
@@ -136,11 +165,8 @@ def publish(db, item_id):
 
 
 def insert_media(db, suffix, *, status="pending", storage_suffix=None):
-    ready_at = SHANGHAI_TIME if status == "ready" else None
-    archived_at = SHANGHAI_TIME if status == "archived" else None
-    scan_code = "clean" if status == "ready" else None
-    scan_checked_at = SHANGHAI_TIME if status == "ready" else None
-    return db.execute(
+    assert status in ("pending", "ready")
+    media_id = db.execute(
         "INSERT INTO media_assets "
         "(storage_name,display_name,detected_mime,byte_size,sha256,"
         "scan_result_code,scan_checked_at,status,created_at,ready_at,"
@@ -151,20 +177,73 @@ def insert_media(db, suffix, *, status="pending", storage_suffix=None):
             "image/png",
             100,
             hashlib.sha256(suffix.encode("ascii")).hexdigest(),
-            scan_code,
-            scan_checked_at,
-            status,
+            None,
+            None,
+            "pending",
             SHANGHAI_TIME,
-            ready_at,
-            archived_at,
+            None,
+            None,
             SHANGHAI_TIME,
         ),
     ).lastrowid
+    if status == "ready":
+        db.execute(
+            "UPDATE media_assets SET scan_result_code='clean',scan_checked_at=?,"
+            "status='ready',ready_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, SHANGHAI_TIME, media_id),
+        )
+    return media_id
 
 
-def test_content_migration_is_idempotent_and_preserves_v2_catalog(client, db):
-    before = frozen_catalog_counts(db)
-    sentinels = {
+def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
+    db_through_005, monkeypatch
+):
+    db = db_through_005
+    version_id = db.execute(
+        "SELECT id FROM assessment_versions WHERE code='v2.0-2026-08-19'"
+    ).fetchone()[0]
+    lead_id = db.execute(
+        "INSERT INTO leads "
+        "(company_name,contact_name,phone_normalized,status,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?)",
+        ("Upgrade sentinel", "Operator", "13800000000", "new", SHANGHAI_TIME, SHANGHAI_TIME),
+    ).lastrowid
+    assessment_id = db.execute(
+        "INSERT INTO assessments "
+        "(company_name,lead_id,rule_version_id,submission_key,report_snapshot_json,"
+        "completed_at) VALUES (?,?,?,?,?,?)",
+        ("Upgrade sentinel", lead_id, version_id, "assessment-005", '{"report":1}', SHANGHAI_TIME),
+    ).lastrowid
+    db.execute(
+        "INSERT INTO roi_estimates "
+        "(assessment_id,rule_version_id,recommended_scenarios_json,"
+        "estimate_snapshot_json,created_at) VALUES (?,?,?,?,?)",
+        (assessment_id, version_id, '["scenario"]', '{"estimate":1}', SHANGHAI_TIME),
+    )
+    db.execute(
+        "INSERT INTO lead_consents "
+        "(lead_id,policy_version,consented_at,source,identity_hash,created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (lead_id, "privacy-v1", SHANGHAI_TIME, "assessment", "identity-hash", SHANGHAI_TIME),
+    )
+    db.execute(
+        "INSERT INTO data_subject_requests "
+        "(lead_id,identity_hash,request_type,status,channel,requested_at,"
+        "admin_received_at,admin_updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (lead_id, "privacy-hash", "access", "received", "web", SHANGHAI_TIME, SHANGHAI_TIME, SHANGHAI_TIME),
+    )
+    db.execute(
+        "INSERT INTO appointments "
+        "(assessment_id,lead_id,submission_key,preferred_date,time_slot,status,"
+        "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (assessment_id, lead_id, "appointment-005", "2026-08-25", "morning", "pending", SHANGHAI_TIME, SHANGHAI_TIME),
+    )
+    db.execute(
+        "INSERT INTO analytics_events "
+        "(event_name,assessment_id,analytics_id_hash,created_at) VALUES (?,?,?,?)",
+        ("upgrade_sentinel", assessment_id, "analytics-hash", SHANGHAI_TIME),
+    )
+    legacy_ids = {
         "articles": db.execute(
             "INSERT INTO articles (title_hash,title,source) VALUES (?,?,?)",
             ("migration-sentinel", "Keep article", "local"),
@@ -183,19 +262,57 @@ def test_content_migration_is_idempotent_and_preserves_v2_catalog(client, db):
     }
     db.commit()
 
-    models.init_db()
-    models.init_db()
+    protected_queries = {
+        "core_industries": ("industries", "status='published'", ()),
+        "core_scenarios": ("scenarios", "status='published'", ()),
+        "core_services": (
+            "services", "code IS NOT NULL AND status='published'", (),
+        ),
+        "assessment": ("assessments", "id=?", (assessment_id,)),
+        "report": ("roi_estimates", "assessment_id=?", (assessment_id,)),
+        "lead": ("leads", "id=?", (lead_id,)),
+        "consent": ("lead_consents", "lead_id=?", (lead_id,)),
+        "privacy": ("data_subject_requests", "lead_id=?", (lead_id,)),
+        "appointment": ("appointments", "assessment_id=?", (assessment_id,)),
+        "analytics": ("analytics_events", "assessment_id=?", (assessment_id,)),
+        **{
+            f"legacy_{table}": (table, "id=?", (row_id,))
+            for table, row_id in legacy_ids.items()
+        },
+    }
+    protected = {
+        label: exact_rows(db, table, where, parameters)
+        for label, (table, where, parameters) in protected_queries.items()
+    }
+    assert [row[0] for row in db.execute(
+        "SELECT version FROM schema_migrations ORDER BY version"
+    )] == [
+        "001_initial", "002_security", "003_v2_catalog",
+        "004_v2_assessment_leads", "005_v2_appointments_analytics",
+    ]
+    assert frozen_catalog_counts(db) == (4, 13, 6)
+
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+    migrations.apply_migrations(db)
+    migrations.apply_migrations(db)
 
     assert EXPECTED_CONTENT_TABLES <= database_tables(db)
-    assert frozen_catalog_counts(db) == before == (4, 13, 6)
-    for table, row_id in sentinels.items():
-        assert db.execute(
-            f"SELECT 1 FROM {table} WHERE id=?", (row_id,)
-        ).fetchone()
+    assert frozen_catalog_counts(db) == (4, 13, 6)
+    assert [row[0] for row in db.execute(
+        "SELECT version FROM schema_migrations ORDER BY version"
+    )][-1] == "006_content_catalog"
+    for label, before in protected.items():
+        table, where, parameters = protected_queries[label]
+        assert exact_rows(db, table, where, parameters) == before, label
 
 
 def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
     expected_columns = {
+        "media_assets": {
+            "id", "storage_name", "display_name", "detected_mime", "byte_size",
+            "sha256", "scan_result_code", "scan_checked_at", "status",
+            "created_at", "ready_at", "archived_at", "updated_at",
+        },
         "content_groups": {
             "id", "entry_type", "industry_id", "scenario_id", "service_id",
             "canonical_slug", "created_at", "updated_at",
@@ -210,6 +327,9 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
             "id", "content_item_id", "block_type", "title", "body_html",
             "settings_json", "media_asset_id", "sort_order",
         },
+        "industry_content": {"id", "content_item_id", "industry_id"},
+        "scenario_content": {"id", "content_item_id", "scenario_id"},
+        "service_content": {"id", "content_item_id", "service_id"},
         "case_content": {
             "id", "content_item_id", "verification_code", "is_anonymized",
             "basis_type", "private_basis_reference", "source_url",
@@ -228,6 +348,37 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
             "source_check_url_sha256", "original_published_at",
             "copyright_notice", "attachment_media_id",
         },
+        "announcement_content": {
+            "id", "content_item_id", "valid_from", "valid_until", "cta_url",
+        },
+        "content_maturity_levels": {
+            "content_item_id", "maturity_code", "sort_order",
+        },
+        "content_slug_aliases": {
+            "id", "entry_type", "old_slug", "content_group_id", "created_at",
+        },
+        "scenario_cases": {
+            "scenario_content_item_id", "case_content_group_id", "sort_order",
+        },
+        "scenario_resources": {
+            "scenario_content_item_id", "resource_content_group_id", "sort_order",
+        },
+        "service_cases": {
+            "service_content_item_id", "case_content_group_id", "sort_order",
+        },
+        "service_resources": {
+            "service_content_item_id", "resource_content_group_id", "sort_order",
+        },
+        "industry_cases": {
+            "industry_content_item_id", "case_content_group_id", "sort_order",
+        },
+        "industry_resources": {
+            "industry_content_item_id", "resource_content_group_id", "sort_order",
+        },
+        "content_audit_events": {
+            "id", "content_item_id", "event_code", "actor_text", "details_json",
+            "created_at",
+        },
         "legacy_content_reviews": {
             "id", "source_table", "source_id", "title_summary", "source_checksum",
             "proposed_action", "reason_code", "decision_action", "decision_at",
@@ -245,6 +396,134 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
     }
     for table, expected in expected_columns.items():
         assert columns(db, table) == expected
+
+    expected_foreign_keys = {
+        "media_assets": set(),
+        "content_groups": {
+            ("industry_id", "industries", "id", "NO ACTION"),
+            ("scenario_id", "scenarios", "id", "NO ACTION"),
+            ("service_id", "services", "id", "NO ACTION"),
+        },
+        "content_items": {
+            ("content_group_id", "content_groups", "id", "NO ACTION"),
+            ("share_image_media_id", "media_assets", "id", "NO ACTION"),
+        },
+        "content_blocks": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+            ("media_asset_id", "media_assets", "id", "NO ACTION"),
+        },
+        "industry_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+            ("industry_id", "industries", "id", "NO ACTION"),
+        },
+        "scenario_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+            ("scenario_id", "scenarios", "id", "NO ACTION"),
+        },
+        "service_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+            ("service_id", "services", "id", "NO ACTION"),
+        },
+        "case_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+        },
+        "case_metrics": {
+            ("case_content_item_id", "content_items", "id", "NO ACTION"),
+        },
+        "resource_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+            ("attachment_media_id", "media_assets", "id", "NO ACTION"),
+        },
+        "announcement_content": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+        },
+        "content_maturity_levels": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+        },
+        "content_slug_aliases": {
+            ("content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "scenario_cases": {
+            ("scenario_content_item_id", "content_items", "id", "NO ACTION"),
+            ("case_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "scenario_resources": {
+            ("scenario_content_item_id", "content_items", "id", "NO ACTION"),
+            ("resource_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "service_cases": {
+            ("service_content_item_id", "content_items", "id", "NO ACTION"),
+            ("case_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "service_resources": {
+            ("service_content_item_id", "content_items", "id", "NO ACTION"),
+            ("resource_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "industry_cases": {
+            ("industry_content_item_id", "content_items", "id", "NO ACTION"),
+            ("case_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "industry_resources": {
+            ("industry_content_item_id", "content_items", "id", "NO ACTION"),
+            ("resource_content_group_id", "content_groups", "id", "NO ACTION"),
+        },
+        "content_audit_events": {
+            ("content_item_id", "content_items", "id", "NO ACTION"),
+        },
+        "legacy_content_reviews": set(),
+        "legacy_content_mappings": {
+            ("target_content_group_id", "content_groups", "id", "NO ACTION"),
+            ("target_content_item_id", "content_items", "id", "NO ACTION"),
+        },
+    }
+    for table, expected in expected_foreign_keys.items():
+        assert foreign_keys(db, table) == expected
+
+    expected_indexes = {
+        ("media_assets", "active_media_sha256_unique"): (
+            1, 1, ("sha256",), "where status in ('pending', 'ready')",
+        ),
+        ("content_items", "one_draft_content_revision"): (
+            1, 1, ("content_group_id",), "where status = 'draft'",
+        ),
+        ("content_items", "one_published_content_revision"): (
+            1, 1, ("content_group_id",), "where status = 'published'",
+        ),
+        ("content_items", "one_public_slug_per_type"): (
+            1, 1, ("entry_type", "slug"), "where status = 'published'",
+        ),
+        ("content_items", "content_items_group_status"): (
+            0, 0, ("content_group_id", "status"), None,
+        ),
+    }
+    for (table, name), (unique, partial, index_columns, predicate) in expected_indexes.items():
+        assert named_index(db, table, name) == (unique, partial, index_columns)
+        sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)
+        ).fetchone()[0]
+        normalized_sql = " ".join(sql.lower().split())
+        if predicate is not None:
+            assert predicate in normalized_sql
+
+    required_triggers = {
+        "require_new_media_pending",
+        "enforce_media_status_transition",
+        "freeze_ready_media_identity",
+        "prevent_referenced_ready_media_archive",
+        "prevent_published_content_edit",
+        "validate_content_publication",
+        "validate_content_maturity_insert",
+        "validate_content_maturity_update",
+        "validate_content_slug_alias_insert",
+        "prevent_canonical_slug_alias_collision_update",
+        "prevent_content_item_delete",
+        "prevent_legacy_article_delete",
+    }
+    actual_triggers = {
+        row[0]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+    }
+    assert required_triggers <= actual_triggers
 
     industry_id = db.execute("SELECT id FROM industries LIMIT 1").fetchone()[0]
     with pytest.raises(sqlite3.IntegrityError):
@@ -270,6 +549,102 @@ def test_database_rejects_invalid_revision_identity_status_and_timestamp(db):
             "UPDATE content_groups SET entry_type='resource' WHERE id=?",
             (group_id,),
         )
+
+
+@pytest.mark.parametrize("column", ["created_at", "updated_at"])
+def test_published_revision_rejects_direct_timestamp_edits(db, column):
+    group_id = insert_group(db, slug=f"published-{column}")
+    item_id = insert_item(db, group_id, slug=f"published-{column}")
+    add_announcement_extension(db, item_id)
+    publish(db, item_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            f"UPDATE content_items SET {column}=? WHERE id=?",
+            ("2026-08-24 12:35:00", item_id),
+        )
+
+
+def test_published_revision_can_archive_with_a_new_updated_timestamp(db):
+    group_id = insert_group(db, slug="legal-archive")
+    item_id = insert_item(db, group_id, slug="legal-archive")
+    add_announcement_extension(db, item_id)
+    publish(db, item_id)
+
+    archive_time = "2026-08-24 12:35:00"
+    db.execute(
+        "UPDATE content_items SET status='archived',archived_at=?,updated_at=? "
+        "WHERE id=?",
+        (archive_time, archive_time, item_id),
+    )
+
+    assert tuple(db.execute(
+        "SELECT status,archived_at,updated_at FROM content_items WHERE id=?",
+        (item_id,),
+    ).fetchone()) == ("archived", archive_time, archive_time)
+
+
+def test_publication_requires_revision_slug_to_match_group_canonical_slug(db):
+    group_id = insert_group(db, slug="canonical-slug")
+    item_id = insert_item(db, group_id, slug="different-slug")
+    add_announcement_extension(db, item_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        publish(db, item_id)
+
+
+def test_slug_change_order_allows_archive_alias_group_update_then_publish(db):
+    group_id = insert_group(db, slug="old-slug")
+    old_item = insert_item(db, group_id, slug="old-slug")
+    add_announcement_extension(db, old_item)
+    publish(db, old_item)
+    new_item = insert_item(db, group_id, revision=2, slug="new-slug")
+    add_announcement_extension(db, new_item)
+
+    archive_time = "2026-08-24 12:35:00"
+    db.execute(
+        "UPDATE content_items SET status='archived',archived_at=?,updated_at=? "
+        "WHERE id=?",
+        (archive_time, archive_time, old_item),
+    )
+    db.execute(
+        "UPDATE content_groups SET canonical_slug=?,updated_at=? WHERE id=?",
+        ("new-slug", archive_time, group_id),
+    )
+    db.execute(
+        "INSERT INTO content_slug_aliases "
+        "(entry_type,old_slug,content_group_id,created_at) VALUES (?,?,?,?)",
+        ("announcement", "old-slug", group_id, archive_time),
+    )
+    db.execute(
+        "UPDATE content_items SET status='published',published_at=?,updated_at=? "
+        "WHERE id=?",
+        (archive_time, archive_time, new_item),
+    )
+
+    assert tuple(db.execute(
+        "SELECT canonical_slug,old_slug FROM content_groups "
+        "JOIN content_slug_aliases ON content_slug_aliases.content_group_id=content_groups.id "
+        "WHERE content_groups.id=?",
+        (group_id,),
+    ).fetchone()) == ("new-slug", "old-slug")
+
+
+def test_public_slug_is_unique_per_type_while_draft_duplicates_are_allowed(db):
+    public_group = insert_group(db, slug="shared-public-slug")
+    public_item = insert_item(db, public_group, slug="shared-public-slug")
+    add_announcement_extension(db, public_item)
+    publish(db, public_item)
+
+    draft_group = insert_group(db, slug="different-canonical")
+    draft_item = insert_item(db, draft_group, slug="shared-public-slug")
+    add_announcement_extension(db, draft_item)
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (draft_item,)
+    ).fetchone()[0] == "draft"
+
+    with pytest.raises(sqlite3.IntegrityError):
+        publish(db, draft_item)
     with pytest.raises(sqlite3.IntegrityError):
         db.execute(
             "INSERT INTO content_groups "
@@ -365,6 +740,43 @@ def test_blocks_maturity_resource_types_and_relation_targets_are_constrained(db)
         )
 
 
+def test_maturity_levels_require_a_scenario_owner_on_insert(db):
+    announcement_group = insert_group(db, slug="wrong-maturity-owner")
+    announcement_item = insert_item(
+        db, announcement_group, slug="wrong-maturity-owner"
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO content_maturity_levels "
+            "(content_item_id,maturity_code,sort_order) VALUES (?,?,?)",
+            (announcement_item, "explore", 0),
+        )
+
+
+def test_maturity_levels_reject_updating_owner_away_from_scenario(db):
+    scenario_group = insert_group(db, entry_type="scenario", slug="maturity-scenario")
+    scenario_item = insert_item(
+        db, scenario_group, entry_type="scenario", slug="maturity-scenario"
+    )
+    announcement_group = insert_group(db, slug="maturity-announcement")
+    announcement_item = insert_item(
+        db, announcement_group, slug="maturity-announcement"
+    )
+    db.execute(
+        "INSERT INTO content_maturity_levels "
+        "(content_item_id,maturity_code,sort_order) VALUES (?,?,?)",
+        (scenario_item, "pilot", 0),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "UPDATE content_maturity_levels SET content_item_id=? "
+            "WHERE content_item_id=? AND maturity_code='pilot'",
+            (announcement_item, scenario_item),
+        )
+
+
 def test_slug_aliases_cannot_collide_with_aliases_or_canonical_slugs(db):
     first = insert_group(db, slug="first")
     second = insert_group(db, slug="second")
@@ -403,6 +815,34 @@ def test_media_active_deduplication_and_archived_reupload_contract(db):
     )
     replacement = insert_media(db, "b", storage_suffix="b-reupload")
     assert replacement != first
+
+
+@pytest.mark.parametrize("status", ["ready", "archived"])
+def test_new_media_rows_must_start_pending(db, status):
+    is_ready = status == "ready"
+    db_values = (
+        f"direct-{status}.png",
+        f"direct-{status}.png",
+        "image/png",
+        100,
+        hashlib.sha256(status.encode("ascii")).hexdigest(),
+        "clean" if is_ready else None,
+        SHANGHAI_TIME if is_ready else None,
+        status,
+        SHANGHAI_TIME,
+        SHANGHAI_TIME if is_ready else None,
+        SHANGHAI_TIME if status == "archived" else None,
+        SHANGHAI_TIME,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO media_assets "
+            "(storage_name,display_name,detected_mime,byte_size,sha256,"
+            "scan_result_code,scan_checked_at,status,created_at,ready_at,"
+            "archived_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            db_values,
+        )
 
 
 def test_media_transitions_and_ready_identity_are_database_enforced(db):

@@ -72,10 +72,32 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
     finally:
         db.close()
 
-    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+    v2_migrations_dir = tmp_path / "v2_migrations_through_005"
+    v2_migrations_dir.mkdir()
+    for migration_name in (
+        "001_initial.sql",
+        "002_security.sql",
+        "003_v2_catalog.sql",
+        "004_v2_assessment_leads.sql",
+        "005_v2_appointments_analytics.sql",
+    ):
+        shutil.copy2(
+            PROJECT_ROOT / "migrations" / migration_name,
+            v2_migrations_dir / migration_name,
+        )
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", v2_migrations_dir)
     models.init_db()
     db = models.get_db()
     try:
+        versions_before_content = [
+            row[0]
+            for row in db.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+        migrations.apply_migrations(db)
+        migrations.apply_migrations(db)
         versions = [
             row[0]
             for row in db.execute(
@@ -96,6 +118,13 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
         db.close()
 
     assert versions_before_upgrade == ["001_initial", "002_security"]
+    assert versions_before_content == [
+        "001_initial",
+        "002_security",
+        "003_v2_catalog",
+        "004_v2_assessment_leads",
+        "005_v2_appointments_analytics",
+    ]
     assert versions == [
         "001_initial",
         "002_security",

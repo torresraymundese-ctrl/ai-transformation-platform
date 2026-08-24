@@ -48,6 +48,13 @@ CREATE TABLE media_assets (
 CREATE UNIQUE INDEX active_media_sha256_unique
 ON media_assets(sha256) WHERE status IN ('pending', 'ready');
 
+CREATE TRIGGER require_new_media_pending
+BEFORE INSERT ON media_assets
+WHEN NEW.status <> 'pending'
+BEGIN
+    SELECT RAISE(ABORT, 'new media must start pending');
+END;
+
 CREATE TRIGGER prevent_media_storage_name_update
 BEFORE UPDATE OF storage_name ON media_assets
 WHEN NEW.storage_name <> OLD.storage_name
@@ -233,9 +240,11 @@ WHEN OLD.status = 'published' AND (
     NEW.share_image_media_id IS NOT OLD.share_image_media_id OR
     NEW.publish_at IS NOT OLD.publish_at OR
     NEW.published_at IS NOT OLD.published_at OR
+    NEW.created_at IS NOT OLD.created_at OR
     (NEW.status = OLD.status AND (
         NEW.archived_at IS NOT OLD.archived_at OR
-        NEW.lock_version IS NOT OLD.lock_version
+        NEW.lock_version IS NOT OLD.lock_version OR
+        NEW.updated_at IS NOT OLD.updated_at
     ))
 )
 BEGIN
@@ -433,6 +442,26 @@ CREATE TABLE content_maturity_levels (
     UNIQUE(content_item_id, sort_order),
     FOREIGN KEY (content_item_id) REFERENCES content_items(id)
 );
+
+CREATE TRIGGER validate_content_maturity_insert
+BEFORE INSERT ON content_maturity_levels
+WHEN NOT EXISTS (
+    SELECT 1 FROM content_items
+    WHERE id = NEW.content_item_id AND entry_type = 'scenario'
+)
+BEGIN
+    SELECT RAISE(ABORT, 'maturity level owner must be scenario content');
+END;
+
+CREATE TRIGGER validate_content_maturity_update
+BEFORE UPDATE OF content_item_id ON content_maturity_levels
+WHEN NOT EXISTS (
+    SELECT 1 FROM content_items
+    WHERE id = NEW.content_item_id AND entry_type = 'scenario'
+)
+BEGIN
+    SELECT RAISE(ABORT, 'maturity level owner must be scenario content');
+END;
 
 CREATE TABLE content_slug_aliases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1261,6 +1290,11 @@ CREATE TRIGGER validate_content_publication
 BEFORE UPDATE OF status ON content_items
 WHEN NEW.status = 'published' AND OLD.status <> 'published'
 BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM content_groups
+        WHERE id = NEW.content_group_id AND canonical_slug = NEW.slug
+    ) THEN RAISE(ABORT, 'published slug must match canonical slug') END;
+
     SELECT CASE WHEN (
         (SELECT COUNT(*) FROM industry_content WHERE content_item_id = NEW.id) +
         (SELECT COUNT(*) FROM scenario_content WHERE content_item_id = NEW.id) +
