@@ -136,37 +136,39 @@ def list_media_assets():
         connection.close()
 
 
-def get_published_media_asset(asset_id, *, kind):
+def get_published_media_asset(asset_id, *, kind, now=None):
     """Return a ready asset only when a current publication references it."""
+    current_clause = "ci.status='published' AND (ci.publish_at IS NULL OR ci.publish_at<=?)"
     if kind == "image":
         allowed = IMAGE_MIMES
         reference = (
             "EXISTS (SELECT 1 FROM content_items ci "
-            "WHERE ci.status='published' AND ci.share_image_media_id=ma.id) OR "
+            f"WHERE {current_clause} AND ci.share_image_media_id=ma.id) OR "
             "EXISTS (SELECT 1 FROM content_blocks cb JOIN content_items ci "
-            "ON ci.id=cb.content_item_id WHERE ci.status='published' "
+            f"ON ci.id=cb.content_item_id WHERE {current_clause} "
             "AND cb.block_type='image_text' AND cb.media_asset_id=ma.id)"
         )
     elif kind == "download":
         allowed = ATTACHMENT_MIMES
         reference = (
             "EXISTS (SELECT 1 FROM content_blocks cb JOIN content_items ci "
-            "ON ci.id=cb.content_item_id WHERE ci.status='published' "
+            f"ON ci.id=cb.content_item_id WHERE {current_clause} "
             "AND cb.block_type='download' AND cb.media_asset_id=ma.id) OR "
             "EXISTS (SELECT 1 FROM resource_content rc JOIN content_items ci "
-            "ON ci.id=rc.content_item_id WHERE ci.status='published' "
+            f"ON ci.id=rc.content_item_id WHERE {current_clause} "
             "AND rc.attachment_media_id=ma.id)"
         )
     else:
         raise ValueError("unknown public media kind")
     placeholders = ",".join("?" for _ in allowed)
+    timestamp = format_shanghai(shanghai_now() if now is None else now)
     connection = models.get_db()
     try:
         row = connection.execute(
             f"SELECT ma.* FROM media_assets ma "
             f"WHERE ma.id=? AND ma.status='ready' "
             f"AND ma.detected_mime IN ({placeholders}) AND ({reference})",
-            (asset_id, *sorted(allowed)),
+            (asset_id, *sorted(allowed), timestamp, timestamp),
         ).fetchone()
         return _asset(row)
     finally:

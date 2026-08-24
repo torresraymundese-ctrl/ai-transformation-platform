@@ -1042,10 +1042,34 @@ def test_all_six_relation_types_survive_revision_copy(db):
     publish_content(resource_id, 2, actor="admin", now=NOW)
     case_group = _row(db, case_id)["content_group_id"]
     resource_group = _row(db, resource_id)["content_group_id"]
+    industry_candidates = db.execute(
+        "SELECT DISTINCT i.id AS industry_id,s.id AS scenario_id FROM industries i "
+        "JOIN industry_branches ib ON ib.industry_id=i.id "
+        "JOIN scenario_branches sb ON sb.industry_branch_id=ib.id "
+        "JOIN scenarios s ON s.id=sb.scenario_id "
+        "WHERE s.code IN ('mfg_operations_reporting','retail_ai_service') "
+        "ORDER BY s.code"
+    ).fetchall()
+    assert len(industry_candidates) == 2
+    for index, candidate in enumerate(industry_candidates):
+        candidate_content = _create_complete_scenario_draft(
+            db,
+            ContentDraft(
+                entry_type="scenario",
+                slug=f"industry-relation-candidate-{index}",
+                title="行业关联完整场景",
+                summary="为行业修订复制测试保留完整的公开场景依赖。",
+                seo_title="行业关联完整场景",
+                seo_description="验证行业发布所需的公开完整场景依赖。",
+                extension={"scenario_id": candidate["scenario_id"]},
+                maturity_codes=("explore",),
+            ),
+        )
+        publish_content(candidate_content, 1, actor="admin", now=NOW)
     identities = {
         "scenario": [row[0] for row in db.execute("SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 2")],
         "service": [row[0] for row in db.execute("SELECT id FROM services WHERE status='published' ORDER BY id LIMIT 2")],
-        "industry": [row[0] for row in db.execute("SELECT id FROM industries WHERE status='published' ORDER BY id LIMIT 2")],
+        "industry": [row["industry_id"] for row in industry_candidates],
     }
     relation_types = (
         "scenario_case", "scenario_resource", "service_case",
@@ -1065,6 +1089,8 @@ def test_all_six_relation_types_survive_revision_copy(db):
             seo_description="验证结构化案例与资源关联的完整修订复制。",
             extension={f"{owner_type}_id": core_id},
             relations=(ContentRelation(relation_type, target_group),),
+            blocks=(ContentBlock("rich_text", body_html="<p>行业公开概述。</p>"),)
+            if owner_type == "industry" else (),
             maturity_codes=("explore",) if owner_type == "scenario" else (),
         )
         original = (

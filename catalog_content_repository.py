@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from html import unescape
-import json
 from numbers import Real
 import re
 from types import MappingProxyType
@@ -11,6 +10,7 @@ from typing import Any, Mapping
 import models
 from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import as_shanghai, format_shanghai
+from content_json import ContentJsonError, decode_database_json
 from content_contracts import ContentDraft
 from content_validation import ContentValidationError, _safe_cta
 from pagination import Page, PageRequest
@@ -326,8 +326,8 @@ def _resolution(db, entry_type, slug, now):
 def _public_block(row):
     """Expose only the reviewed block fields required by the public renderer."""
     try:
-        settings = json.loads(row["settings_json"] or "{}")
-    except (TypeError, json.JSONDecodeError):
+        settings = decode_database_json(row["settings_json"])
+    except ContentJsonError:
         return None
     if type(settings) is not dict:
         return None
@@ -426,8 +426,8 @@ def _nonblank_values(values):
 
 def _exact_nonblank_json_list(value):
     try:
-        decoded = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
+        decoded = decode_database_json(value)
+    except ContentJsonError:
         return None
     if type(decoded) is not list or not _nonblank_values(decoded):
         return None

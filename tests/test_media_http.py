@@ -5,14 +5,18 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
+from datetime import datetime
 
 from flask import render_template_string
 from PIL import Image
 from pypdf import PdfWriter
+import pytest
 from werkzeug.test import EnvironBuilder
 from werkzeug.wrappers import Response
 
 import models
+import media_service
+from content_clock import SHANGHAI
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -96,7 +100,7 @@ def _latest_asset():
         db.close()
 
 
-def _publish_reference(db, *, asset_id, kind):
+def _publish_reference(db, *, asset_id, kind, publish_at=None):
     slug = f"media-{kind}-{asset_id}"
     group_id = db.execute(
         "INSERT INTO content_groups (entry_type,canonical_slug,created_at,updated_at) "
@@ -120,13 +124,13 @@ def _publish_reference(db, *, asset_id, kind):
         )
     db.execute(
         "UPDATE content_items SET status='published',published_at='2026-08-24 10:00:00',"
-        "updated_at='2026-08-24 10:00:00' WHERE id=?",
-        (content_id,),
+        "publish_at=?,updated_at='2026-08-24 10:00:00' WHERE id=?",
+        (publish_at, content_id),
     )
     db.commit()
 
 
-def _publish_resource_attachment(db, asset_id):
+def _publish_resource_attachment(db, asset_id, *, publish_at=None):
     slug = f"resource-attachment-{asset_id}"
     group_id = db.execute(
         "INSERT INTO content_groups (entry_type,canonical_slug,created_at,updated_at) "
@@ -149,8 +153,8 @@ def _publish_resource_attachment(db, asset_id):
     )
     db.execute(
         "UPDATE content_items SET status='published',published_at='2026-08-24 10:00:00',"
-        "updated_at='2026-08-24 10:00:00' WHERE id=?",
-        (content_id,),
+        "publish_at=?,updated_at='2026-08-24 10:00:00' WHERE id=?",
+        (publish_at, content_id),
     )
     db.commit()
 
@@ -344,6 +348,51 @@ def test_published_resource_attachment_uses_only_the_download_route(
     assert download.data == data
     assert download.headers["Content-Disposition"].startswith("attachment;")
     assert client.get(f"/media/{asset['id']}/image").status_code == 404
+
+
+@pytest.mark.parametrize("reference_kind", ("share", "image_block"))
+def test_future_published_image_references_are_private_until_due(
+    client, admin_client, db, monkeypatch, reference_kind
+):
+    assert _upload(admin_client, f"future-{reference_kind}.png", "image/png", _image_bytes()).status_code == 302
+    asset = _latest_asset()
+    due = datetime(2030, 1, 1, 10, 0, 0, tzinfo=SHANGHAI)
+    _publish_reference(
+        db,
+        asset_id=asset["id"],
+        kind=reference_kind,
+        publish_at="2030-01-01 10:00:00",
+    )
+
+    assert client.get(f"/media/{asset['id']}/image").status_code == 404
+
+    monkeypatch.setattr(media_service, "shanghai_now", lambda: due)
+
+    assert client.get(f"/media/{asset['id']}/image").status_code == 200
+
+
+@pytest.mark.parametrize("reference_kind", ("download", "resource"))
+def test_future_published_download_references_are_private_until_due(
+    client, admin_client, db, monkeypatch, reference_kind
+):
+    assert _upload(admin_client, f"future-{reference_kind}.pdf", "application/pdf", _pdf_bytes()).status_code == 302
+    asset = _latest_asset()
+    due = datetime(2030, 1, 1, 10, 0, 0, tzinfo=SHANGHAI)
+    if reference_kind == "resource":
+        _publish_resource_attachment(db, asset["id"], publish_at="2030-01-01 10:00:00")
+    else:
+        _publish_reference(
+            db,
+            asset_id=asset["id"],
+            kind=reference_kind,
+            publish_at="2030-01-01 10:00:00",
+        )
+
+    assert client.get(f"/media/{asset['id']}/download").status_code == 404
+
+    monkeypatch.setattr(media_service, "shanghai_now", lambda: due)
+
+    assert client.get(f"/media/{asset['id']}/download").status_code == 200
 
 
 def test_missing_archived_and_unreferenced_public_assets_share_generic_404(

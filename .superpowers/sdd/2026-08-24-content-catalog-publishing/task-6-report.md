@@ -474,3 +474,178 @@ report-only append. No full suite, network access, dependency installation,
 production server, Nginx, or real database was used. The original full-suite
 outcome remains **UNKNOWN**, and the historical PyPI-network violation remains
 **CONFIRMED**.
+
+## Fix1e — industry publication, bounded content JSON, and future media correction
+
+**Status: DONE_WITH_CONCERNS.** This Task-6-only correction retains the
+original full-suite outcome as **UNKNOWN** and the historical PyPI network
+violation as **CONFIRMED**. Fix1e made no network request, dependency
+installation, production-server/Nginx call, or real-database access; every
+test used a temporary SQLite database and local Flask clients/mocks.
+
+### Offline environment
+
+Every Fix1e pytest invocation used the assigned interpreter, process-scoped
+offline overlay, `-p no:cacheprovider`, and a fresh
+`pytest-task6-fix1e-*` basetemp:
+
+```text
+PYTHON=D:\\Codex干活\\企业AI转型平台2.0升级\\V0.2-server-snapshot-20260819\\.venv\\Scripts\\python.exe
+PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps
+PYPDF_VERSION=6.10.0
+PYPDF_SOURCE=...\\.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps\\pypdf\\__init__.py
+TASK6_ENV_EXIT=0
+```
+
+### TDD / debugging evidence
+
+The first `red-foundations-001` collection attempt stopped on a test-only
+non-ASCII Python bytes literal (`SyntaxError: bytes can only contain ASCII
+literal characters`), before production behavior could run. It was corrected
+to ASCII fixture text and not counted as a behavioral RED. The genuine
+behavioral RED was:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1e-red-foundations-002 -k "industry_with_blank_overview or industry_publication_requires_each_live_public_dependency or due_industry_with_later_missing_overview or published_blank_deliverable or formal_publish_rejects_non_text_json or public_catalog_fails_closed_for_non_text_or_unbounded_json or future_published_scenario_hides_detail"
+24 failed, 1 passed, 87 deselected in 17.93s
+TASK6_PYTEST_EXIT=1
+```
+
+It demonstrated that a blank or dependency-incomplete industry draft could
+replace its healthy public revision, a due industry could still publish after
+post-schedule damage, a published blank deliverable was accepted when another
+deliverable was valid, binary/deep/oversized JSON was accepted or surfaced as
+500, and a future-dated published scenario was visible. The Fix1e industry
+gate stays entirely in `publishing_repository`: it queries only currently due
+published scenario revisions and reuses the local scenario publication
+validator, avoiding a Blueprint SQL path or a catalog-to-publishing import
+cycle.
+
+The initial combined GREEN had one test-clock issue:
+
+```text
+pytest-task6-fix1e-green-foundations-003
+1 failed, 26 passed, 85 deselected in 18.88s
+TASK6_PYTEST_EXIT=1
+```
+
+The test had used a 2026 time which the host clock had already passed. It was
+changed to the explicit 2030 Shanghai instant; the single media-clock proof
+was `1 passed in 1.22s`, exit 0 (`green-media-clock-004`) and the full selected
+GREEN was:
+
+```text
+pytest-task6-fix1e-green-foundations-005
+27 passed, 85 deselected in 18.87s
+TASK6_PYTEST_EXIT=0
+```
+
+One pre-existing generic publishing fixture then failed correctly under the
+new global industry invariant: `test_all_six_relation_types_survive_revision_copy`
+created an incomplete industry aggregate (`1 failed, 33 passed in 21.05s`,
+`focused-publishing-008`, exit 1). Its first replacement query selected
+duplicate branches (`green-publishing-fixture-009`: `1 failed in 0.94s`, exit
+1). The fixture now creates two complete, distinct scenario dependencies and
+an overview block for the two industry aggregates; targeted GREEN was
+`1 passed in 0.95s`, exit 0 (`green-publishing-fixture-010`). This preserves,
+rather than bypasses, the formal invariant.
+
+The first added future share/resource media test collection attempt was also a
+test-only setup error (`NameError: pytest is not defined`,
+`green-media-references-015`, exit 1). After importing `pytest`, the relevant
+media reference selection was `8 passed, 16 deselected in 7.87s`, exit 0
+(`green-media-references-016`).
+
+### Implementation
+
+- `content_json.py` provides a dependency-free decoder that accepts only exact
+  `str` database values, caps content at 16,384 characters and nesting at 32,
+  and maps `ValueError`, `JSONDecodeError`, and `RecursionError` to a bounded
+  content error without catching `MemoryError` or `BaseException`.
+- Catalog projections fail closed for invalid block settings, scenario risks,
+  and service step/prerequisite/acceptance JSON. Publication converts the same
+  condition to stable `ContentValidationError("content_json_invalid")` before
+  any archival/audit state transition.
+- Industry formal publication now requires a published nonblank core,
+  meaningful overview, published nonblank pain/department/company-size data,
+  and at least one now-effective associated scenario that passes the existing
+  complete scenario/service/deliverable publication rules. Cases/resources
+  remain optional.
+- Scenario publication requires both a valid published deliverable and no
+  blank published deliverable; archived blank historical deliverables remain
+  harmless.
+- Public-media reference queries use the trusted Shanghai clock parameter for
+  every share-image, block-image, block-download, and resource-attachment
+  reference, requiring `publish_at IS NULL OR publish_at <= now`.
+
+### Focused GREEN evidence
+
+```text
+pytest-task6-fix1e-focused-public-020
+112 passed in 67.60s (0:01:07)
+TASK6_PYTEST_EXIT=0
+
+pytest-task6-fix1e-focused-publishing-018
+34 passed in 25.44s
+TASK6_PYTEST_EXIT=0
+
+pytest-task6-fix1e-focused-media-017
+24 passed in 20.80s
+TASK6_PYTEST_EXIT=0
+
+pytest-task6-fix1e-focused-migrations-seed-019
+48 passed in 26.77s
+TASK6_PYTEST_EXIT=0
+```
+
+After code/test freeze, the combined affected set was run once in a retained
+direct pytest session (still not the full suite):
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest tests\\test_public_catalog.py tests\\test_content_publishing.py tests\\test_media_http.py tests\\test_content_migrations.py tests\\test_content_seed.py tests\\test_v2_migrations.py -q -p no:cacheprovider --basetemp ...\\pytest-task6-fix1e-final-focused-021
+218 passed in 134.14s (0:02:14)
+TASK6_PYTEST_EXIT=0
+```
+
+Earlier public whole-file runs `focused-public-006` and `-007` retained only
+progress dots; their terminal summary/exit is irretrievable and no PASS claim
+is made for them. They are superseded by the direct-session,
+exit-captured `focused-public-014` (`112 passed in 65.29s`, exit 0) and final
+`focused-public-020` above. No full suite was run in Fix1e.
+
+### Static checks and self-review
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile content_json.py catalog_content_repository.py publishing_repository.py publishing_service.py media_service.py tests\\test_public_catalog.py tests\\test_content_publishing.py tests\\test_media_http.py
+TASK6_PYCOMPILE_EXIT=0
+
+git diff --check b4b2f6a7736f7b60cb9fd139def771e05cff8e7e
+BLUEPRINT_DIRECT_SQL_GUARD=PASS
+TASK6_STATIC_EXIT=0
+```
+
+Reviewed: immediate and due transaction ordering; healthy old-revision
+preservation; required industry/core/scenario/service dependencies; exact JSON
+type/size/depth behavior and public private-404 boundaries; published versus
+archived deliverables; strict time-aware media lookup with no Host or SQLite
+localtime dependency; no direct SQL in the public Blueprint; existing catalog
+filter/canonical/analytics/private-cache behavior; and the frozen
+`data_process_foundation` product-data limitation. The code does not change
+that frozen `pain_codes=[]` data, does not invent claims, and does not expand
+share-image/resource MIME policy.
+
+### Changed files
+
+- `content_json.py`
+- `catalog_content_repository.py`
+- `publishing_repository.py`
+- `media_service.py`
+- `tests/test_public_catalog.py`
+- `tests/test_content_publishing.py`
+- `tests/test_media_http.py`
+- this report
+
+Known limitations remain the original full-suite result **UNKNOWN** and the
+historical PyPI network violation **CONFIRMED**. Controller-side final
+verification remains the appropriate next step; Fix1e did not run a full
+suite.
