@@ -435,3 +435,42 @@ fresh GREEN was `4 passed in 0.47s`, `TASK6_PYTEST_EXIT=0`, with basetemp
 ### Known limitation / required product decision
 
 The frozen assessment manifest deliberately defines `data_process_foundation` as a fallback-only scenario with `pain_codes=[]`. The later Fix1d requirement makes a published pain mandatory for every public scenario. To avoid changing shared assessment/private matching behavior, this Fix1d change does not invent or add a pain association: 12 public-complete seeded scenarios formally publish and that fallback scenario is rejected and private. Publishing it publicly now requires an explicit product-approved core association change outside this Task-6 implementation scope.
+
+## Fix1d controller verification
+
+The controller independently verified code commit
+`05eddacf3befe596d1dd51da1e3c58c64e0210c7` from the clean assigned
+worktree. Every pytest invocation used the assigned project interpreter,
+process-scoped `PYTHONPATH` pointing only to the checked-in offline
+`local-deps` overlay, `-p no:cacheprovider`, and a unique basetemp. The
+resolved dependency evidence was pypdf `6.10.0` loaded from
+`.superpowers/sdd/2026-08-24-content-catalog-publishing/local-deps`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_content_publishing.py tests\test_v2_migrations.py tests\test_app_factory_and_migrations.py tests\test_catalog_content_admin.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1d-focused-001
+```
+
+Result: `188 passed in 102.83s (0:01:42)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1d-public-partition-001
+```
+
+Result: `242 passed in 141.00s (0:02:20)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1d-related-partition-001
+```
+
+Result: `204 passed in 80.49s (0:01:20)`, tool `exit_code=0`.
+
+Controller static verification also returned `py_compile=0`,
+`git diff --check 1c359a7..05eddac=0`, valid input JSON, and no direct SQL
+call in `blueprints/public_catalog.py`. Tracked status was clean before this
+report-only append. No full suite, network access, dependency installation,
+production server, Nginx, or real database was used. The original full-suite
+outcome remains **UNKNOWN**, and the historical PyPI-network violation remains
+**CONFIRMED**.
