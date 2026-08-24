@@ -1409,3 +1409,51 @@ external task-card behavior was broadened. The sole historical full-suite
 outcome remains **UNKNOWN** and was not rerun; the historical PyPI-network
 violation remains **CONFIRMED**; the frozen `data_process_foundation`
 product-data limitation remains unchanged.
+
+## Fix1i controller verification
+
+The controller independently verified frozen implementation commit
+`0ab8d09968ff3cb65f21c51c7f1ea10f898b0954` from a clean tracked tree. Each
+pytest command used the assigned Python `3.12.13` interpreter, the
+process-scoped offline `local-deps` overlay (`pypdf 6.10.0`),
+`-p no:cacheprovider`, and a unique basetemp. The three commands ran in
+parallel against isolated temporary databases; none edited the repository.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_content_publishing.py tests\test_content_validation.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1i-focused-001
+```
+
+Result: `517 passed in 282.61s (0:04:42)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1i-public-partition-001
+```
+
+Result: `363 passed in 232.84s (0:03:52)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1i-related-partition-001
+```
+
+Result: `314 passed in 169.95s (0:02:49)`, tool `exit_code=0`.
+
+Controller `git diff --check 1c359a7..0ab8d09` returned exit 0. Both
+Blueprint direct-SQL scans returned no matches (`rg` exit 1, interpreted as
+PASS). An initial static command mistakenly sent the Jinja template
+`templates/components/content_blocks.html` to `py_compile` and therefore
+returned the expected template `SyntaxError` with exit 1; no code changed.
+The corrected command was then run over the Python files only:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m py_compile app.py tests\test_public_catalog.py tests\test_catalog_content_admin.py
+```
+
+Corrected `py_compile` result: tool `exit_code=0`. The tracked tree was clean
+before this controller-only report append. No full suite, network access,
+dependency installation, production server, Nginx, or real database was used.
+The original full-suite outcome remains **UNKNOWN**; the historical
+PyPI-network violation remains **CONFIRMED**; and the frozen
+`data_process_foundation` product-data limitation remains unchanged.
