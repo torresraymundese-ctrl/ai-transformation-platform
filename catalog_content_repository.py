@@ -6,9 +6,10 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 import models
+from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import as_shanghai, format_shanghai
 from content_contracts import ContentDraft
-from content_validation import ContentValidationError
+from content_validation import ContentValidationError, _safe_cta
 from pagination import Page, PageRequest
 import publishing_repository
 import publishing_service
@@ -228,13 +229,14 @@ def _scenario_card(db, row) -> ScenarioCard:
             "SELECT DISTINCT i.name FROM scenario_branches sb "
             "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
             "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+            "AND ib.status='published' AND i.status='published' "
             "ORDER BY i.sort_order,i.id",
             (scenario_id,),
         ),
         departments=_names(
             db,
             "SELECT d.name FROM scenario_departments sd JOIN departments d ON d.id=sd.department_id "
-            "WHERE sd.scenario_id=? ORDER BY d.industry_id,d.sort_order,d.id",
+            "WHERE sd.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id",
             (scenario_id,),
         ),
         maturity=_names(
@@ -318,19 +320,68 @@ def _resolution(db, entry_type, slug, now):
     return (row, row is not None)
 
 
+def _public_block(row):
+    """Expose only the reviewed block fields required by the public renderer."""
+    try:
+        settings = json.loads(row["settings_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if type(settings) is not dict:
+        return None
+    block_type = row["block_type"]
+    expected = {
+        "heading": {"level"}, "rich_text": set(),
+        "image_text": {"alignment", "alt_text"}, "metric": {"value", "unit"},
+        "steps": {"items"}, "download": {"label"},
+        "cta": {"label", "url", "style"},
+    }
+    if block_type not in expected or set(settings) != expected[block_type]:
+        return None
+    if block_type == "heading" and settings["level"] not in (2, 3, 4):
+        return None
+    if block_type == "image_text" and (
+        settings["alignment"] not in {"left", "right"}
+        or type(settings["alt_text"]) is not str
+    ):
+        return None
+    if block_type == "metric" and not all(
+        type(settings[key]) is str and settings[key] for key in ("value", "unit")
+    ):
+        return None
+    if block_type == "steps" and not (
+        type(settings["items"]) is list and settings["items"]
+        and all(type(item) is str and item for item in settings["items"])
+    ):
+        return None
+    if block_type in {"download", "cta"} and not settings["label"]:
+        return None
+    if block_type == "cta" and (
+        settings["style"] not in {"primary", "secondary", "text"}
+        or not _safe_cta(settings["url"])
+    ):
+        return None
+    return MappingProxyType({
+        "block_type": block_type, "title": row["title"], "body_html": row["body_html"],
+        "settings": MappingProxyType(settings), "media_asset_id": row["media_asset_id"],
+    })
+
+
 def _blocks(db, content_id):
-    return tuple(
-        MappingProxyType(dict(row)) for row in db.execute(
-            "SELECT block_type,title,body_html FROM content_blocks WHERE content_item_id=? "
-            "ORDER BY sort_order,id", (content_id,)
-        )
-    )
+    blocks = []
+    for row in db.execute(
+        "SELECT block_type,title,body_html,settings_json,media_asset_id FROM content_blocks "
+        "WHERE content_item_id=? ORDER BY sort_order,id", (content_id,)
+    ):
+        block = _public_block(row)
+        if block is not None:
+            blocks.append(block)
+    return tuple(blocks)
 
 
 def _services_for_scenario(db, scenario_id):
     rows = db.execute(
         "SELECT s.id,s.code,s.public_name,s.min_budget,s.max_budget,s.min_weeks,s.max_weeks,"
-        "s.implementation_steps_json,s.prerequisites_json FROM scenario_services link "
+        "s.implementation_steps_json,s.prerequisites_json,s.acceptance_json FROM scenario_services link "
         "JOIN services s ON s.id=link.service_id WHERE link.scenario_id=? "
         "AND s.status='published' ORDER BY s.sort_order,s.id", (scenario_id,)
     ).fetchall()
@@ -339,6 +390,7 @@ def _services_for_scenario(db, scenario_id):
         values = dict(row)
         values["steps"] = tuple(json.loads(values.pop("implementation_steps_json") or "[]"))
         values["prerequisites"] = tuple(json.loads(values.pop("prerequisites_json") or "[]"))
+        values["acceptance"] = tuple(json.loads(values.pop("acceptance_json") or "[]"))
         values["deliverables"] = _names(
             db, "SELECT title FROM service_deliverables WHERE service_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)
         )
@@ -358,6 +410,33 @@ def _scenario_authority(db, scenario_id):
         integration_level=row["integration_level"], min_weeks=row["min_weeks"], max_weeks=row["max_weeks"],
         risk_codes=tuple(json.loads(row["risk_codes_json"])), fallback_only=bool(row["fallback_only"]),
     )
+
+
+def _scenario_inputs(db, scenario_id):
+    departments = _names(
+        db, "SELECT d.name FROM scenario_departments link JOIN departments d "
+        "ON d.id=link.department_id WHERE link.scenario_id=? AND d.status='published' "
+        "ORDER BY d.industry_id,d.sort_order,d.id", (scenario_id,)
+    )
+    pains = _names(
+        db, "SELECT p.name FROM scenario_pains link JOIN pain_points p "
+        "ON p.id=link.pain_point_id WHERE link.scenario_id=? AND p.status='published' "
+        "ORDER BY p.industry_id,p.sort_order,p.id", (scenario_id,)
+    )
+    return tuple(f"部门：{name}" for name in departments) + tuple(
+        f"业务问题：{name}" for name in pains
+    )
+
+
+def _public_risks(authority):
+    risks = []
+    for code in authority.risk_codes:
+        label = RISK_LABELS.get(code)
+        description = RISK_EXPLANATIONS.get(code)
+        if not label or not description:
+            return ()
+        risks.append(MappingProxyType({"label": label, "description": description}))
+    return tuple(risks)
 
 
 def public_industry(slug: str, now) -> Mapping[str, Any] | None:
@@ -406,19 +485,40 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         if authority is None:
             return None
         services = _services_for_scenario(db, authority.scenario_id)
+        departments = _names(db, "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id", (authority.scenario_id,))
+        pains = _names(db, "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id", (authority.scenario_id,))
+        inputs = _scenario_inputs(db, authority.scenario_id)
+        prerequisites = tuple(value for service in services for value in service["prerequisites"])
+        outputs = tuple(value for service in services for value in service["deliverables"])
+        steps = tuple(value for service in services for value in service["steps"])
+        metrics = tuple(
+            MappingProxyType({"label": "验收条件", "value": value})
+            for service in services for value in service["acceptance"]
+        )
+        risks = _public_risks(authority)
+        timeline = tuple((service["min_weeks"], service["max_weeks"]) for service in services)
+        budget = tuple((service["min_budget"], service["max_budget"]) for service in services)
+        if not all((
+            services, departments, inputs, prerequisites, outputs, steps, metrics, risks,
+            timeline, budget,
+        )):
+            return None
         return MappingProxyType({
             "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
             "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": _blocks(db, item["id"]),
-            "industries": _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? ORDER BY i.sort_order,i.id", (authority.scenario_id,)),
-            "departments": _names(db, "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? ORDER BY d.industry_id,d.sort_order,d.id", (authority.scenario_id,)),
-            "pains": _names(db, "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? ORDER BY p.industry_id,p.sort_order,p.id", (authority.scenario_id,)),
+            "industries": _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id", (authority.scenario_id,)),
+            "departments": departments,
+            "pains": pains,
             "maturity": tuple(MATURITY_LABELS[code] for code in _names(db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],))),
             "services": services,
-            "prerequisites": tuple(value for service in services for value in service["prerequisites"]),
-            "outputs": tuple(value for service in services for value in service["deliverables"]),
-            "steps": tuple(value for service in services for value in service["steps"]),
-            "timeline": tuple((service["min_weeks"], service["max_weeks"]) for service in services),
-            "budget": tuple((service["min_budget"], service["max_budget"]) for service in services),
+            "prerequisites": prerequisites,
+            "inputs": inputs,
+            "outputs": outputs,
+            "steps": steps,
+            "metrics": metrics,
+            "risks": risks,
+            "timeline": timeline,
+            "budget": budget,
         })
     finally:
         db.close()

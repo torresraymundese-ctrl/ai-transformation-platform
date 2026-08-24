@@ -16,7 +16,10 @@ def _canonical(path):
 
 @bp.get("/industries")
 def industries():
-    return render_template("industries.html", industries=catalog.public_industries(shanghai_now()))
+    return render_template(
+        "industries.html", industries=catalog.public_industries(shanghai_now()),
+        canonical=_canonical("/industries"),
+    )
 
 
 @bp.get("/industries/<slug>")
@@ -33,7 +36,10 @@ def industry_detail(slug):
 def scenarios():
     filters = catalog.parse_public_scenario_filters(request.args)
     page = catalog.public_scenarios(filters, parse_pagination(request.args), shanghai_now())
-    return render_template("scenarios.html", page=page, filters=filters, maturity_labels=catalog.MATURITY_LABELS)
+    return render_template(
+        "scenarios.html", page=page, filters=filters,
+        maturity_labels=catalog.MATURITY_LABELS, canonical=_canonical("/scenarios"),
+    )
 
 
 @bp.get("/scenarios/<slug>")

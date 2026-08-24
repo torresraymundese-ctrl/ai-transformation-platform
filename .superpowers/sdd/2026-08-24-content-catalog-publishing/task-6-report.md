@@ -100,3 +100,103 @@ Known limits: the public risk and metrics sections intentionally expose no inter
 4. The exact dependency command was `..\\..\\.venv\\Scripts\\python.exe -m pip install "pypdf>=6.10,<7"`. It used approved escalated PyPI network/download access and installed `pypdf 6.16.2`, contrary to the task prompt's no-real-network constraint. No application or production endpoint was contacted.
 
 The missing full-outcome evidence and this environment-scope violation are the reasons for the `DONE_WITH_CONCERNS` status.
+
+## Fix1 — external-review corrections (2026-08-25)
+
+**Status: DONE_WITH_CONCERNS.** This is a separate, Task-6-only fix round.  It preserves the original full-suite outcome as UNKNOWN and the confirmed historical PyPI-network violation above; no full suite was run in this fix round and no further network access, installation, production server, Nginx, or real database was used.
+
+### Changed files
+
+- `catalog_content_repository.py`
+- `blueprints/public_catalog.py`
+- `templates/components/content_blocks.html`
+- `templates/industries.html`, `templates/industry_detail.html`, `templates/scenarios.html`, and `templates/scenario_detail.html`
+- `tests/test_public_catalog.py`
+- this report
+
+### Review corrections and TDD evidence
+
+All Fix1 pytest invocations used the assigned project interpreter, `-p no:cacheprovider`, a fresh `pytest-task6-fix1-*` basetemp, and the already-present immutable local overlay:
+
+```text
+PYTHON=D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe
+PYTHONPATH=.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps
+PYPDF_VERSION=6.10.0
+PYPDF_SOURCE=...\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps\pypdf\__init__.py
+```
+
+The initial event/HTTP RED was run before Fix1 production edits:
+
+```text
+$env:PYTHONPATH=<local-deps>; ..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1-red-001
+7 failed, 18 passed in 15.51s
+```
+
+Those failures proved that formally saved-and-published governed blocks disappeared from the public scenario HTTP response; scenario inputs duplicated prerequisites and metrics/risks were empty; archived industry/department/pain records leaked into public projections; and list canonical links were absent.  A first implementation attempt produced a genuine 500 RED for the block renderer because Jinja resolved `settings.items` as a mapping method rather than the `items` key (`1 failed in 1.20s`); systematic debugging identified that lookup and the renderer now uses bracket lookup.
+
+The CTA assertion was then scoped to the governed CTA block (rather than the page-level assessment CTA) and independently proved the remaining safe-URL bug:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py::test_formally_published_governed_block_types_render_through_safe_public_http -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1-red-cta-001
+1 failed in 1.21s
+```
+
+The shared persisted-CTA validator now accepts only the existing safe local-path/HTTPS schema before the auto-escaped template renders it; it does not use the external-only template URL filter.  The corresponding GREEN was `1 passed in 0.91s` with basetemp `pytest-task6-fix1-green-cta-001`.
+
+The required-information availability boundary was also proved RED before its guard was added:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py::test_scenario_with_missing_required_structured_data_is_not_publicly_available -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1-red-required-data-001
+1 failed in 1.07s  # incomplete prerequisites still returned HTTP 200
+```
+
+It is GREEN with `pytest-task6-fix1-green-required-data-001`: `1 passed in 0.88s`.  The final focused Fix1 command was:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1-focused-final-001
+26 passed in 16.95s
+```
+
+The resulting public read model exposes only exact validated schemas for all seven governed block types (`heading`, `rich_text`, `image_text`, `metric`, `steps`, `download`, `cta`); rich text remains allowlist-sanitized, CTA targets are schema-validated, and media URLs are constructed exclusively through the published public media endpoints.  The test publishes every type through the real admin/service save-and-publish flow before public HTTP assertions.  Scenario inputs are separately structured from published department/pain associations; measurable values are sourced from existing published service acceptance data; reviewed Chinese risk labels/descriptions come from the existing frozen reporting map without codes.  Missing prerequisite, input, output, step, metric, risk, timeline, or budget data makes the scenario unavailable rather than rendering an empty required section.  Associated public industry/department/pain queries now require target `published` status, and list canonical/description values are from the validated `PUBLIC_BASE_URL` only.
+
+### Fix1 regression and static evidence
+
+Controller-equivalent public/analytics/cache/smoke partition first ran as `pytest-task6-fix1-public-analytics-cache-smoke-001`; the execution host retained only progress output and its target exit is irretrievable.  One authorized evidence-capture retry used `pytest-task6-fix1-public-analytics-cache-smoke-002` with an offline local log.  Its retained complete pytest summary is:
+
+```text
+183 passed in 99.07s (0:01:39)
+```
+
+The host detached before that wrapper wrote its `PYTEST_EXIT=` marker.  No pytest Python process remained afterwards.  The summary is recorded as captured output, but this report intentionally does not claim a recovered target exit code.
+
+The related content/security/media partition ran once in an independently retained offline wrapper:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_catalog_content_admin.py tests/test_content_validation.py tests/test_content_publishing.py tests/test_content_seed.py tests/test_content_migrations.py tests/test_security_gaps.py tests/test_media_http.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1-content-security-001
+187 passed in 61.67s (0:01:01)
+PYTEST_EXIT=0
+```
+
+After code freeze:
+
+```text
+..\..\.venv\Scripts\python.exe -m py_compile catalog_content_repository.py blueprints\public_catalog.py app.py
+exit: 0
+
+git diff --check
+exit: 0
+
+rg -n '\\b(execute|executemany|executescript|cursor)\\s*\\(' blueprints\public_catalog.py
+BLUEPRINT_DIRECT_SQL_GUARD=PASS (no matches)
+exit: 0
+```
+
+### Fix1 self-review and limits
+
+- Public Blueprint remains HTTP-only; new read-model logic and every SQL query stay in the repository.
+- Related cards/details filter target publication status and keep stable query order.  Invalid filters remain lenient but accept only published codes.
+- Detail/list canonical links use only validated configured HTTPS origin; no request host forwarding is read.
+- The exact-schema block projection does not expose settings outside approved renderer inputs, storage paths, contact/admin fields, thresholds, risk codes, or unpublished media.
+- Required sections now fail closed at the public availability boundary; this relies on existing structured service/relationship data rather than invented claims.
+
+Known limitations: the prior full suite remains UNKNOWN and the historical dependency installation remains a confirmed environment-scope violation.  The Fix1 public partition has a captured complete success summary but an unavailable process exit marker; no additional partition rerun was made.  Controller-side fresh offline verification is required for an independently captured target exit.

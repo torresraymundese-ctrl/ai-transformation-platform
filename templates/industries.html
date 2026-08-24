@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}行业 AI 应用方向{% endblock %}
 {% block analytics_page %}industries{% endblock %}
+{% block head %}<meta name="description" content="了解各行业 AI 场景的适用环节、准备条件和实施边界。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
 <main class="container" style="padding:48px 0"><h1>行业 AI 应用方向</h1><div class="card-grid">
 {% for industry in industries %}<article class="card" data-industry-code="{{ industry.code }}"><h2><a href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}">{{ industry.title }}</a></h2><p>{{ industry.summary }}</p><a class="btn btn-secondary" href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}" aria-label="查看{{ industry.title }}行业详情">查看详情</a></article>{% endfor %}

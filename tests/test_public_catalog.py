@@ -1,12 +1,15 @@
 """Public, read-only catalog routes use only published catalog aggregates."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
+import hashlib
 
 import pytest
 from bs4 import BeautifulSoup
 
 import app as app_module
 from content_clock import SHANGHAI
+from content_contracts import ContentBlock, ContentDraft
+from publishing_service import publish_content, save_content_draft
 from publishing_service import archive_content
 
 
@@ -20,6 +23,7 @@ SCENARIO_REQUIRED_SECTIONS = {
     "timeline", "budget", "services", "assessment-cta",
 }
 NOW = "2026-08-24 10:00:00"
+NOW_DATETIME = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
 
 
 def publish_catalog(db):
@@ -192,3 +196,116 @@ def test_public_base_url_is_required_https_origin(tmp_path, monkeypatch):
                   "MEDIA_UPLOAD_ROOT": str(tmp_path / "media")}
         with pytest.raises(ValueError):
             app_module.create_app(config)
+
+
+def _ready_media(db, name, mime):
+    asset_id = db.execute(
+        "INSERT INTO media_assets "
+        "(storage_name,display_name,detected_mime,byte_size,sha256,status,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,'pending',?,?)",
+        (name, name, mime, 1, hashlib.sha256(name.encode()).hexdigest(), NOW, NOW),
+    ).lastrowid
+    db.execute(
+        "UPDATE media_assets SET status='ready',scan_result_code='validated',"
+        "scan_checked_at=?,ready_at=?,updated_at=? WHERE id=?",
+        (NOW, NOW, NOW, asset_id),
+    )
+    db.commit()
+    return asset_id
+
+
+def _publish_all_governed_blocks(db):
+    row = db.execute(
+        "SELECT ci.id,ci.lock_version,ci.content_group_id,g.scenario_id,ci.slug "
+        "FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='draft' ORDER BY ci.id LIMIT 1"
+    ).fetchone()
+    image_id = _ready_media(db, "review-image.png", "image/png")
+    download_id = _ready_media(db, "review-download.pdf", "application/pdf")
+    draft = ContentDraft(
+        entry_type="scenario", slug=row["slug"], title="受控区块公开测试",
+        summary="通过受控发布流程验证每类内容区块的公开渲染。",
+        seo_title="受控区块公开测试", seo_description="验证公开场景区块的安全渲染。",
+        content_group_id=row["content_group_id"], extension={"scenario_id": row["scenario_id"]},
+        maturity_codes=("explore",),
+        blocks=(
+            ContentBlock("heading", title="REVIEW-HEADING", settings={"level": 2}),
+            ContentBlock("rich_text", title="REVIEW-RICH-TITLE", body_html="<p>REVIEW-RICH</p>", settings={}),
+            ContentBlock("image_text", title="REVIEW-IMAGE", body_html="<p>REVIEW-IMAGE-BODY</p>", settings={"alignment": "left", "alt_text": "REVIEW-ALT"}, media_asset_id=image_id),
+            ContentBlock("metric", title="REVIEW-METRIC-TITLE", settings={"value": "REVIEW-METRIC", "unit": "项"}),
+            ContentBlock("steps", title="REVIEW-STEPS", settings={"items": ("REVIEW-STEP-ONE", "REVIEW-STEP-TWO")}),
+            ContentBlock("download", title="REVIEW-DOWNLOAD-TITLE", settings={"label": "REVIEW-DOWNLOAD"}, media_asset_id=download_id),
+            ContentBlock("cta", title="REVIEW-CTA-TITLE", settings={"label": "REVIEW-CTA", "url": "/assessment", "style": "primary"}),
+        ),
+    )
+    lock_version = save_content_draft(row["id"], row["lock_version"], draft, actor="test-admin", now=NOW_DATETIME)
+    publish_content(row["id"], lock_version, actor="test-admin", now=NOW_DATETIME)
+    return row["slug"], image_id, download_id
+
+
+def test_formally_published_governed_block_types_render_through_safe_public_http(client, db):
+    slug, image_id, download_id = _publish_all_governed_blocks(db)
+
+    response = client.get(f"/scenarios/{slug}")
+    document = page(response)
+    assert {node["data-content-block"] for node in document.select("[data-content-block]")} >= {
+        "heading", "rich_text", "image_text", "metric", "steps", "download", "cta"
+    }
+    for marker in ("REVIEW-HEADING", "REVIEW-RICH", "REVIEW-IMAGE-BODY", "REVIEW-METRIC", "REVIEW-STEP-ONE", "REVIEW-DOWNLOAD", "REVIEW-CTA"):
+        assert marker.encode() in response.data
+    assert document.select_one(f'img[src="/media/{image_id}/image"]')["alt"] == "REVIEW-ALT"
+    assert document.select_one(f'a[href="/media/{download_id}/download"]') is not None
+    assert document.select_one('[data-content-block="cta"] a[href="/assessment"].btn-primary') is not None
+
+
+def test_scenario_required_sections_are_nonempty_and_inputs_are_distinct_from_prerequisites(published_catalog):
+    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    inputs = {node.get_text(strip=True) for node in document.select('[data-content-section="inputs"] li')}
+    prerequisites = {node.get_text(strip=True) for node in document.select('[data-content-section="prerequisites"] li')}
+    metrics = document.select('[data-content-section="metrics"] li')
+    risks = document.select('[data-content-section="risks"] li')
+
+    assert inputs and inputs != prerequisites
+    assert metrics and risks
+    assert all("_" not in node.get_text() for node in risks)
+
+
+def test_scenario_with_missing_required_structured_data_is_not_publicly_available(published_catalog, db):
+    service = db.execute(
+        "SELECT service_id FROM scenario_services link JOIN scenarios s ON s.id=link.scenario_id "
+        "WHERE s.code='mfg_knowledge_assistant' LIMIT 1"
+    ).fetchone()
+    db.execute("UPDATE services SET prerequisites_json='[]' WHERE id=?", (service["service_id"],))
+    db.commit()
+
+    assert published_catalog.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+
+
+@pytest.mark.parametrize("target", ("industry", "department", "pain"))
+def test_archived_related_core_rows_are_omitted_from_public_cards_and_details(published_catalog, db, target):
+    scenario = db.execute("SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'").fetchone()
+    table = {"industry": "industries", "department": "departments", "pain": "pain_points"}[target]
+    if target == "industry":
+        row = db.execute(
+            "SELECT i.id FROM industries i JOIN industry_branches ib ON ib.industry_id=i.id "
+            "JOIN scenario_branches sb ON sb.industry_branch_id=ib.id WHERE sb.scenario_id=? LIMIT 1", (scenario["id"],)
+        ).fetchone()
+    else:
+        link_table = "scenario_departments" if target == "department" else "scenario_pains"
+        column = "department_id" if target == "department" else "pain_point_id"
+        row = db.execute(f"SELECT {column} AS id FROM {link_table} WHERE scenario_id=? LIMIT 1", (scenario["id"],)).fetchone()
+    marker = f"REVIEW-ARCHIVED-{target.upper()}"
+    db.execute(f"UPDATE {table} SET name=?,status='archived' WHERE id=?", (marker, row["id"]))
+    db.commit()
+
+    card = page(published_catalog.get("/scenarios"))
+    detail = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    assert marker not in card.get_text()
+    assert marker not in detail.get_text()
+
+
+@pytest.mark.parametrize("path", ("/industries", "/scenarios"))
+def test_public_catalog_list_has_trusted_canonical_and_description(published_catalog, path):
+    document = page(published_catalog.get(path, headers={"Host": "untrusted.example"}))
+    assert document.select_one('link[rel="canonical"]')["href"] == f"https://test.example{path}"
+    assert document.select_one('meta[name="description"]')["content"]
