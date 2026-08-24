@@ -28,6 +28,7 @@ def client(tmp_path, monkeypatch):
             "SESSION_COOKIE_SECURE": True,
             "SESSION_COOKIE_HTTPONLY": True,
             "SESSION_COOKIE_SAMESITE": "Lax",
+            "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
         }
     )
     return test_app.test_client()
@@ -51,6 +52,14 @@ def db(client):
         yield connection
     finally:
         connection.close()
+
+
+@pytest.fixture()
+def media_root(client):
+    """Return the disposable media directory configured for this test app."""
+    root = Path(client.application.config["MEDIA_UPLOAD_ROOT"])
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 @pytest.fixture()

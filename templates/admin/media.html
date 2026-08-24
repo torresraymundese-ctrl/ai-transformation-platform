@@ -1,0 +1,40 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}媒体管理 - CMS 后台{% endblock %}
+{% block admin_content %}
+<div class="admin-heading"><h1>安全媒体</h1></div>
+<section class="card admin-section">
+  <form method="POST" action="{{ url_for('admin.admin_media') }}" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label for="media-file">JPEG、PNG、WebP、PDF、DOCX 或 XLSX</label>
+      <input id="media-file" type="file" name="file" required accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx">
+    </div>
+    <label><input type="checkbox" name="metadata_review_confirmed" value="1"> 我已确认文档通过固定的元数据与隐私检查</label>
+    <div><button class="btn btn-primary" type="submit">上传并验证</button></div>
+  </form>
+</section>
+<section class="card admin-section">
+  {% if assets %}
+  <table>
+    <thead><tr><th>ID</th><th>显示名称</th><th>类型</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for asset in assets %}
+      <tr>
+        <td>{{ asset.id }}</td><td>{{ asset.display_name }}</td><td>{{ asset.detected_mime }}</td>
+        <td>{{ asset.byte_size }}</td><td>{{ asset.status }}</td>
+        <td>
+          {% if asset.status == 'ready' %}
+          <a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_media_preview', asset_id=asset.id) }}">预览</a>
+          <form method="POST" action="{{ url_for('admin.admin_media_archive', asset_id=asset.id) }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-danger btn-sm" type="submit">归档</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">暂无媒体。</p>{% endif %}
+</section>
+{% endblock %}

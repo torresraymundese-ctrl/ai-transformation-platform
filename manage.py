@@ -10,6 +10,7 @@ import sys
 
 import lead_repository
 import legacy_content_migration
+import media_service
 import models
 import publishing_service
 from models import init_db
@@ -103,6 +104,15 @@ def main(argv=None):
         "publish-due-content",
         help="Atomically publish due content revisions",
     )
+    recover_media = subcommands.add_parser(
+        "recover-media-storage",
+        help="Preview or apply non-destructive media storage reconciliation",
+    )
+    recover_media.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply safe state transitions (default is dry-run)",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
@@ -151,6 +161,19 @@ def main(argv=None):
             f"published_count={result.published_count} published_ids={published_ids} "
             f"failed_count={result.failed_count} failures={failures}"
         )
+        return 0
+    if args.command == "recover-media-storage":
+        try:
+            result = media_service.recover_media_storage(apply=args.apply)
+        except (OSError, sqlite3.Error, ValueError):
+            print("error=media_recovery_unavailable", file=sys.stderr)
+            return 1
+        mode = "apply" if args.apply else "dry-run"
+        findings = ",".join(
+            f"{item.asset_id if item.asset_id is not None else 'none'}:{item.status}"
+            for item in result.findings
+        ) or "none"
+        print(f"mode={mode} count={result.count} findings={findings}")
         return 0
     return 2
 

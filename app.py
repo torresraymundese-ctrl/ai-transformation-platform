@@ -4,8 +4,9 @@
 
 import os
 from datetime import timedelta
+from pathlib import Path
 
-from flask import Flask, g, request
+from flask import Flask, abort, g, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -14,11 +15,12 @@ from blueprints.admin import bp as admin_bp
 from blueprints.assessment import bp as assessment_bp
 from blueprints.api import bp as api_bp
 from blueprints.public import bp as public_bp, svc_emoji
+from blueprints.media import bp as media_bp
 from models import init_db
-from security import (add_security_headers, audit_admin_actions, csrf_token,
-                      data_conflict, forbidden, invalid_form, not_found,
-                      protect_admin_routes, request_too_large, sanitize_html,
-                      unexpected_error)
+from security import (add_security_headers, audit_admin_actions, check_admin_auth,
+                      csrf_token, data_conflict, forbidden, invalid_form,
+                      not_found, protect_admin_routes, request_too_large,
+                      sanitize_html, unexpected_error)
 from repository import DataConflictError
 from validation import ValidationError, safe_external_url
 
@@ -31,7 +33,15 @@ DEFAULT_CONFIG = {
     "SESSION_COOKIE_SECURE": True,
     "SESSION_COOKIE_SAMESITE": "Lax",
     "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
-    "MAX_CONTENT_LENGTH": 1024 * 1024,
+    "MAX_CONTENT_LENGTH": 22 * 1024 * 1024,
+    "MEDIA_UPLOAD_ROOT": os.environ.get("AI_PLATFORM_MEDIA_ROOT"),
+    "MEDIA_IMAGE_MAX_BYTES": 8 * 1024 * 1024,
+    "MEDIA_ATTACHMENT_MAX_BYTES": 20 * 1024 * 1024,
+    "MEDIA_IMAGE_MAX_PIXELS": 40_000_000,
+    "MEDIA_OOXML_MAX_MEMBERS": 1024,
+    "MEDIA_OOXML_MAX_UNCOMPRESSED_BYTES": 100 * 1024 * 1024,
+    "MEDIA_OOXML_MAX_COMPRESSION_RATIO": 20,
+    "MEDIA_PDF_MAX_PAGES": 500,
     "LOGIN_RATE_LIMIT": 10,
     "LOGIN_RATE_WINDOW": 15 * 60,
     "ASSESSMENT_RATE_LIMIT": 30,
@@ -84,18 +94,47 @@ def add_public_analytics_cache_policy(response):
     return response
 
 
+def enforce_request_size_policy():
+    """Keep 1 MiB everywhere except the authenticated media upload adapter."""
+    if request.content_length is None:
+        return None
+    if (
+        request.method == "POST"
+        and request.endpoint == "admin.admin_media"
+        and check_admin_auth()
+    ):
+        return None
+    if request.content_length > 1024 * 1024:
+        abort(413)
+    return None
+
+
+def media_image_url(asset_id):
+    return url_for("media.published_image", asset_id=asset_id)
+
+
+def media_download_url(asset_id):
+    return url_for("media.published_download", asset_id=asset_id)
+
+
 def create_app(test_config=None):
     """Build an isolated Flask application instance."""
     flask_app = Flask(__name__)
     flask_app.config.from_mapping(DEFAULT_CONFIG)
     if test_config:
         flask_app.config.update(test_config)
+    if not flask_app.config.get("MEDIA_UPLOAD_ROOT"):
+        flask_app.config["MEDIA_UPLOAD_ROOT"] = str(
+            Path(__file__).resolve().parent / "data" / "media"
+        )
     flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=1, x_proto=1)
 
     flask_app.jinja_env.globals.update(
         csrf_token=csrf_token,
         enable_public_analytics_response=enable_public_analytics_response,
         svc_emoji=svc_emoji,
+        media_image_url=media_image_url,
+        media_download_url=media_download_url,
     )
     flask_app.jinja_env.filters.update(
         safe_html=sanitize_html,
@@ -108,6 +147,7 @@ def create_app(test_config=None):
     flask_app.register_error_handler(404, not_found)
     flask_app.register_error_handler(RequestEntityTooLarge, request_too_large)
     flask_app.register_error_handler(Exception, unexpected_error)
+    flask_app.before_request(enforce_request_size_policy)
     flask_app.before_request(protect_admin_routes)
     flask_app.before_request(establish_config_analytics_session)
     flask_app.after_request(add_public_analytics_cache_policy)
@@ -118,6 +158,7 @@ def create_app(test_config=None):
     flask_app.register_blueprint(api_bp)
     flask_app.register_blueprint(assessment_bp)
     flask_app.register_blueprint(admin_bp)
+    flask_app.register_blueprint(media_bp)
     return flask_app
 
 
