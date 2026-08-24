@@ -1264,3 +1264,42 @@ Known limitations remain unchanged: the sole historical full-suite stream is
 **UNKNOWN** and was not rerun; the historic PyPI network use is
 **CONFIRMED**; and the frozen `data_process_foundation` product-data limitation
 continues to keep that scenario private rather than inventing a pain relation.
+
+## Fix1h controller verification
+
+The controller independently verified frozen implementation commit
+`5fc3f2e173ce4a23793182c3cdf5ae0675ce3c11` from a clean tracked tree. All
+pytest commands used the assigned Python `3.12.13` interpreter, the
+process-scoped offline `local-deps` overlay (`pypdf 6.10.0`),
+`-p no:cacheprovider`, and a unique basetemp. No full suite, network access,
+dependency installation, production server, Nginx, or real database was used.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_content_publishing.py tests\test_content_validation.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1h-focused-001
+```
+
+Result: `507 passed in 224.06s (0:03:44)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1h-public-partition-001
+```
+
+Result: `354 passed in 180.65s (0:03:00)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1h-related-partition-001
+```
+
+Result: `313 passed in 126.60s (0:02:06)`, tool `exit_code=0`.
+
+Controller `py_compile`, `git diff --check 1c359a7..5fc3f2e`, exact migration
+whitespace-plus-NUL contract check, and no-direct-SQL guards for both public and
+admin catalog Blueprints all returned exit 0. The tracked tree was clean before
+this report-only append.
+
+The original full-suite outcome remains **UNKNOWN** and was not rerun. The
+historical PyPI-network violation remains **CONFIRMED**, and the frozen
+`data_process_foundation` product-data limitation remains unchanged.
