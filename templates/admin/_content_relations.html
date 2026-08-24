@@ -3,15 +3,12 @@
   <div data-content-relations>
   {% for relation in form.relations %}
     <div data-content-relation style="display:flex;gap:8px;margin:8px 0;">
-      <select name="relations-{{ loop.index0 }}-type" data-relation-field="type">
-      {% for suffix in ('case','resource') %}
-        {% set relation_type = view.kind ~ '_' ~ suffix %}
-        <option value="{{ relation_type }}" {% if relation.relation_type == relation_type %}selected{% endif %}>{{ relation_type }}</option>
-      {% endfor %}
-      </select>
+      <input type="hidden" name="relations-{{ loop.index0 }}-type" value="{{ relation.relation_type }}" data-relation-field="type">
+      <span>{{ relation.relation_type }}</span>
       <select name="relations-{{ loop.index0 }}-target_group_id" data-relation-field="target_group_id">
+      {% set target_type = relation.relation_type.split('_')[-1] %}
       {% for choice in view.relation_choices %}
-        {% if choice.entry_type in relation.relation_type %}<option value="{{ choice.group_id }}" {% if relation.target_group_id == choice.group_id %}selected{% endif %}>{{ choice.title }}</option>{% endif %}
+        {% if choice.entry_type == target_type %}<option value="{{ choice.group_id }}" {% if relation.target_group_id == choice.group_id %}selected{% endif %}>{{ choice.title }}</option>{% endif %}
       {% endfor %}
       </select>
       <button type="button" data-relation-action="up">上移</button>

@@ -371,3 +371,181 @@ Known scope limits (intentional, not defects):
 - Verification used temporary SQLite databases and Flask clients only; it did not touch a real database, production, Nginx, or the network.
 
 No known Task 5 correctness defect remains after the final full and Node suites.
+
+## Fix round 1 — synchronize catalog relation choices
+
+### Scope and result
+
+- Fix base: `217c1c1ca4a56dfdc09128332e26615d979b5ff4`.
+- Review issue: the bound editor ignored `relationTarget.value`, always created the first filtered target, did not synchronize targets when relation type changed, and left both server-rendered and dynamic row types mutable without rebuilding target choices.
+- Resolution: the new-relation selector now hides/disables targets outside the selected case/resource type, preserves a selection only while it remains legal, disables add when no legal target exists, and strictly creates the currently selected legal target. It does not fall back during the click action or accept a target from the other type.
+- Existing and dynamically created rows now use the same immutable relation-type representation: a hidden submitted field plus safe visible text. Changing a row's type requires deleting and re-adding it.
+- Server-rendered target options use exact `entry_type` equality rather than substring matching.
+- The server POST boundary already persisted a selected second target correctly, so no backend production code was changed.
+- Fix commit subject: `fix: synchronize catalog relation choices`.
+- Final fix commit SHA is recorded in the controller/DONE handoff after the commit. As noted above, a tracked report cannot embed the SHA of the commit containing itself.
+- Status: **DONE**; no known Fix round 1 defect remains.
+
+All pytest commands used the command-scoped overlay:
+
+```powershell
+$task5Overlay = (Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+$env:PYTHONPATH = $task5Overlay
+```
+
+Every Fix round 1 pytest command used `-p no:cacheprovider` and its own `pytest-task5-fix1-*` basetemp.
+
+### RED evidence
+
+The first Node attempt extended the Fake DOM but omitted the relation-type options present in the real template:
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Raw result: exit 1; 6 passed, 2 failed, duration `177.0182ms`. One failure was the test-double error `TypeError: unsupported relation type`; this run is recorded but is **not** accepted as the product RED. The test fixture alone was corrected to mirror the real type options.
+
+The next event-level run exercised `bind()` and produced product failures:
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Raw result: exit 1; 6 passed, 2 failed, duration `132.558ms`. Dynamic rows were still type `<select>` elements (`'select' !== 'input'`) and type changes did not disable the resource option (`false !== true`).
+
+The selected-target assertion was then ordered before the immutable-type assertion so the hard-coded-first-target defect was directly visible:
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Accepted RED raw result: exit 1; 6 passed, 2 failed, duration `125.3545ms`.
+
+```text
+bound add relation uses the selected second target and freezes the row type:
+  actual '17', expected '18'
+bound relation type changes synchronize legal targets and block empty choices:
+  actual false, expected true
+```
+
+These tests go through real `bind` listeners, `change` dispatch, and add-button `click`; they do not only call the row constructor.
+
+The server-rendered existing-row RED was:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py::test_existing_relation_type_is_rendered_as_an_immutable_field -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-template-red-001
+```
+
+Raw result: exit 1; `1 failed in 0.94s`. The rendered response lacked `type="hidden" name="relations-0-type"` because the old partial emitted a mutable relation-type `<select>`.
+
+### Pre-existing backend boundary verification
+
+Before changing production code, the new narrow real-SQLite/Flask integration test proved that the backend already persisted the selected second relation target:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py::test_post_persists_the_selected_second_relation_target -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-backend-boundary-001
+```
+
+Raw result: exit 0; `1 passed in 0.79s`.
+
+The test publishes two valid case targets through the Task 3 service, submits the second group ID through the admin POST, and queries `scenario_cases` to prove that only the second target was stored. This is explicitly a pre-existing GREEN boundary, not a fabricated RED.
+
+### Focused GREEN evidence
+
+After the minimal JS/partial change:
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Raw result: exit 0; 8 passed, 0 failed, duration `154.2462ms`.
+
+Targeted Flask GREEN:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py::test_post_persists_the_selected_second_relation_target tests\test_catalog_content_admin.py::test_existing_relation_type_is_rendered_as_an_immutable_field -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-flask-green-001
+```
+
+Raw result: exit 0; `2 passed in 1.57s`.
+
+The test-side select emulation was then tightened to retain a programmatically selected disabled option, and the event test asserted that a resource target cannot be added while the current type is case. No production change followed this test-only strengthening.
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Raw result: exit 0; 8 passed, 0 failed, duration `128.0533ms`.
+
+### Required partitions
+
+Task 5 focused:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_content_seed.py tests\test_pagination.py tests\test_catalog_content_admin.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-focused-001
+```
+
+Raw result: exit 0; `30 passed in 8.59s`.
+
+The first assessment/report partition invocation used basetemp `pytest-task5-fix1-related-001`. The tool channel returned progress through 63% but lost its terminal result; a read-only process check confirmed that no pytest process remained. Because no exit code or final pytest summary was available, no pass claim is made for that invocation.
+
+The exact partition was rerun with a new unique basetemp to obtain auditable evidence:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_content_seed.py tests\test_pagination.py tests\test_catalog_content_admin.py tests\test_assessment_catalog.py tests\test_assessment_v2_api.py tests\test_reporting.py tests\test_rate_limits_and_audit.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-related-002
+```
+
+Raw result: exit 0; `113 passed in 49.06s`.
+
+Architecture/content/security partition:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_content_publishing.py tests\test_content_validation.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_security_gaps.py tests\test_scraper_safety_gate.py tests\test_matching.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-architecture-001
+```
+
+Raw result: exit 0; `291 passed in 122.46s (0:02:02)`.
+
+### Frozen static verification
+
+```powershell
+..\..\.venv\Scripts\python.exe -m py_compile tests\test_catalog_content_admin.py
+node --check static\js\content_editor.js
+git diff --check
+rg -n '\.execute\(|\b(SELECT|INSERT|UPDATE|DELETE)\b' blueprints\admin\catalog.py
+rg -n 'innerHTML|outerHTML|insertAdjacentHTML|eval\(' static\js\content_editor.js
+```
+
+Raw result: the combined guarded command exited 0. Python compilation, Node syntax, and diff check exited 0; both ripgrep guards produced no matches (their expected individual result is exit 1). The only output was Git's existing LF-to-CRLF advisory for the four modified working-tree files and `git status` showing exactly those four files.
+
+Frozen final Node runtime:
+
+```powershell
+node --test tests\js\content_editor_runtime.test.js
+```
+
+Raw result: exit 0; 8 passed, 0 failed, duration `155.2858ms`.
+
+### The one and only Fix round 1 full suite
+
+After code/test freeze, exactly one Fix round 1 full suite was started and it was not rerun:
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task5-fix1-full-final-once
+```
+
+Raw result:
+
+```text
+831 passed in 388.09s (0:06:28)
+```
+
+Exit code: 0.
+
+### Fix round 1 changed files
+
+1. `static/js/content_editor.js`
+2. `templates/admin/_content_relations.html`
+3. `tests/js/content_editor_runtime.test.js`
+4. `tests/test_catalog_content_admin.py`
+5. `.superpowers/sdd/2026-08-24-content-catalog-publishing/task-5-report.md`
+
+No other code, Task 6 route, migration, deployment/Nginx file, progress ledger, or external task card was changed. Verification used disposable local SQLite databases and no network or real database.

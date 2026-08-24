@@ -191,17 +191,12 @@
     }
     const row = documentObject.createElement('div');
     row.dataset.contentRelation = '1';
-    const typeChoice = documentObject.createElement('select');
-    typeChoice.dataset.relationField = 'type';
-    const owner = relation.relationType.split('_')[0];
-    for (const suffix of ['case', 'resource']) {
-      const value = `${owner}_${suffix}`;
-      const option = documentObject.createElement('option');
-      option.setAttribute('value', value);
-      option.textContent = value;
-      if (value === relation.relationType) option.setAttribute('selected', 'selected');
-      typeChoice.append(option);
-    }
+    const hiddenType = documentObject.createElement('input');
+    hiddenType.setAttribute('type', 'hidden');
+    hiddenType.setAttribute('value', relation.relationType);
+    hiddenType.dataset.relationField = 'type';
+    const typeLabel = documentObject.createElement('span');
+    typeLabel.textContent = relation.relationType;
     const targetChoice = documentObject.createElement('select');
     targetChoice.dataset.relationField = 'target_group_id';
     for (const target of relation.targets) {
@@ -214,7 +209,7 @@
       if (target.value === relation.targetGroupId) option.setAttribute('selected', 'selected');
       targetChoice.append(option);
     }
-    row.append(typeChoice, targetChoice);
+    row.append(hiddenType, typeLabel, targetChoice);
     for (const action of ['up', 'down', 'remove']) {
       const button = documentObject.createElement('button');
       button.setAttribute('type', 'button');
@@ -246,6 +241,35 @@
       }
     });
     return relations.length;
+  }
+
+  function relationTargetType(relationType) {
+    const match = /^(industry|scenario|service)_(case|resource)$/.exec(relationType);
+    return match ? match[2] : null;
+  }
+
+  function relationTargetOptions(relationType, relationTarget) {
+    const targetType = relationTargetType(relationType);
+    if (!targetType) return [];
+    return Array.from(relationTarget.options).filter(function (candidate) {
+      return candidate.dataset.entryType === targetType;
+    });
+  }
+
+  function synchronizeRelationTargets(relationType, relationTarget, addRelation) {
+    const legalTargets = relationTargetOptions(relationType.value, relationTarget);
+    for (const candidate of Array.from(relationTarget.options)) {
+      const legal = legalTargets.includes(candidate);
+      candidate.hidden = !legal;
+      candidate.disabled = !legal;
+    }
+    if (!legalTargets.some((candidate) => candidate.value === relationTarget.value)) {
+      relationTarget.value = legalTargets.length ? legalTargets[0].value : '';
+    }
+    const empty = legalTargets.length === 0;
+    relationTarget.disabled = empty;
+    addRelation.disabled = empty;
+    return legalTargets;
   }
 
   function bind(documentObject) {
@@ -291,18 +315,28 @@
     const relationType = documentObject.querySelector('[data-new-relation-type]');
     const relationTarget = documentObject.querySelector('[data-new-relation-target]');
     if (relationContainer && addRelation && relationType && relationTarget) {
+      relationType.addEventListener('change', function () {
+        synchronizeRelationTargets(relationType, relationTarget, addRelation);
+      });
+      synchronizeRelationTargets(relationType, relationTarget, addRelation);
       addRelation.addEventListener('click', function () {
+        if (addRelation.disabled) return;
         if (relationContainer.querySelectorAll('[data-content-relation]').length >= 50) return;
-        const suffix = relationType.value.endsWith('_case') ? 'case' : 'resource';
-        const targets = Array.from(relationTarget.options).filter(function (candidate) {
-          return candidate.dataset.entryType === suffix;
-        }).map(function (candidate) {
-          return { value: Number(candidate.value), label: candidate.textContent };
+        const legalOptions = relationTargetOptions(relationType.value, relationTarget);
+        const selected = legalOptions.find(function (candidate) {
+          return !candidate.disabled && candidate.value === relationTarget.value;
         });
-        if (!targets.length) return;
+        if (!selected) return;
+        const targets = legalOptions.map(function (candidate) {
+          return { value: Number(candidate.value), label: candidate.textContent };
+        }).filter(function (candidate) {
+          return Number.isInteger(candidate.value) && candidate.value > 0;
+        });
+        const selectedId = Number(selected.value);
+        if (!targets.some((target) => target.value === selectedId)) return;
         relationContainer.append(createRelationElement(documentObject, {
           relationType: relationType.value,
-          targetGroupId: targets[0].value,
+          targetGroupId: selectedId,
           targets,
         }));
         renumberRelations(relationContainer);

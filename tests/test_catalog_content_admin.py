@@ -1,6 +1,9 @@
 import hashlib
 from pathlib import Path
 
+from content_contracts import CaseMetric, ContentDraft
+from publishing_service import create_content_draft, publish_content
+
 CSRF = "test-csrf-token"
 
 
@@ -32,6 +35,48 @@ def _valid_form(item, **changes):
     }
     values.update(changes)
     return values
+
+
+def _publish_case_target(db, slug, title):
+    draft = ContentDraft(
+        entry_type="case",
+        slug=slug,
+        title=title,
+        summary="经授权并由内部交付记录验证的匿名案例说明。",
+        seo_title=title,
+        seo_description="查看经授权并已完成内部核验的匿名案例。",
+        extension={
+            "verification_code": f"verification-{slug}",
+            "is_anonymized": 1,
+            "basis_type": "private_authorization",
+            "private_basis_reference": f"internal-{slug}",
+            "source_url": None,
+            "source_url_sha256": None,
+            "source_check_code": None,
+            "source_checked_at": None,
+            "source_check_expires_at": None,
+            "source_check_url_sha256": None,
+            "is_verified": 1,
+            "review_confirmed": 1,
+            "verified_at": "2026-08-24 09:00:00",
+        },
+        metrics=(
+            CaseMetric(
+                "处理周期",
+                "8",
+                "6",
+                "小时",
+                "连续 30 天",
+                "由已授权内部交付记录中的处理时长对比得出。",
+            ),
+        ),
+    )
+    content_id = create_content_draft(draft, actor="test-admin")
+    publish_content(content_id, 1, actor="test-admin")
+    return db.execute(
+        "SELECT content_group_id FROM content_items WHERE id=?",
+        (content_id,),
+    ).fetchone()[0]
 
 
 def test_catalog_lists_all_core_rows_once_with_private_cache(admin_client):
@@ -154,6 +199,55 @@ def test_block_maturity_and_relation_inputs_use_exact_choice_schema(admin_client
     assert invalid_maturity.status_code == 400
     assert invalid_block.status_code == 400
     assert db.execute("SELECT lock_version FROM content_items WHERE id=?", (item["id"],)).fetchone()[0] == item["lock_version"]
+
+
+def test_post_persists_the_selected_second_relation_target(admin_client, db):
+    item = _first(db)
+    first_group = _publish_case_target(db, "first-relation-case", "第一个关系案例")
+    second_group = _publish_case_target(db, "second-relation-case", "第二个关系案例")
+
+    response = admin_client.post(
+        f"/admin/catalog/scenario/{item['scenario_id']}",
+        data=_valid_form(
+            item,
+            **{
+                "relations-0-type": "scenario_case",
+                "relations-0-target_group_id": str(second_group),
+            },
+        ),
+    )
+
+    assert response.status_code == 302
+    targets = db.execute(
+        "SELECT case_content_group_id FROM scenario_cases "
+        "WHERE scenario_content_item_id=? ORDER BY sort_order",
+        (item["id"],),
+    ).fetchall()
+    assert [row[0] for row in targets] == [second_group]
+    assert first_group != second_group
+
+
+def test_existing_relation_type_is_rendered_as_an_immutable_field(admin_client, db):
+    item = _first(db)
+    target_group = _publish_case_target(db, "immutable-relation-case", "不可变关系案例")
+    saved = admin_client.post(
+        f"/admin/catalog/scenario/{item['scenario_id']}",
+        data=_valid_form(
+            item,
+            **{
+                "relations-0-type": "scenario_case",
+                "relations-0-target_group_id": str(target_group),
+            },
+        ),
+    )
+    assert saved.status_code == 302
+
+    rendered = admin_client.get(f"/admin/catalog/scenario/{item['scenario_id']}")
+
+    assert rendered.status_code == 200
+    assert b'type="hidden" name="relations-0-type"' in rendered.data
+    assert b'<select name="relations-0-type"' not in rendered.data
+    assert b'scenario_case' in rendered.data
 
 
 def test_block_rejects_settings_for_another_type_and_non_contiguous_order(admin_client, db):
