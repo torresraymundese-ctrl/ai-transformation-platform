@@ -2,11 +2,22 @@
 """Explicit operational commands for deployment and maintenance."""
 
 import argparse
+from pathlib import Path
+import sqlite3
+import sys
 
 import lead_repository
 import legacy_content_migration
 import models
 from models import init_db
+
+
+def _open_inventory_readonly():
+    database_path = Path(models.DB_PATH).resolve(strict=True)
+    connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only=ON")
+    return connection
 
 
 def main(argv=None):
@@ -43,16 +54,21 @@ def main(argv=None):
         init_db()
         return 0
     if args.command == "inventory-content":
-        db = models.get_db()
+        db = None
         try:
+            db = models.get_db() if args.record else _open_inventory_readonly()
             items = legacy_content_migration.inventory_legacy_content(db)
             if args.record:
                 legacy_content_migration.record_legacy_inventory(db, items)
             output = legacy_content_migration.items_to_jsonl(items)
             if output:
                 print(output)
+        except (OSError, sqlite3.Error):
+            print("error=inventory_unavailable", file=sys.stderr)
+            return 1
         finally:
-            db.close()
+            if db is not None:
+                db.close()
         return 0
     if args.command == "purge-expired-leads":
         result = lead_repository.run_retention_purge(apply=args.apply)

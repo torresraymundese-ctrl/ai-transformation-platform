@@ -1,6 +1,7 @@
 import json
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
+import sqlite3
 
 import pytest
 
@@ -419,3 +420,139 @@ def test_mapping_rules_reject_unknown_sources_targets_and_executable_rules(
 
     with pytest.raises(ValueError, match="mapping rules"):
         migration.inventory_legacy_content(db)
+
+
+def test_cli_dry_run_uses_a_true_read_only_connection_and_preserves_delete_journal(
+    db, capsys, monkeypatch
+):
+    assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() == "delete"
+
+    def writable_connection_must_not_be_used():
+        raise AssertionError("dry-run opened the writable database helper")
+
+    monkeypatch.setattr(manage.models, "get_db", writable_connection_must_not_be_used)
+
+    assert manage.main(["inventory-content"]) == 0
+    assert capsys.readouterr().err == ""
+    assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
+
+
+def test_cli_dry_run_missing_database_fails_generically_without_creating_paths(
+    tmp_path, capsys, monkeypatch
+):
+    missing_parent = tmp_path / "must-not-be-created"
+    missing_db = missing_parent / "platform.db"
+    monkeypatch.setattr(manage.models, "DB_PATH", str(missing_db))
+
+    assert manage.main(["inventory-content"]) == 1
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "error=inventory_unavailable\n"
+    assert not missing_parent.exists()
+    assert str(missing_db) not in captured.err
+
+
+def test_cli_record_uses_the_existing_writable_connection_seam(
+    db, capsys, monkeypatch
+):
+    calls = []
+    real_get_db = manage.models.get_db
+
+    def tracked_get_db():
+        calls.append("write")
+        return real_get_db()
+
+    monkeypatch.setattr(manage.models, "get_db", tracked_get_db)
+
+    assert manage.main(["inventory-content", "--record"]) == 0
+    capsys.readouterr()
+
+    assert calls == ["write"]
+    assert db.execute("SELECT COUNT(*) FROM legacy_content_reviews").fetchone()[0] > 0
+
+
+@pytest.mark.parametrize(
+    "unsafe_url",
+    (
+        "https://example.com/has space",
+        "https://-bad.example/path",
+        "https://bad_.example/path",
+        "https://example.com/%zz",
+        "https://example.com/@user",
+        " https://example.com/leading-space",
+        "https://example.com/delete\x7fcontrol",
+        "https://example.com/c1\x80control",
+    ),
+)
+def test_article_url_that_cannot_safely_persist_fails_closed(db, unsafe_url):
+    article_id = db.execute(
+        "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+        ("非法 URL", "来源", unsafe_url),
+    ).lastrowid
+    db.commit()
+
+    item = _item(migration.inventory_legacy_content(db), "articles", article_id)
+
+    assert (item.action, item.reason_code, item.target_type, item.target_preview) == (
+        "archive",
+        "article_source_url_invalid",
+        None,
+        None,
+    )
+
+
+def test_cli_record_handles_mixed_valid_and_invalid_urls_atomically(
+    db, capsys, monkeypatch
+):
+    monkeypatch.setattr(
+        migration,
+        "current_shanghai_datetime",
+        lambda: datetime(2026, 8, 24, 15, 16, 17),
+    )
+    invalid_urls = (
+        "https://example.com/has space",
+        "https://-bad.example/path",
+        "https://bad_.example/path",
+        "https://example.com/%zz",
+        "https://example.com/@user",
+    )
+    invalid_ids = [
+        db.execute(
+            "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+            (f"非法 URL {index}", "来源", url),
+        ).lastrowid
+        for index, url in enumerate(invalid_urls, 1)
+    ]
+    valid_id = db.execute(
+        "INSERT INTO articles (title,source,source_url) VALUES (?,?,?)",
+        (
+            "合法 URL",
+            "来源",
+            "https://Example.com/valid/path?token=still-hashed#not-stored",
+        ),
+    ).lastrowid
+    db.commit()
+
+    assert manage.main(["inventory-content", "--record"]) == 0
+    capsys.readouterr()
+
+    rows = db.execute(
+        "SELECT source_id,proposed_action,reason_code,source_url_display,"
+        "source_url_sha256 FROM legacy_content_reviews "
+        "WHERE source_table='articles' AND source_id IN ({})".format(
+            ",".join("?" for _ in (*invalid_ids, valid_id))
+        ),
+        (*invalid_ids, valid_id),
+    ).fetchall()
+    by_id = {row["source_id"]: row for row in rows}
+    assert set(by_id) == {*invalid_ids, valid_id}
+    for source_id in invalid_ids:
+        assert (
+            by_id[source_id]["proposed_action"],
+            by_id[source_id]["reason_code"],
+            by_id[source_id]["source_url_display"],
+            by_id[source_id]["source_url_sha256"],
+        ) == ("archive", "article_source_url_invalid", None, None)
+    assert by_id[valid_id]["source_url_display"] == "https://example.com/valid/path"
+    assert len(by_id[valid_id]["source_url_sha256"]) == 64

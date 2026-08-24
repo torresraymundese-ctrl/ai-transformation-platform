@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Literal, Mapping
+import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
@@ -43,6 +44,8 @@ _RULE_KEYS = {
     "service_code_targets",
 }
 _HEX_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+_INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 
 
 @dataclass(frozen=True)
@@ -118,10 +121,14 @@ def _canonical_checksum(source_table: str, row: sqlite3.Row) -> str:
 
 
 def _normalized_public_url(value: object) -> tuple[str, str] | None:
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value or value != value.strip():
         return None
-    candidate = value.strip()
-    if any(ord(char) < 32 for char in candidate) or "\\" in candidate:
+    candidate = value
+    if (
+        any(char.isspace() or unicodedata.category(char).startswith("C") for char in candidate)
+        or "\\" in candidate
+        or _INVALID_PERCENT_ESCAPE.search(candidate)
+    ):
         return None
     try:
         parsed = urlsplit(candidate)
@@ -142,7 +149,12 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
     try:
         ip = ipaddress.ip_address(ascii_host)
     except ValueError:
-        if "." not in ascii_host or any(not label for label in ascii_host.split(".")):
+        labels = ascii_host.split(".")
+        if (
+            len(ascii_host) > 253
+            or len(labels) < 2
+            or any(_DNS_LABEL.fullmatch(label) is None for label in labels)
+        ):
             return None
     else:
         if not ip.is_global:
@@ -152,6 +164,11 @@ def _normalized_public_url(value: object) -> tuple[str, str] | None:
     default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
     authority = ascii_host if port is None or default_port else f"{ascii_host}:{port}"
     display = urlunsplit((scheme, authority, parsed.path or "", "", ""))
+    if (
+        not (display.startswith("https://") or display.startswith("http://"))
+        or any(character in display for character in "?#@")
+    ):
+        return None
     full_normalized = urlunsplit(
         (scheme, authority, parsed.path or "", parsed.query, "")
     )
