@@ -28,6 +28,9 @@ DEFAULT_MEDIA_CONFIG = {
     "MEDIA_OOXML_MAX_MEMBERS": 1024,
     "MEDIA_OOXML_MAX_UNCOMPRESSED_BYTES": 100 * 1024 * 1024,
     "MEDIA_OOXML_MAX_COMPRESSION_RATIO": 20,
+    # Cumulative across inspected XML parts; depth is per XML document.
+    "MEDIA_OOXML_XML_MAX_NODES": 250_000,
+    "MEDIA_OOXML_XML_MAX_DEPTH": 128,
     "MEDIA_PDF_MAX_PAGES": 500,
 }
 
@@ -285,18 +288,41 @@ def store_media(upload, *, metadata_review_confirmed=False):
 
 def _reuse_or_restore_ready_duplicate(root, temporary_path, row):
     existing_path = root / row["storage_name"]
-    if _disk_matches(existing_path, row):
-        return _asset(row)
-    try:
-        existing_path.lstat()
-    except FileNotFoundError:
+    if not _disk_matches(existing_path, row):
         try:
-            os.link(temporary_path, existing_path)
-        except FileExistsError:
-            pass
-        if _disk_matches(existing_path, row):
-            return _asset(row)
-    raise MediaValidationError("matching media storage is inconsistent")
+            existing_path.lstat()
+        except FileNotFoundError:
+            try:
+                os.link(temporary_path, existing_path)
+            except FileExistsError:
+                pass
+        if not _disk_matches(existing_path, row):
+            raise MediaValidationError("matching media storage is inconsistent")
+    return _recheck_ready_duplicate(existing_path, row)
+
+
+def _recheck_ready_duplicate(existing_path, original_row):
+    connection = models.get_db()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        current = connection.execute(
+            "SELECT * FROM media_assets WHERE id=?", (original_row["id"],)
+        ).fetchone()
+        identity_fields = ("storage_name", "detected_mime", "byte_size", "sha256")
+        if (
+            current is None
+            or current["status"] != "ready"
+            or any(current[field] != original_row[field] for field in identity_fields)
+            or not _disk_matches(existing_path, current)
+        ):
+            raise MediaValidationError("matching media is no longer ready")
+        connection.commit()
+        return _asset(current)
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def _mark_media_ready(connection, asset_id, timestamp):

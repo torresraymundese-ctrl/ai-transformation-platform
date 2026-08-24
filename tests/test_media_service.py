@@ -285,6 +285,8 @@ def test_media_limits_use_exact_policy_defaults_and_bound_the_stream(client):
     assert config["MEDIA_OOXML_MAX_MEMBERS"] == 1024
     assert config["MEDIA_OOXML_MAX_UNCOMPRESSED_BYTES"] == 100 * 1024 * 1024
     assert config["MEDIA_OOXML_MAX_COMPRESSION_RATIO"] == 20
+    assert config["MEDIA_OOXML_XML_MAX_NODES"] == 250_000
+    assert config["MEDIA_OOXML_XML_MAX_DEPTH"] == 128
     assert config["MEDIA_PDF_MAX_PAGES"] == 500
 
     with pytest.raises(MediaValidationError):
@@ -597,6 +599,120 @@ def test_ooxml_rejects_invalid_exact_main_xml_part(client, media_root, kind, mai
 
 
 @pytest.mark.parametrize(
+    "kind,main_xml,max_nodes,max_depth",
+    [
+        (
+            "docx",
+            (
+                b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                + (b"<w:r/>" * 64)
+                + b"</w:document>"
+            ),
+            64,
+            128,
+        ),
+        (
+            "xlsx",
+            (
+                b'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                + (b"<sheet>" * 8)
+                + (b"</sheet>" * 8)
+                + b"</workbook>"
+            ),
+            64,
+            8,
+        ),
+    ],
+    ids=["node-budget", "depth-budget"],
+)
+def test_ooxml_main_xml_is_rejected_above_node_or_depth_budget(
+    client, media_root, kind, main_xml, max_nodes, max_depth
+):
+    client.application.config["MEDIA_OOXML_XML_MAX_NODES"] = max_nodes
+    client.application.config["MEDIA_OOXML_XML_MAX_DEPTH"] = max_depth
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            f"bounded.{kind}",
+            OOXML_MIMES[kind],
+            _ooxml_bytes(kind, main_xml=main_xml),
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_resolved_core_metadata_is_rejected_above_node_budget(
+    client, media_root
+):
+    client.application.config["MEDIA_OOXML_XML_MAX_NODES"] = 32
+    renamed_core = (
+        b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">'
+        + (b"<cp:category/>" * 32)
+        + b"</cp:coreProperties>"
+    )
+    data = _ooxml_bytes(
+        "docx",
+        extra=(("metadata/renamed.xml", renamed_core),),
+        content_type_overrides=(
+            (
+                "metadata/renamed.xml",
+                "application/vnd.openxmlformats-package.core-properties+xml",
+            ),
+        ),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "bounded.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_rejects_duplicate_canonical_content_type_declarations(
+    client, media_root
+):
+    content_types = (
+        b'<?xml version="1.0"?>'
+        b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>'
+        b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        b"</Types>"
+    )
+    data = _ooxml_bytes(
+        "docx", extra=(("[Content_Types].xml", content_types),)
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "ambiguous.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_rejects_duplicate_relationship_ids(client, media_root):
+    relationships = (
+        b'<?xml version="1.0"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png"/>'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/b.png"/>'
+        b"</Relationships>"
+    )
+    data = _ooxml_bytes(
+        "docx",
+        extra=(
+            ("word/_rels/document.xml.rels", relationships),
+            ("word/media/a.png", b"a"),
+            ("word/media/b.png", b"b"),
+        ),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "ambiguous.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
     "data",
     [
         pytest.param(_pdf_bytes(metadata={"/Author": "Alice"}), id="metadata"),
@@ -695,6 +811,36 @@ def test_duplicate_ready_upload_rejects_corrupt_file_without_overwriting_evidenc
 
     assert stored_path.read_bytes() == corrupt_evidence
     assert dict(_row(db, first.id)) == before
+    assert db.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
+    assert not any(path.name.startswith(".upload-") for path in media_root.iterdir())
+
+
+def test_missing_duplicate_fails_if_ready_row_is_archived_during_restoration(
+    client, db, media_root, monkeypatch
+):
+    data = _image_bytes("PNG")
+    first = _store(client, "original.png", "image/png", data)
+    stored_path = media_root / first.storage_name
+    expected_bytes = stored_path.read_bytes()
+    stored_path.unlink()
+    restore = media_service._reuse_or_restore_ready_duplicate
+
+    def archive_at_restoration_boundary(root, temporary_path, row):
+        archive_media(row["id"])
+        return restore(root, temporary_path, row)
+
+    monkeypatch.setattr(
+        media_service,
+        "_reuse_or_restore_ready_duplicate",
+        archive_at_restoration_boundary,
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "duplicate.png", "image/png", data)
+
+    assert _row(db, first.id)["status"] == "archived"
+    assert stored_path.read_bytes() == expected_bytes
+    assert hashlib.sha256(stored_path.read_bytes()).hexdigest() == first.sha256
     assert db.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
     assert not any(path.name.startswith(".upload-") for path in media_root.iterdir())
 
