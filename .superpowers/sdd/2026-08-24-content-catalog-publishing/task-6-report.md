@@ -843,3 +843,49 @@ Known limitations remain: no full-suite rerun (the original outcome is
 **UNKNOWN**), the historical PyPI-network violation is **CONFIRMED**, and the
 frozen fallback `data_process_foundation` has no pain relation and remains
 intentionally private rather than receiving invented product data.
+
+## Fix1f controller verification
+
+The controller independently verified code commit
+`7f0c8e8af77260fd0f5cb3cde94854d65aaad7ce` with the assigned interpreter,
+the process-scoped offline `local-deps` overlay (pypdf `6.10.0`),
+`-p no:cacheprovider`, and unique basetemps.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_content_publishing.py tests\test_media_http.py tests\test_content_migrations.py tests\test_content_seed.py tests\test_v2_migrations.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1f-focused-001
+```
+
+Result: `266 passed in 167.63s (0:02:47)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1f-public-partition-001
+```
+
+Result: `308 passed in 175.27s (0:02:55)`, tool `exit_code=0`.
+
+The first related-partition invocation used basetemp
+`pytest-task6-controller-fix1f-related-partition-001` and returned
+`1 failed, 208 passed in 71.46s`, tool `exit_code=1`: one catalog-admin review
+POST returned 400 instead of 302. The exact test immediately passed alone
+(`1 passed in 0.78s`, exit 0), and the complete admin file passed
+(`13 passed in 6.94s`, exit 0). A fresh exact partition run used a new
+basetemp rather than reusing evidence:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1f-related-partition-002
+```
+
+Fresh result: `209 passed in 73.24s (0:01:13)`, tool `exit_code=0`. The initial
+failure is retained here as an unreproduced transient result, not erased or
+relabelled as passing.
+
+Controller static verification returned `py_compile=0`,
+`git diff --check 1c359a7..7f0c8e8=0`, and no direct SQL call in
+`blueprints/public_catalog.py`; tracked status was clean before this
+report-only append. No full suite, network access, dependency installation,
+production server, Nginx, or real database was used. The original full-suite
+outcome remains **UNKNOWN** and the historical PyPI-network violation remains
+**CONFIRMED**.
