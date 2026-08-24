@@ -4,15 +4,29 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 from flask import render_template_string
 from PIL import Image
 from pypdf import PdfWriter
+from werkzeug.test import EnvironBuilder
+from werkzeug.wrappers import Response
 
 import models
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class _ShortReadInput:
+    def __init__(self, data, chunk_size=64 * 1024):
+        self._stream = io.BytesIO(data)
+        self._chunk_size = chunk_size
+
+    def read(self, size=-1):
+        if size < 0:
+            size = self._chunk_size
+        return self._stream.read(min(size, self._chunk_size))
 
 
 def _image_bytes():
@@ -27,6 +41,40 @@ def _pdf_bytes():
     writer.metadata = None
     output = io.BytesIO()
     writer.write(output)
+    return output.getvalue()
+
+
+def _ooxml_bytes(kind):
+    if kind == "docx":
+        main_path = "word/document.xml"
+        main_type = (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document.main+xml"
+        )
+        main_xml = (
+            b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+            b'wordprocessingml/2006/main"/>'
+        )
+    else:
+        main_path = "xl/workbook.xml"
+        main_type = (
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet.main+xml"
+        )
+        main_xml = (
+            b'<workbook xmlns="http://schemas.openxmlformats.org/'
+            b'spreadsheetml/2006/main"/>'
+        )
+    content_types = (
+        '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/'
+        'package/2006/content-types">'
+        f'<Override PartName="/{main_path}" ContentType="{main_type}"/>'
+        "</Types>"
+    ).encode()
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as package:
+        package.writestr("[Content_Types].xml", content_types)
+        package.writestr(main_path, main_xml)
     return output.getvalue()
 
 
@@ -196,6 +244,42 @@ def test_admin_media_list_preview_and_archive_are_controlled(admin_client, media
     assert (media_root / asset["storage_name"]).is_file()
 
 
+def test_admin_image_preview_is_inline_with_exact_content_disposition(admin_client):
+    assert _upload(admin_client, "preview.png", "image/png", _image_bytes()).status_code == 302
+    asset = _latest_asset()
+
+    response = admin_client.get(f"/admin/media/{asset['id']}/preview")
+
+    assert response.status_code == 200
+    assert response.headers["Content-Disposition"] == "inline; filename=preview.png"
+
+
+def test_admin_document_previews_are_attachments_with_exact_content_disposition(
+    admin_client,
+):
+    documents = (
+        ("report.pdf", "application/pdf", _pdf_bytes()),
+        (
+            "guide.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _ooxml_bytes("docx"),
+        ),
+        (
+            "sheet.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ooxml_bytes("xlsx"),
+        ),
+    )
+    for name, mime, data in documents:
+        assert _upload(admin_client, name, mime, data).status_code == 302
+        asset = _latest_asset()
+
+        response = admin_client.get(f"/admin/media/{asset['id']}/preview")
+
+        assert response.status_code == 200
+        assert response.headers["Content-Disposition"] == f"attachment; filename={name}"
+
+
 def test_public_inline_image_requires_current_published_reference_and_safe_headers(
     admin_client, db
 ):
@@ -309,6 +393,24 @@ def test_non_media_requests_keep_one_mebibyte_boundary(admin_client):
     assert response.status_code == 413
 
 
+def test_non_media_stream_without_content_length_is_bounded_while_reading(client):
+    body = b'{"padding":"' + (b"x" * (1024 * 1024)) + b'"}'
+    builder = EnvironBuilder(
+        path="/api/assessment",
+        method="POST",
+        input_stream=io.BytesIO(body),
+        content_type="application/json",
+    )
+    environ = builder.get_environ()
+    environ.pop("CONTENT_LENGTH", None)
+    environ["wsgi.input"] = _ShortReadInput(body)
+    environ["wsgi.input_terminated"] = True
+
+    response = Response.from_app(client.application, environ)
+
+    assert response.status_code == 413
+
+
 def test_authenticated_media_route_can_reach_validator_above_one_mebibyte(
     admin_client, media_root
 ):
@@ -335,6 +437,34 @@ def test_unauthenticated_large_media_is_rejected_before_multipart_auth_parsing(
 
     assert response.status_code == 413
     assert list(media_root.iterdir()) == []
+
+
+def test_early_admin_size_rejections_are_always_private_for_anonymous_and_authenticated(
+    client, admin_client
+):
+    anonymous_client = client.application.test_client()
+    anonymous = _upload(
+        anonymous_client,
+        "anonymous-large.jpg",
+        "image/jpeg",
+        b"x" * (1024 * 1024 + 1),
+    )
+    authenticated = admin_client.post(
+        "/admin/announcement/new",
+        data={
+            "csrf_token": "test-csrf-token",
+            "title": "oversized",
+            "content_html": "x" * (1024 * 1024),
+            "status": "draft",
+        },
+    )
+
+    assert anonymous.status_code == 413
+    assert authenticated.status_code == 413
+    for response in (anonymous, authenticated):
+        assert response.headers["Cache-Control"] == "private, no-store"
+        assert response.headers["Pragma"] == "no-cache"
+        assert response.headers["Expires"] == "0"
 
 
 def test_media_transport_ceiling_allows_validation_to_enforce_twenty_mebibytes(

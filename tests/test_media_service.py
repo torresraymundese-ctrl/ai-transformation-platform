@@ -8,7 +8,13 @@ import zipfile
 import pytest
 from PIL import Image
 from pypdf import PdfWriter
-from pypdf.generic import DictionaryObject, NameObject, TextStringObject
+from pypdf.generic import (
+    ArrayObject,
+    DecodedStreamObject,
+    DictionaryObject,
+    NameObject,
+    TextStringObject,
+)
 from werkzeug.datastructures import FileStorage
 
 import manage
@@ -52,7 +58,17 @@ def _image_bytes(fmt="PNG", *, size=(8, 6), exif=False):
     return output.getvalue()
 
 
-def _pdf_bytes(*, pages=1, metadata=None, action=False, attachment=False, encrypt=False):
+def _pdf_bytes(
+    *,
+    pages=1,
+    metadata=None,
+    action=False,
+    attachment=False,
+    encrypt=False,
+    page_metadata=False,
+    xfa=False,
+    rich_media=False,
+):
     writer = PdfWriter()
     for _ in range(pages):
         writer.add_blank_page(width=72, height=72)
@@ -66,6 +82,28 @@ def _pdf_bytes(*, pages=1, metadata=None, action=False, attachment=False, encryp
         )
     if attachment:
         writer.add_attachment("payload.txt", b"payload")
+    if page_metadata:
+        xmp = DecodedStreamObject()
+        xmp.set_data(b'<x:xmpmeta xmlns:x="adobe:ns:meta/"/>')
+        xmp[NameObject("/Type")] = NameObject("/Metadata")
+        xmp[NameObject("/Subtype")] = NameObject("/XML")
+        writer.pages[0][NameObject("/Metadata")] = writer._add_object(xmp)
+    if xfa:
+        form = DictionaryObject(
+            {NameObject("/XFA"): TextStringObject("active form payload")}
+        )
+        writer._root_object[NameObject("/AcroForm")] = writer._add_object(form)
+    if rich_media:
+        annotation = DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Annot"),
+                NameObject("/Subtype"): NameObject("/RichMedia"),
+                NameObject("/Rect"): ArrayObject(),
+            }
+        )
+        writer.pages[0][NameObject("/Annots")] = ArrayObject(
+            [writer._add_object(annotation)]
+        )
     if encrypt:
         writer.encrypt("secret")
     output = io.BytesIO()
@@ -74,7 +112,13 @@ def _pdf_bytes(*, pages=1, metadata=None, action=False, attachment=False, encryp
 
 
 def _ooxml_bytes(
-    kind, *, extra=(), compression=zipfile.ZIP_STORED, main_type_override=None
+    kind,
+    *,
+    extra=(),
+    compression=zipfile.ZIP_STORED,
+    main_type_override=None,
+    content_type_overrides=(),
+    main_xml=None,
 ):
     main_path = "word/document.xml" if kind == "docx" else "xl/workbook.xml"
     main_type = (
@@ -83,16 +127,27 @@ def _ooxml_bytes(
         else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
     )
     main_type = main_type_override or main_type
+    override_xml = "".join(
+        f'<Override PartName="/{part}" ContentType="{content_type}"/>'
+        for part, content_type in content_type_overrides
+    )
+    if main_xml is None:
+        main_xml = (
+            b'<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+            if kind == "docx"
+            else b'<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>'
+        )
     base = [
         (
             "[Content_Types].xml",
             (
                 '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
                 f'<Override PartName="/{main_path}" ContentType="{main_type}"/>'
+                f"{override_xml}"
                 "</Types>"
             ).encode(),
         ),
-        (main_path, b"<?xml version='1.0'?><document/>") ,
+        (main_path, main_xml),
         (
             "docProps/core.xml",
             b'<?xml version="1.0"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"/>',
@@ -134,6 +189,32 @@ def _mark_ready(db, asset_id):
         "scan_checked_at='2026-08-24 10:00:00',ready_at='2026-08-24 10:00:00',"
         "updated_at='2026-08-24 10:00:00' WHERE id=?",
         (asset_id,),
+    )
+    db.commit()
+
+
+def _publish_share_reference(db, asset_id):
+    slug = f"duplicate-media-{asset_id}"
+    group_id = db.execute(
+        "INSERT INTO content_groups (entry_type,canonical_slug,created_at,updated_at) "
+        "VALUES ('announcement',?,'2026-08-24 10:00:00','2026-08-24 10:00:00')",
+        (slug,),
+    ).lastrowid
+    content_id = db.execute(
+        "INSERT INTO content_items "
+        "(content_group_id,entry_type,revision_number,slug,title,summary,seo_title,seo_description,"
+        "share_image_media_id,status,lock_version,created_at,updated_at) "
+        "VALUES (?,'announcement',1,?,'Title','Summary','SEO','Description',?,'draft',1,"
+        "'2026-08-24 10:00:00','2026-08-24 10:00:00')",
+        (group_id, slug, asset_id),
+    ).lastrowid
+    db.execute(
+        "INSERT INTO announcement_content (content_item_id) VALUES (?)", (content_id,)
+    )
+    db.execute(
+        "UPDATE content_items SET status='published',published_at='2026-08-24 10:00:00',"
+        "updated_at='2026-08-24 10:00:00' WHERE id=?",
+        (content_id,),
     )
     db.commit()
 
@@ -351,6 +432,171 @@ def test_ooxml_rejects_main_part_content_type_mismatch(client, media_root):
 
 
 @pytest.mark.parametrize(
+    "kind,relationship_type,target,part_name",
+    [
+        (
+            "docx",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject",
+            "payload/item.bin",
+            "word/payload/item.bin",
+        ),
+        (
+            "xlsx",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/control",
+            "payload/control.bin",
+            "xl/payload/control.bin",
+        ),
+        (
+            "xlsx",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package",
+            "../payload/package.bin",
+            "payload/package.bin",
+        ),
+        (
+            "docx",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+            "../metadata/arbitrary.xml",
+            "metadata/arbitrary.xml",
+        ),
+    ],
+    ids=["ole", "activex", "embedded-package", "custom-properties"],
+)
+def test_ooxml_rejects_forbidden_relationship_semantics_with_arbitrary_part_names(
+    client, media_root, kind, relationship_type, target, part_name
+):
+    rels_path = (
+        "word/_rels/document.xml.rels"
+        if kind == "docx"
+        else "xl/_rels/workbook.xml.rels"
+    )
+    relationships = (
+        '<?xml version="1.0"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rId1" Type="{relationship_type}" Target="{target}"/>'
+        "</Relationships>"
+    ).encode()
+    data = _ooxml_bytes(
+        kind,
+        extra=((rels_path, relationships), (part_name, b"opaque payload")),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            f"semantic.{kind}",
+            OOXML_MIMES[kind],
+            data,
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "kind,part_name,content_type,part_data",
+    [
+        (
+            "docx",
+            "word/data/arbitrary.bin",
+            "application/vnd.openxmlformats-officedocument.oleObject",
+            b"opaque",
+        ),
+        (
+            "xlsx",
+            "xl/data/arbitrary.xml",
+            "application/vnd.ms-office.activeX+xml",
+            b"<control/>",
+        ),
+        (
+            "docx",
+            "metadata/arbitrary.xml",
+            "application/vnd.openxmlformats-officedocument.custom-properties+xml",
+            b"<Properties/>",
+        ),
+        (
+            "xlsx",
+            "metadata/arbitrary.xml",
+            "application/vnd.openxmlformats-package.core-properties+xml",
+            b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Alice</dc:creator></cp:coreProperties>',
+        ),
+    ],
+    ids=["ole", "activex", "custom-properties", "core-properties"],
+)
+def test_ooxml_rejects_forbidden_content_types_with_arbitrary_part_names(
+    client, media_root, kind, part_name, content_type, part_data
+):
+    data = _ooxml_bytes(
+        kind,
+        extra=((part_name, part_data),),
+        content_type_overrides=((part_name, content_type),),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            f"semantic.{kind}",
+            OOXML_MIMES[kind],
+            data,
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_resolves_core_properties_relationship_target_before_inspection(
+    client, media_root
+):
+    relationships = (
+        b'<?xml version="1.0"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="../metadata/renamed.xml"/>'
+        b"</Relationships>"
+    )
+    private_core = (
+        b'<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+        b'xmlns:cp2="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">'
+        b"<cp2:lastModifiedBy>Alice</cp2:lastModifiedBy></cp:coreProperties>"
+    )
+    data = _ooxml_bytes(
+        "docx",
+        extra=(
+            ("word/_rels/document.xml.rels", relationships),
+            ("metadata/renamed.xml", private_core),
+        ),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "private.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "kind,main_xml",
+    [
+        (
+            "docx",
+            b'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+        ),
+        ("xlsx", b"<workbook/>"),
+        ("docx", b"<not-well-formed"),
+    ],
+    ids=["wrong-root", "wrong-namespace", "malformed"],
+)
+def test_ooxml_rejects_invalid_exact_main_xml_part(client, media_root, kind, main_xml):
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            f"invalid-main.{kind}",
+            OOXML_MIMES[kind],
+            _ooxml_bytes(kind, main_xml=main_xml),
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
     "data",
     [
         pytest.param(_pdf_bytes(metadata={"/Author": "Alice"}), id="metadata"),
@@ -366,6 +612,23 @@ def test_pdf_rejects_metadata_actions_embedded_files_encryption_parse_and_page_b
 ):
     with pytest.raises(MediaValidationError):
         _store(client, "unsafe.pdf", "application/pdf", data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(_pdf_bytes(page_metadata=True), id="page-xmp-metadata"),
+        pytest.param(_pdf_bytes(xfa=True), id="xfa-acroform"),
+        pytest.param(_pdf_bytes(rich_media=True), id="rich-media"),
+    ],
+)
+def test_pdf_rejects_nested_metadata_forms_and_rich_media(
+    client, media_root, data
+):
+    with pytest.raises(MediaValidationError):
+        _store(client, "active.pdf", "application/pdf", data, confirmed=True)
 
     assert list(media_root.iterdir()) == []
 
@@ -391,6 +654,49 @@ def test_sha256_duplicate_reuses_ready_asset_and_single_file(client, db, media_r
     assert second.id == first.id
     assert db.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
     assert [path.name for path in media_root.iterdir()] == [first.storage_name]
+
+
+def test_duplicate_ready_upload_restores_missing_file_with_published_reference(
+    client, db, media_root
+):
+    data = _image_bytes("PNG")
+    first = _store(client, "published.png", "image/png", data)
+    stored_path = media_root / first.storage_name
+    expected_bytes = stored_path.read_bytes()
+    _publish_share_reference(db, first.id)
+    stored_path.unlink()
+
+    restored = _store(client, "duplicate.png", "image/png", data)
+
+    assert restored.id == first.id
+    assert stored_path.read_bytes() == expected_bytes
+    assert hashlib.sha256(stored_path.read_bytes()).hexdigest() == first.sha256
+    assert _row(db, first.id)["status"] == "ready"
+    assert db.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items "
+        "WHERE status='published' AND share_image_media_id=?",
+        (first.id,),
+    ).fetchone()[0] == 1
+
+
+def test_duplicate_ready_upload_rejects_corrupt_file_without_overwriting_evidence(
+    client, db, media_root
+):
+    data = _image_bytes("PNG")
+    first = _store(client, "original.png", "image/png", data)
+    stored_path = media_root / first.storage_name
+    corrupt_evidence = b"corrupt durable media evidence"
+    stored_path.write_bytes(corrupt_evidence)
+    before = dict(_row(db, first.id))
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "duplicate.png", "image/png", data)
+
+    assert stored_path.read_bytes() == corrupt_evidence
+    assert dict(_row(db, first.id)) == before
+    assert db.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
+    assert not any(path.name.startswith(".upload-") for path in media_root.iterdir())
 
 
 def test_rename_failure_archives_pending_row_and_cleans_temporary_file(
@@ -540,6 +846,29 @@ def test_recovery_archives_pending_hash_mismatch_without_deleting_file(
     ]
     assert _row(db, asset_id)["status"] == "archived"
     assert (media_root / "mismatch.png").is_file()
+
+
+@pytest.mark.parametrize("apply", [False, True], ids=["dry-run", "apply"])
+def test_recovery_refuses_missing_root_without_filesystem_or_database_changes(
+    client, db, media_root, apply
+):
+    data = _image_bytes("PNG")
+    pending_id = _insert_pending(
+        db, storage_name="pending.png", mime="image/png", data=data
+    )
+    ready_id = _insert_pending(
+        db, storage_name="ready.png", mime="image/png", data=data + b"ready"
+    )
+    _mark_ready(db, ready_id)
+    missing_root = media_root.parent / f"missing-recovery-root-{apply}"
+    client.application.config["MEDIA_UPLOAD_ROOT"] = str(missing_root)
+
+    with client.application.app_context(), pytest.raises(OSError):
+        recover_media_storage(apply=apply)
+
+    assert not missing_root.exists()
+    assert _row(db, pending_id)["status"] == "pending"
+    assert _row(db, ready_id)["status"] == "ready"
 
 
 def test_recover_media_cli_is_dry_run_first_and_never_prints_storage_names(

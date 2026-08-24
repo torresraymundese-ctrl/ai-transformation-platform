@@ -3,9 +3,11 @@
 from dataclasses import dataclass
 import hashlib
 import io
+import posixpath
 from pathlib import Path, PurePosixPath
 import re
 import unicodedata
+from urllib.parse import unquote, urlsplit
 import warnings
 import zipfile
 from xml.etree import ElementTree
@@ -214,8 +216,24 @@ def _reject_active_pdf_objects(value):
         "/JavaScript",
         "/EmbeddedFiles",
         "/EF",
+        "/Metadata",
+        "/AcroForm",
+        "/XFA",
+        "/RichMediaContent",
+        "/RichMediaSettings",
+        "/3D",
+        "/Movie",
     }
-    forbidden_types = {"/EmbeddedFile", "/Filespec", "/FileAttachment"}
+    forbidden_types = {
+        "/EmbeddedFile",
+        "/Filespec",
+        "/FileAttachment",
+        "/RichMedia",
+        "/Movie",
+        "/Sound",
+        "/Screen",
+        "/3D",
+    }
     forbidden_actions = {
         "/JavaScript",
         "/Launch",
@@ -294,10 +312,16 @@ def _validate_ooxml(path, config):
                 raise MediaValidationError("macro-enabled OOXML is not allowed")
             content_type_root = ElementTree.fromstring(content_type_bytes)
             overrides = {
-                element.attrib.get("PartName", "").lstrip("/").casefold():
+                _canonical_ooxml_part_name(element.attrib.get("PartName", "")):
                 element.attrib.get("ContentType", "")
                 for element in content_type_root.iter()
                 if _local_name(element.tag) == "Override"
+            }
+            defaults = {
+                str(element.attrib.get("Extension", "")).lstrip(".").casefold():
+                element.attrib.get("ContentType", "")
+                for element in content_type_root.iter()
+                if _local_name(element.tag) == "Default"
             }
             has_docx = "word/document.xml" in names
             has_xlsx = "xl/workbook.xml" in names
@@ -313,11 +337,20 @@ def _validate_ooxml(path, config):
             main_part = "word/document.xml" if has_docx else "xl/workbook.xml"
             if overrides.get(main_part) != expected_main_type:
                 raise MediaValidationError("OOXML main content type is invalid")
+            expected_main_root = (
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document"
+                if has_docx
+                else "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}workbook"
+            )
+            main_root = ElementTree.fromstring(package.read(names[main_part]))
+            if main_root.tag != expected_main_root:
+                raise MediaValidationError("OOXML main document root is invalid")
 
             if "docprops/custom.xml" in names:
                 raise MediaValidationError("custom OOXML metadata is not allowed")
+            _reject_ooxml_semantic_content_types(package, names, overrides, defaults)
             _reject_ooxml_personal_metadata(package, names)
-            _reject_ooxml_external_relationships(package, names)
+            _reject_ooxml_relationships(package, names)
             return (DOCX_MIME, ".docx") if has_docx else (XLSX_MIME, ".xlsx")
     except MediaValidationError:
         raise
@@ -356,6 +389,42 @@ def _local_name(tag):
     return str(tag).rsplit("}", 1)[-1]
 
 
+def _canonical_ooxml_part_name(name):
+    value = str(name).strip()
+    if not value.startswith("/"):
+        raise MediaValidationError("OOXML part name is invalid")
+    return _safe_zip_member_name(unquote(value[1:])).casefold()
+
+
+def _reject_ooxml_semantic_content_types(package, names, overrides, defaults):
+    for name, member in names.items():
+        content_type = overrides.get(name)
+        if content_type is None:
+            extension = PurePosixPath(name).suffix.lstrip(".").casefold()
+            content_type = defaults.get(extension, "")
+        semantic_type = str(content_type).casefold()
+        if (
+            "oleobject" in semantic_type
+            or "activex" in semantic_type
+            or "embedded-package" in semantic_type
+            or "officedocument.package" in semantic_type
+        ):
+            raise MediaValidationError("active OOXML content is not allowed")
+        if "custom-properties" in semantic_type:
+            raise MediaValidationError("custom OOXML metadata is not allowed")
+        if "core-properties" in semantic_type:
+            _reject_ooxml_metadata_part(
+                package, member, {"creator", "lastModifiedBy"}
+            )
+
+
+def _reject_ooxml_metadata_part(package, member, fields):
+    root = ElementTree.fromstring(package.read(member))
+    for element in root.iter():
+        if _local_name(element.tag) in fields and (element.text or "").strip():
+            raise MediaValidationError("personal OOXML metadata is not allowed")
+
+
 def _reject_ooxml_personal_metadata(package, names):
     for member_name, fields in (
         ("docprops/core.xml", {"creator", "lastModifiedBy"}),
@@ -364,13 +433,50 @@ def _reject_ooxml_personal_metadata(package, names):
         member = names.get(member_name)
         if member is None:
             continue
-        root = ElementTree.fromstring(package.read(member))
-        for element in root.iter():
-            if _local_name(element.tag) in fields and (element.text or "").strip():
-                raise MediaValidationError("personal OOXML metadata is not allowed")
+        _reject_ooxml_metadata_part(package, member, fields)
 
 
-def _reject_ooxml_external_relationships(package, names):
+def _relationship_source_directory(relationship_name):
+    if relationship_name == "_rels/.rels":
+        return ""
+    marker = "/_rels/"
+    if marker not in relationship_name:
+        raise MediaValidationError("OOXML relationship path is invalid")
+    prefix, relationship_leaf = relationship_name.rsplit(marker, 1)
+    if not relationship_leaf.endswith(".rels"):
+        raise MediaValidationError("OOXML relationship path is invalid")
+    source_leaf = relationship_leaf[: -len(".rels")]
+    return posixpath.dirname(f"{prefix}/{source_leaf}")
+
+
+def _resolve_ooxml_relationship_target(relationship_name, target):
+    parsed = urlsplit(str(target).strip())
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise MediaValidationError("OOXML relationship target is invalid")
+    decoded = unquote(parsed.path).replace("\\", "/")
+    if not decoded:
+        raise MediaValidationError("OOXML relationship target is invalid")
+    if decoded.startswith("/"):
+        combined = decoded.lstrip("/")
+    else:
+        combined = posixpath.join(
+            _relationship_source_directory(relationship_name), decoded
+        )
+    normalized = posixpath.normpath(combined)
+    if normalized in {"", ".", ".."} or normalized.startswith("../"):
+        raise MediaValidationError("OOXML relationship target is unsafe")
+    return _safe_zip_member_name(normalized).casefold()
+
+
+def _reject_ooxml_relationships(package, names):
+    forbidden_types = {
+        "oleobject",
+        "package",
+        "control",
+        "activexcontrol",
+        "activexcontrolbinary",
+        "custom-properties",
+    }
     for name, member in names.items():
         if not name.endswith(".rels"):
             continue
@@ -382,3 +488,17 @@ def _reject_ooxml_external_relationships(package, names):
             }
             if attributes.get("targetmode", "").casefold() == "external":
                 raise MediaValidationError("external OOXML relationships are not allowed")
+            relationship_type = attributes.get("type", "").rstrip("/")
+            semantic_type = relationship_type.rsplit("/", 1)[-1].casefold()
+            if semantic_type in forbidden_types:
+                raise MediaValidationError("active OOXML content is not allowed")
+            if semantic_type == "core-properties":
+                target_name = _resolve_ooxml_relationship_target(
+                    name, attributes.get("target", "")
+                )
+                target_member = names.get(target_name)
+                if target_member is None:
+                    raise MediaValidationError("OOXML relationship target is missing")
+                _reject_ooxml_metadata_part(
+                    package, target_member, {"creator", "lastModifiedBy"}
+                )

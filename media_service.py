@@ -234,29 +234,32 @@ def store_media(upload, *, metadata_review_confirmed=False):
                 connection.commit()
                 if duplicate["status"] != "ready":
                     raise MediaValidationError("matching media is pending recovery")
-                return _asset(duplicate)
-            cursor = connection.execute(
-                "INSERT INTO media_assets "
-                "(storage_name,display_name,detected_mime,byte_size,sha256,status,"
-                "created_at,updated_at) "
-                "VALUES (?,?,?,?,?,'pending',?,?)",
-                (
-                    storage_name,
-                    display_name,
-                    validated.detected_mime,
-                    validated.byte_size,
-                    validated.sha256,
-                    timestamp,
-                    timestamp,
-                ),
-            )
-            asset_id = cursor.lastrowid
-            connection.commit()
+            else:
+                cursor = connection.execute(
+                    "INSERT INTO media_assets "
+                    "(storage_name,display_name,detected_mime,byte_size,sha256,status,"
+                    "created_at,updated_at) "
+                    "VALUES (?,?,?,?,?,'pending',?,?)",
+                    (
+                        storage_name,
+                        display_name,
+                        validated.detected_mime,
+                        validated.byte_size,
+                        validated.sha256,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                asset_id = cursor.lastrowid
+                connection.commit()
         except Exception:
             connection.rollback()
             raise
         finally:
             connection.close()
+
+        if duplicate is not None:
+            return _reuse_or_restore_ready_duplicate(root, temporary_path, duplicate)
 
         try:
             os.replace(temporary_path, final_path)
@@ -278,6 +281,22 @@ def store_media(upload, *, metadata_review_confirmed=False):
             connection.close()
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def _reuse_or_restore_ready_duplicate(root, temporary_path, row):
+    existing_path = root / row["storage_name"]
+    if _disk_matches(existing_path, row):
+        return _asset(row)
+    try:
+        existing_path.lstat()
+    except FileNotFoundError:
+        try:
+            os.link(temporary_path, existing_path)
+        except FileExistsError:
+            pass
+        if _disk_matches(existing_path, row):
+            return _asset(row)
+    raise MediaValidationError("matching media storage is inconsistent")
 
 
 def _mark_media_ready(connection, asset_id, timestamp):
@@ -353,7 +372,7 @@ def _disk_matches(path, row):
 
 def recover_media_storage(*, root=None, apply=False):
     """Report reconciliation by ID/status and optionally apply safe state transitions."""
-    root_path = media_root(root)
+    root_path = media_root(root, create=False)
     connection = models.get_db()
     findings = []
     try:

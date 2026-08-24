@@ -12,6 +12,7 @@ from media_service import (
     media_root,
     store_media,
 )
+from media_validation import ATTACHMENT_MIMES
 from repository import DataConflictError
 
 
@@ -41,7 +42,7 @@ def admin_media_preview(asset_id):
     response = send_file(
         path,
         mimetype=asset.detected_mime,
-        as_attachment=False,
+        as_attachment=asset.detected_mime in ATTACHMENT_MIMES,
         download_name=asset.display_name,
         conditional=False,
         etag=False,

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Enterprise AI transformation platform application factory."""
 
+import io
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -96,15 +97,31 @@ def add_public_analytics_cache_policy(response):
 
 def enforce_request_size_policy():
     """Keep 1 MiB everywhere except the authenticated media upload adapter."""
-    if request.content_length is None:
-        return None
+    if request.path.startswith("/admin"):
+        g.admin_response = True
     if (
         request.method == "POST"
         and request.endpoint == "admin.admin_media"
         and check_admin_auth()
     ):
         return None
-    if request.content_length > 1024 * 1024:
+    maximum = 1024 * 1024
+    request.max_content_length = maximum
+    if request.content_length is None:
+        if request.environ.get("wsgi.input_terminated"):
+            body = bytearray()
+            stream = request.environ["wsgi.input"]
+            while len(body) <= maximum:
+                chunk = stream.read(maximum + 1 - len(body))
+                if not chunk:
+                    break
+                body.extend(chunk)
+            if len(body) > maximum:
+                abort(413)
+            request.environ["wsgi.input"] = io.BytesIO(bytes(body))
+            request.environ["CONTENT_LENGTH"] = str(len(body))
+        return None
+    if request.content_length > request.max_content_length:
         abort(413)
     return None
 
