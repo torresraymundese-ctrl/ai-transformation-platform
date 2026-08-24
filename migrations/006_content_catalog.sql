@@ -118,6 +118,9 @@ CREATE TABLE content_groups (
     )
 );
 
+CREATE UNIQUE INDEX unique_content_group_canonical_slug
+ON content_groups(entry_type, canonical_slug);
+
 CREATE TRIGGER prevent_content_group_identity_update
 BEFORE UPDATE OF entry_type, industry_id, scenario_id, service_id ON content_groups
 WHEN NEW.entry_type IS NOT OLD.entry_type

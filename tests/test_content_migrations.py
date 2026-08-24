@@ -501,6 +501,9 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         assert foreign_keys(db, table) == expected
 
     expected_indexes = {
+        ("content_groups", "unique_content_group_canonical_slug"): (
+            1, 0, ("entry_type", "canonical_slug"), None,
+        ),
         ("media_assets", "active_media_sha256_unique"): (
             1, 1, ("sha256",), "where status in ('pending', 'ready')",
         ),
@@ -731,7 +734,24 @@ def test_slug_change_order_allows_archive_alias_group_update_then_publish(db):
     ).fetchone()) == ("new-slug", "old-slug")
 
 
+def test_content_group_canonical_slug_is_unique_within_entry_type(db):
+    insert_group(db, slug="stable-group-slug")
+
+    with pytest.raises(
+        sqlite3.IntegrityError,
+        match=(
+            r"UNIQUE constraint failed: "
+            r"content_groups.entry_type, content_groups.canonical_slug"
+        ),
+    ):
+        insert_group(db, slug="stable-group-slug")
+
+    insert_group(db, entry_type="resource", slug="stable-group-slug")
+
+
 def test_public_slug_is_unique_per_type_while_draft_duplicates_are_allowed(db):
+    """Probe the weaker public index only inside this function-scoped test DB."""
+    db.execute("DROP INDEX unique_content_group_canonical_slug")
     first_group = insert_group(db, slug="shared-public-slug")
     second_group = insert_group(db, slug="shared-public-slug")
     first_item = insert_item(db, first_group, slug="shared-public-slug")
