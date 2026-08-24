@@ -1,7 +1,7 @@
 {% macro render(blocks) -%}
 {% for block in blocks %}
   {% if block.block_type == 'heading' %}
-    {% if block.settings.level == 2 %}<h2 data-content-block="heading">{{ block.title }}</h2>{% elif block.settings.level == 3 %}<h3 data-content-block="heading">{{ block.title }}</h3>{% else %}<h4 data-content-block="heading">{{ block.title }}</h4>{% endif %}
+    {% if block.title %}{% if block.settings.level == 2 %}<h2 data-content-block="heading">{{ block.title }}</h2>{% elif block.settings.level == 3 %}<h3 data-content-block="heading">{{ block.title }}</h3>{% else %}<h4 data-content-block="heading">{{ block.title }}</h4>{% endif %}{% endif %}
     {% if block.body_html %}<div data-content-block-body="heading">{{ block.body_html|safe_html }}</div>{% endif %}
   {% elif block.block_type == 'rich_text' %}
     <div data-content-block="rich_text">{% if block.title %}<h3>{{ block.title }}</h3>{% endif %}{{ block.body_html|safe_html }}</div>

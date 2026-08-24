@@ -47,6 +47,7 @@ def is_exact_nonblank_text(value, *, maximum=None):
     """Return whether a persisted public text value has the exact safe shape."""
     return (
         type(value) is str
+        and "\x00" not in value
         and bool(value.strip())
         and (maximum is None or len(value) <= maximum)
     )

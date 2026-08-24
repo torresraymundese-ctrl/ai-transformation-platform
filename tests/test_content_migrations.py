@@ -471,6 +471,20 @@ def test_scenario_input_rows_reject_unicode_whitespace_and_raw_overlong_text(db,
         )
 
 
+def test_scenario_input_rows_reject_nul_text_even_with_a_valid_draft_owner(db):
+    """Catch SQLite length() accepting a NUL-containing TEXT input as short."""
+    scenario_item = insert_item(
+        db, insert_group(db, "scenario", "scenario-input-nul"),
+        entry_type="scenario", slug="scenario-input-nul",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,?,1)",
+            (scenario_item, "有效\x00输入"),
+        )
+
+
 def test_scenario_input_rows_reject_blob_text_even_with_a_valid_draft_owner(db):
     scenario_item = insert_item(
         db, insert_group(db, "scenario", "scenario-input-blob"),

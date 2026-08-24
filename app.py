@@ -3,10 +3,13 @@
 """Enterprise AI transformation platform application factory."""
 
 import io
+import ipaddress
 import os
+import re
+import unicodedata
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, abort, g, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -73,6 +76,7 @@ DEFAULT_CONFIG = {
 }
 
 ANALYTICS_CONFIG_ENDPOINT = "assessment_v2.assessment_config"
+_HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 
 
 def enable_public_analytics_response():
@@ -140,21 +144,61 @@ def media_download_url(asset_id):
     return url_for("media.published_download", asset_id=asset_id)
 
 
+def _valid_public_hostname(hostname):
+    """Validate a configured origin host without resolving or contacting it."""
+    if type(hostname) is not str or not hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return False
+    if (
+        not ascii_hostname or len(ascii_hostname) > 253
+        or ascii_hostname.startswith(".") or ascii_hostname.endswith(".")
+    ):
+        return False
+    return all(
+        1 <= len(label) <= 63 and _HOST_LABEL.fullmatch(label)
+        for label in ascii_hostname.split(".")
+    )
+
+
+def _strict_public_base_url(value):
+    """Accept only an unambiguous, literal HTTPS origin from deployment config."""
+    if type(value) is not str or any(
+        unicodedata.category(character).startswith("C") for character in value
+    ):
+        raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError as error:
+        raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin") from error
+    origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    if (
+        parts.scheme != "https" or not parts.netloc
+        or not _valid_public_hostname(parts.hostname)
+        or parts.username is not None or parts.password is not None
+        or port == 0 or parts.path or parts.query or parts.fragment or value != origin
+    ):
+        raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
+    return origin
+
+
 def create_app(test_config=None):
     """Build an isolated Flask application instance."""
     flask_app = Flask(__name__)
     flask_app.config.from_mapping(DEFAULT_CONFIG)
     if test_config:
         flask_app.config.update(test_config)
-    public_base_url = flask_app.config.get("PUBLIC_BASE_URL")
-    parts = urlsplit(public_base_url) if type(public_base_url) is str else None
-    if (
-        parts is None or parts.scheme != "https" or not parts.netloc
-        or parts.username is not None or parts.password is not None
-        or parts.path or parts.query or parts.fragment
-    ):
-        raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
-    flask_app.config["PUBLIC_BASE_URL"] = public_base_url
+    flask_app.config["PUBLIC_BASE_URL"] = _strict_public_base_url(
+        flask_app.config.get("PUBLIC_BASE_URL")
+    )
     if not flask_app.config.get("MEDIA_UPLOAD_ROOT"):
         flask_app.config["MEDIA_UPLOAD_ROOT"] = str(
             Path(__file__).resolve().parent / "data" / "media"

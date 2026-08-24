@@ -177,6 +177,56 @@ def test_scenario_input_seed_writes_a_whole_explicit_schema_group_to_an_empty_dr
     ]
 
 
+@pytest.mark.parametrize("invalid_input", (
+    "x" * 300 + " ",
+    "有效\x00输入",
+), ids=("raw-length-over-300", "nul"))
+def test_scenario_input_seed_rejects_raw_invalid_text_before_any_write(
+    db, monkeypatch, invalid_input
+):
+    """Catch validation that trims an invalid source value before persisting it."""
+    payload = _structured_input_seed()
+    payload["scenarios"][-1]["inputs"][0]["input_text"] = invalid_input
+    before = [tuple(row) for row in db.execute(
+        "SELECT content_item_id,input_text,sort_order FROM scenario_public_inputs "
+        "ORDER BY content_item_id,sort_order,id"
+    )]
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    with pytest.raises(ContentSeedError, match="scenario input seed values are invalid"):
+        content_seed.seed_scenario_public_inputs(db)
+
+    after = [tuple(row) for row in db.execute(
+        "SELECT content_item_id,input_text,sort_order FROM scenario_public_inputs "
+        "ORDER BY content_item_id,sort_order,id"
+    )]
+    assert after == before
+
+
+def test_scenario_input_seed_preserves_valid_raw_input_text(db, monkeypatch):
+    """Catch a seed pass that silently rewrites editor-approved whitespace."""
+    payload = _structured_input_seed()
+    raw_input = "  受控输入的首尾空白  "
+    next(
+        entry for entry in payload["scenarios"]
+        if entry["code"] == "mfg_knowledge_assistant"
+    )["inputs"][0]["input_text"] = raw_input
+    draft = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
+    ).fetchone()[0]
+    db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=?", (draft,))
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    content_seed.seed_scenario_public_inputs(db)
+
+    assert db.execute(
+        "SELECT input_text FROM scenario_public_inputs "
+        "WHERE content_item_id=? AND sort_order=1", (draft,)
+    ).fetchone()[0] == raw_input
+
+
 @pytest.mark.parametrize("mutate", (
     lambda payload: payload.__setitem__("scenarios", {}),
     lambda payload: payload["scenarios"][-1]["inputs"].__setitem__(0, {"input_text": "x" * 301, "sort_order": 1}),

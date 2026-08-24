@@ -403,10 +403,15 @@ def load_content_draft(db, content_id):
 
 def validate_for_publication(db, content_id, now):
     draft = validate_content_draft(load_content_draft(db, content_id))
-    if draft.share_image_media_id is not None and db.execute(
-        "SELECT 1 FROM media_assets WHERE id=? AND status='ready'", (draft.share_image_media_id,)
-    ).fetchone() is None:
-        raise ContentValidationError("media_not_ready")
+    if draft.share_image_media_id is not None:
+        media = db.execute(
+            "SELECT detected_mime FROM media_assets WHERE id=? AND status='ready'",
+            (draft.share_image_media_id,),
+        ).fetchone()
+        if media is None:
+            raise ContentValidationError("media_not_ready")
+        if media["detected_mime"] not in IMAGE_MIMES:
+            raise ContentValidationError("share_image_mime_invalid")
     for block in draft.blocks:
         if block.media_asset_id is None:
             continue

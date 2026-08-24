@@ -7,6 +7,7 @@ from pathlib import Path
 from assessment.seed import load_core_catalog_manifest
 from content_clock import as_shanghai
 from content_contracts import ContentBlock, ContentDraft
+from content_validation import is_exact_nonblank_text
 import publishing_repository
 
 
@@ -70,11 +71,11 @@ def _validated_scenario_public_inputs():
             input_text = value["input_text"]
             sort_order = value["sort_order"]
             if (
-                type(input_text) is not str or not input_text.strip() or len(input_text.strip()) > 300
+                not is_exact_nonblank_text(input_text, maximum=300)
                 or type(sort_order) is not int or sort_order < 1
             ):
                 raise ContentSeedError("scenario input seed values are invalid")
-            values.append((input_text.strip(), sort_order))
+            values.append((input_text, sort_order))
         if len({sort_order for _, sort_order in values}) != len(values):
             raise ContentSeedError("scenario input seed sort order is invalid")
         validated[code] = tuple(sorted(values, key=lambda value: value[1]))

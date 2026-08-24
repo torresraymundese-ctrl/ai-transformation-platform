@@ -13,6 +13,7 @@ from content_clock import as_shanghai, format_shanghai
 from content_json import ContentJsonError, decode_database_json
 from content_contracts import ContentDraft
 from content_validation import ContentValidationError, _safe_cta, is_exact_nonblank_text, public_input_texts
+from media_validation import IMAGE_MIMES
 from pagination import Page, PageRequest
 import publishing_repository
 import publishing_service
@@ -136,6 +137,7 @@ class EditorProjection:
     latest_archived: RevisionProjection | None
     relation_choices: tuple[RelationChoice, ...]
     media_choices: tuple[MediaChoice, ...]
+    share_image_choices: tuple[MediaChoice, ...]
 
 
 @dataclass(frozen=True)
@@ -800,6 +802,9 @@ def load_editor(db, kind: str, core_id: int) -> EditorProjection:
             "WHERE status='ready' ORDER BY display_name,id"
         )
     )
+    share_image_choices = tuple(
+        media for media in media_choices if media.detected_mime in IMAGE_MIMES
+    )
     return EditorProjection(
         kind=kind,
         core_id=core_id,
@@ -815,6 +820,7 @@ def load_editor(db, kind: str, core_id: int) -> EditorProjection:
         latest_archived=_revision(db, archived["id"] if archived else None),
         relation_choices=relation_choices,
         media_choices=media_choices,
+        share_image_choices=share_image_choices,
     )
 
 

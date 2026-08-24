@@ -39,7 +39,7 @@
     <label>分享图</label>
     <select name="share_image_media_id">
       <option value="">不使用</option>
-      {% for media in view.media_choices %}
+      {% for media in view.share_image_choices %}
       <option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>
       {% endfor %}
     </select>

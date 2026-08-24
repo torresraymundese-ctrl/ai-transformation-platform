@@ -1075,3 +1075,192 @@ before this report-only append.
 The original full-suite result remains **UNKNOWN** and was not rerun. The
 historical PyPI-network violation remains **CONFIRMED**. The frozen
 `data_process_foundation` product-data limitation also remains unchanged.
+
+## Fix1h — seed fidelity, strict public origin, optional headings, and share-image gate
+
+Fix1h started from `ffdde7103ba57bdb6e93a98e072d2ae7701f2ca2`. It stayed
+inside Task 6: no Task 7 work, full suite, dependency installation, network
+access, production server, Nginx, or real database was used. Every pytest
+command used the assigned `..\\..\\.venv\\Scripts\\python.exe`, a
+process-scoped `PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps`,
+`-p no:cacheprovider`, and a distinct `pytest-task6-fix1h-*` basetemp. The
+existing offline overlay resolved `pypdf` to `6.10.0`.
+
+### TDD RED evidence
+
+The first test-first command covered raw seed input bounds/preservation, the
+007 schema, public NUL fail-closed behavior, heading rendering, strict origin
+inputs, and share-image selection/publication:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1h-red-core-001 [12 focused Task 6 test nodes]
+16 failed, 3 passed in 7.15s
+tool exit_code=1
+```
+
+It correctly exposed the intended missing behaviors (trimmed raw seed input,
+accepted NUL, ready PDF share selection/publication, literal heading `None`,
+and noncanonical origins). Two assertions were then corrected before any
+production edit: a public legacy-input test must corrupt the draft before it
+is made public because the immutable published-row trigger correctly rejects
+an in-place update, and the valid-image control must use
+`PublishResult.published_id`/`archived_id`. The corrected genuine RED was:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1h-red-core-002 [same focused Task 6 nodes]
+15 failed, 4 passed in 6.99s
+tool exit_code=1
+```
+
+The failures proved: raw `x * 300 + ' '` and NUL input seed values were
+accepted before stripping; valid leading/trailing whitespace was rewritten;
+007 accepted NUL TEXT; a ready PDF appeared as a share image and published;
+an optional heading title emitted `>None<`; malformed origin delimiters,
+ports, hostless forms, and controls were accepted; and both formal publication
+and public reads accepted a legacy NUL input.
+
+The strict-host follow-up had its own tests before the hostname implementation:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1h-red-origin-host-005 tests\\test_public_catalog.py::test_public_base_url_rejects_invalid_hostname_shape tests\\test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+3 failed, 5 passed in 0.68s
+tool exit_code=1
+```
+
+The three invalid parsed hosts were `exa mple.test`, `example_test`, and
+`example%.test`. The port follow-up also had an independent RED:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1h-red-origin-port-008 tests\\test_public_catalog.py::test_public_base_url_rejects_noncanonical_https_origins tests\\test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+1 failed, 12 passed in 0.60s
+tool exit_code=1
+```
+
+It proved `https://example.test:0` was accepted before the local port guard.
+
+### Minimal implementation and GREEN evidence
+
+`is_exact_nonblank_text` now rejects NUL in addition to exact `str`, Python
+`strip()` nonblank, and the caller-supplied maximum. `content_seed` uses this
+same predicate with a 300-character maximum and persists valid text verbatim;
+it retains whole-payload prevalidation before any insert. Unreleased migration
+007 now also rejects NUL with `instr(input_text,char(0))=0` while retaining its
+existing exact TEXT/length/whitespace/order/ownership contract. Formal
+publication and public projection already consume this shared predicate, so
+legacy malformed NUL rows reject or fail closed instead of silently reaching a
+public page.
+
+The editor now exposes image MIME assets only in `share_image_choices`; its
+block `media_choices` remain all ready attachments. The authoritative
+publication gate independently requires the selected share asset to be ready
+and an `IMAGE_MIMES` member, so crafted requests roll back before archiving a
+healthy revision. A legal ready PNG remains publishable. The optional heading
+title is rendered only when truthy, while its meaningful body continues
+through the existing `safe_html` filter.
+
+`PUBLIC_BASE_URL` now accepts only an input exactly equal to a reconstructed
+HTTPS origin: no userinfo/path/query/fragment/Unicode C-category character, a nonzero
+valid port, and a hostname validated locally as IDNA-normalizable IPv4, IPv6,
+or DNS-label shape. No DNS lookup/global-address policy was added. Explicit
+ports 1..65535, IPv6, IPv4, and a Unicode IDN control remain accepted.
+
+```text
+pytest-task6-fix1h-green-core-003
+19 passed in 6.52s
+tool exit_code=0
+
+pytest-task6-fix1h-green-origin-host-006
+14 passed in 0.30s
+tool exit_code=0
+
+pytest-task6-fix1h-green-origin-port-009
+17 passed in 0.34s
+tool exit_code=0
+```
+
+A final strict-origin review found that U+200B (a Unicode format character)
+could be removed by IDNA after the former `Cc`-only control check. It had its
+own test-first evidence:
+
+```text
+pytest-task6-fix1h-red-origin-format-011
+tests/test_public_catalog.py::test_public_base_url_rejects_invalid_hostname_shape tests/test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+1 failed, 10 passed in 0.60s
+tool exit_code=1
+
+pytest-task6-fix1h-green-origin-format-012
+tests/test_public_catalog.py::test_public_base_url_is_required_https_origin tests/test_public_catalog.py::test_public_base_url_rejects_noncanonical_https_origins tests/test_public_catalog.py::test_public_base_url_rejects_invalid_hostname_shape tests/test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+18 passed in 0.34s
+tool exit_code=0
+```
+
+The minimal correction now follows the existing project policy,
+`unicodedata.category(character).startswith("C")`, before parsing. This
+rejects controls and format characters without adding DNS/global-address
+policy.
+
+Before the hostname/port additions, the six required responsibility files
+returned `302 passed in 156.43s`, exit 0, in
+`pytest-task6-fix1h-responsibility-004`; the broader pre-port set including
+media HTTP/service returned `421 passed in 218.18s`, exit 0, in
+`pytest-task6-fix1h-responsibility-final-007`. A pre-format-character final
+run returned `424 passed in 220.28s`, exit 0, in
+`pytest-task6-fix1h-responsibility-final-010`. The final frozen responsibility
+command was rerun after the U+200B correction:
+
+```text
+$env:PYTHONPATH=(Resolve-Path '.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps').Path
+..\\..\\.venv\\Scripts\\python.exe -c "import sys, pypdf; print(sys.executable); print(sys.version.split()[0]); print(__import__('os').environ['PYTHONPATH']); print(pypdf.__version__)"
+interpreter=...\\.venv\\Scripts\\python.exe
+python=3.12.13
+PYTHONPATH=...\\.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps
+pypdf=6.10.0
+
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1h-responsibility-final-013 tests\\test_public_catalog.py tests\\test_catalog_content_admin.py tests\\test_content_seed.py tests\\test_content_migrations.py tests\\test_app_factory_and_migrations.py tests\\test_content_publishing.py tests\\test_media_service.py tests\\test_media_http.py
+425 passed in 222.59s (0:03:42)
+tool exit_code=0
+```
+
+### Static checks, self-review, and inventory
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile app.py catalog_content_repository.py content_seed.py content_validation.py publishing_repository.py tests\\test_catalog_content_admin.py tests\\test_content_migrations.py tests\\test_content_seed.py tests\\test_public_catalog.py
+PYCOMPILE_EXIT=0
+
+git diff --check
+DIFF_CHECK_EXIT=0
+
+Blueprint direct-SQL guard over blueprints\\admin\\catalog.py
+BLUEPRINT_DIRECT_SQL_GUARD=PASS
+```
+
+Self-review confirmed raw input values are only accepted when exact/nonblank/
+bounded and are never trimmed on seed; NUL is blocked in seed, schema,
+publication, and public-read boundaries; valid ready share images remain
+available while PDF/document selections are rejected atomically; the seven
+governed block contracts remain unchanged and the heading body retains safe
+HTML rendering; `PUBLIC_BASE_URL` comes solely from validated configuration,
+not Host/X-Forwarded-Host; and no analytics/private-cache, core frozen data,
+public leak, media block MIME, share/resource endpoint MIME, visual-token,
+Task 7, ledger, or task-card behavior was broadened.
+
+Fix1h changed:
+
+- `app.py`
+- `catalog_content_repository.py`
+- `content_seed.py`
+- `content_validation.py`
+- `migrations/007_scenario_public_inputs.sql`
+- `publishing_repository.py`
+- `templates/admin/catalog_edit.html`
+- `templates/components/content_blocks.html`
+- `tests/test_catalog_content_admin.py`
+- `tests/test_content_migrations.py`
+- `tests/test_content_seed.py`
+- `tests/test_public_catalog.py`
+- this report
+
+Known limitations remain unchanged: the sole historical full-suite stream is
+**UNKNOWN** and was not rerun; the historic PyPI network use is
+**CONFIRMED**; and the frozen `data_process_foundation` product-data limitation
+continues to keep that scenario private rather than inventing a pain relation.

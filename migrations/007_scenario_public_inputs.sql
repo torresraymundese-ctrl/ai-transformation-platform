@@ -3,6 +3,7 @@ CREATE TABLE scenario_public_inputs (
     content_item_id INTEGER NOT NULL,
     input_text TEXT NOT NULL CHECK(
         typeof(input_text)='text'
+        AND instr(input_text,char(0))=0
         AND length(input_text) BETWEEN 1 AND 300
         AND length(trim(input_text,
             char(9)||char(10)||char(11)||char(12)||char(13)||

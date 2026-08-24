@@ -212,6 +212,65 @@ def test_public_base_url_is_required_https_origin(tmp_path, monkeypatch):
             app_module.create_app(config)
 
 
+@pytest.mark.parametrize("value", (
+    "https://example.test?",
+    "https://example.test#",
+    "https://example.test:bad",
+    "https://:443",
+    "https://example.test:0",
+    "https://example.test\n",
+), ids=("empty-query", "empty-fragment", "bad-port", "empty-host", "zero-port", "control"))
+def test_public_base_url_rejects_noncanonical_https_origins(tmp_path, monkeypatch, value):
+    """Catch parser normalization that accepts an input other than a strict origin."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    with pytest.raises(ValueError):
+        app_module.create_app({
+            "TESTING": False,
+            "SECRET_KEY": "test",
+            "PUBLIC_BASE_URL": value,
+            "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+        })
+
+
+@pytest.mark.parametrize("value", (
+    "https://exa mple.test",
+    "https://example_test",
+    "https://example%.test",
+    "https://exam\u200bple.test",
+), ids=("space", "underscore", "bad-percent", "zero-width"))
+def test_public_base_url_rejects_invalid_hostname_shape(tmp_path, monkeypatch, value):
+    """Catch a syntactically parsed hostname that is not a legal local origin host."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    with pytest.raises(ValueError):
+        app_module.create_app({
+            "TESTING": False,
+            "SECRET_KEY": "test",
+            "PUBLIC_BASE_URL": value,
+            "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+        })
+
+
+@pytest.mark.parametrize("value", (
+    "https://example.test",
+    "https://example.test:1",
+    "https://example.test:8443",
+    "https://example.test:65535",
+    "https://[2001:db8::1]:8443",
+    "https://192.0.2.1:8443",
+    "https://例子.测试",
+))
+def test_public_base_url_accepts_exact_https_origins(tmp_path, monkeypatch, value):
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    application = app_module.create_app({
+        "TESTING": False,
+        "SECRET_KEY": "test",
+        "PUBLIC_BASE_URL": value,
+        "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+    })
+
+    assert application.config["PUBLIC_BASE_URL"] == value
+
+
 def _ready_media(db, name, mime):
     asset_id = db.execute(
         "INSERT INTO media_assets "
@@ -483,6 +542,7 @@ def _corrupt_one_scenario_text_source(db, scenario_id, revision_id, source, valu
             type(value) is not str
             or not value.strip()
             or len(value) > 300
+            or "\x00" in value
         )
         if legacy_value:
             db.execute("PRAGMA ignore_check_constraints=ON")
@@ -851,6 +911,89 @@ def test_formal_publish_rejects_legacy_nonexact_input_sort_order_and_keeps_curre
     assert error.value.code == "scenario_public_incomplete"
     _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
     assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+def test_formal_publish_rejects_nul_input_without_archiving_current_public(client, db):
+    """Catch formal publication accepting a NUL that later makes public input unsafe."""
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _corrupt_one_scenario_text_source(
+        db, current["scenario_id"], revision_id, "input", "有效\x00输入"
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+def test_public_scenario_projection_fails_closed_for_legacy_nul_input(client, db):
+    """Catch a public projection that renders a persisted NUL-containing input."""
+    revision = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' "
+        "AND ci.status='draft'"
+    ).fetchone()
+    db.execute("PRAGMA ignore_check_constraints=ON")
+    try:
+        db.execute(
+            "UPDATE scenario_public_inputs SET input_text=? WHERE id=(SELECT id FROM "
+            "scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+            ("有效\x00输入", revision["id"]),
+        )
+    finally:
+        db.execute("PRAGMA ignore_check_constraints=OFF")
+    db.commit()
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"]
+        for card in page(client.get("/scenarios")).select("[data-scenario-code]")
+    }
+
+
+def test_formal_publish_rejects_ready_pdf_share_image_without_archiving_current_public(client, db):
+    """Catch a formal publish that promotes a PDF share image the image endpoint rejects."""
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    pdf_id = _ready_media(db, "formal-share.pdf", "application/pdf")
+    draft = publishing_repository.load_content_draft(db, revision_id)
+    lock_version = save_content_draft(
+        revision_id,
+        lock_version,
+        replace(draft, share_image_media_id=pdf_id),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "share_image_mime_invalid"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+def test_formal_publish_accepts_ready_image_share_image(db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    image_id = _ready_media(db, "formal-share.png", "image/png")
+    draft = publishing_repository.load_content_draft(db, revision_id)
+    lock_version = save_content_draft(
+        revision_id,
+        lock_version,
+        replace(draft, share_image_media_id=image_id),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+
+    result = publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert (result.published_id, result.archived_id) == (revision_id, current["id"])
+    assert tuple(db.execute(
+        "SELECT status,share_image_media_id FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()) == ("published", image_id)
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "archived"
 
 
 @pytest.mark.parametrize("bad_settings", (

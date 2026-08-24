@@ -1,6 +1,8 @@
 import hashlib
 from pathlib import Path
 
+from bs4 import BeautifulSoup
+
 from content_contracts import CaseMetric, ContentDraft
 from publishing_service import create_content_draft, publish_content
 
@@ -285,6 +287,106 @@ def _pending_media(db):
     ).lastrowid
     db.commit()
     return media_id
+
+
+def _ready_media(db, name, mime):
+    timestamp = "2026-08-24 09:00:00"
+    media_id = db.execute(
+        "INSERT INTO media_assets "
+        "(storage_name,display_name,detected_mime,byte_size,sha256,status,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,'pending',?,?)",
+        (
+            name,
+            name,
+            mime,
+            10,
+            hashlib.sha256(name.encode("utf-8")).hexdigest(),
+            timestamp,
+            timestamp,
+        ),
+    ).lastrowid
+    db.execute(
+        "UPDATE media_assets SET status='ready',scan_result_code='validated',"
+        "scan_checked_at=?,ready_at=?,updated_at=? WHERE id=?",
+        (timestamp, timestamp, timestamp, media_id),
+    )
+    db.commit()
+    return media_id
+
+
+def test_editor_share_choices_exclude_ready_pdf_but_block_choices_keep_it(admin_client, db):
+    """Catch a share selector that exposes an asset its public image route cannot serve."""
+    item = _first(db)
+    pdf_id = _ready_media(db, "share-choice.pdf", "application/pdf")
+    image_id = _ready_media(db, "share-choice.png", "image/png")
+
+    response = admin_client.get(f"/admin/catalog/scenario/{item['scenario_id']}")
+    document = BeautifulSoup(response.data, "html.parser")
+    share_choices = {
+        option.get("value")
+        for option in document.select('select[name="share_image_media_id"] option')
+    }
+    block_choices = {
+        option.get("value")
+        for option in document.select('select[name="blocks-0-media_id"] option')
+    }
+
+    assert response.status_code == 200
+    assert str(pdf_id) not in share_choices
+    assert str(image_id) in share_choices
+    assert str(pdf_id) in block_choices
+
+
+def test_admin_publish_rejects_ready_pdf_share_image_without_mutation(admin_client, db):
+    """Catch an admin publish that accepts a ready non-image sharing asset."""
+    item = _first(db)
+    pdf_id = _ready_media(db, "share-publish.pdf", "application/pdf")
+    before = tuple(db.execute(
+        "SELECT title,status,lock_version,share_image_media_id FROM content_items WHERE id=?",
+        (item["id"],),
+    ).fetchone())
+
+    response = admin_client.post(
+        f"/admin/catalog/scenario/{item['scenario_id']}",
+        data=_valid_form(item, action="publish", share_image_media_id=str(pdf_id)),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "share_image_mime_invalid"}
+    assert tuple(db.execute(
+        "SELECT title,status,lock_version,share_image_media_id FROM content_items WHERE id=?",
+        (item["id"],),
+    ).fetchone()) == before
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'", (item["id"],),
+    ).fetchone()[0] == 0
+
+
+def test_admin_publish_heading_without_title_renders_its_safe_body_without_none(admin_client, db):
+    """Catch the literal None heading emitted for the legal optional heading title."""
+    item = _first(db)
+    response = admin_client.post(
+        f"/admin/catalog/scenario/{item['scenario_id']}",
+        data=_valid_form(
+            item,
+            action="publish",
+            **{
+                "blocks-0-type": "heading",
+                "blocks-0-title": "",
+                "blocks-0-body": "<p>HEADING-BODY-VISIBLE</p>",
+                "blocks-0-heading_level": "2",
+            },
+        ),
+    )
+
+    assert response.status_code == 302
+    public = admin_client.get(f"/scenarios/{item['slug']}")
+    document = BeautifulSoup(public.data, "html.parser")
+    assert public.status_code == 200
+    assert b"HEADING-BODY-VISIBLE" in public.data
+    assert b">None<" not in public.data
+    assert document.select('[data-content-block="heading"]') == []
 
 
 def test_save_rejects_media_outside_ready_choices_without_mutation(admin_client, db):
