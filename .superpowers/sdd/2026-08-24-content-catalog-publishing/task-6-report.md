@@ -1034,3 +1034,44 @@ Known limitations remain unchanged: the original sole full-suite outcome is
 and frozen `data_process_foundation` remains intentionally private owing to its
 disclosed product-data limitation. This Fix1g used only the existing offline
 overlay and disposable SQLite databases.
+
+## Fix1g controller verification
+
+The controller independently verified code commit
+`02c3a51c763ce3e2f5c70449e481f11a7573e193` from a clean tracked tree. Every
+pytest command used the assigned project interpreter, process-scoped offline
+`local-deps` overlay (`pypdf 6.10.0`), `-p no:cacheprovider`, and a unique
+basetemp. No full suite, network access, dependency installation, production
+server, Nginx, or real database was used.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_content_publishing.py tests\test_content_validation.py tests\test_media_http.py tests\test_content_migrations.py tests\test_content_seed.py tests\test_v2_migrations.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1g-focused-001
+```
+
+Result: `376 passed in 168.11s (0:02:48)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1g-public-partition-001
+```
+
+Result: `333 passed in 173.26s (0:02:53)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1g-related-partition-001
+```
+
+Result: `216 passed in 74.30s (0:01:14)`, tool `exit_code=0`.
+
+Controller environment evidence resolved the interpreter to the assigned
+project venv and `pypdf` to version `6.10.0` inside the command-scoped offline
+overlay. `py_compile`, `git diff --check 1c359a7..02c3a51`, the exact 29-codepoint
+Python-`isspace`/migration parity check, and the no-direct-SQL guard for
+`blueprints/public_catalog.py` all returned exit 0. The tracked tree was clean
+before this report-only append.
+
+The original full-suite result remains **UNKNOWN** and was not rerun. The
+historical PyPI-network violation remains **CONFIRMED**. The frozen
+`data_process_foundation` product-data limitation also remains unchanged.
