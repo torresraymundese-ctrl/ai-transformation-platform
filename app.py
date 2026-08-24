@@ -6,6 +6,7 @@ import io
 import os
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, abort, g, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -16,6 +17,7 @@ from blueprints.admin import bp as admin_bp
 from blueprints.assessment import bp as assessment_bp
 from blueprints.api import bp as api_bp
 from blueprints.public import bp as public_bp, svc_emoji
+from blueprints.public_catalog import bp as public_catalog_bp
 from blueprints.media import bp as media_bp
 from models import init_db
 from security import (add_security_headers, audit_admin_actions, check_admin_auth,
@@ -36,6 +38,7 @@ DEFAULT_CONFIG = {
     "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
     "MAX_CONTENT_LENGTH": 22 * 1024 * 1024,
     "MEDIA_UPLOAD_ROOT": os.environ.get("AI_PLATFORM_MEDIA_ROOT"),
+    "PUBLIC_BASE_URL": os.environ.get("AI_PLATFORM_PUBLIC_BASE_URL"),
     "MEDIA_IMAGE_MAX_BYTES": 8 * 1024 * 1024,
     "MEDIA_ATTACHMENT_MAX_BYTES": 20 * 1024 * 1024,
     "MEDIA_IMAGE_MAX_PIXELS": 40_000_000,
@@ -143,6 +146,15 @@ def create_app(test_config=None):
     flask_app.config.from_mapping(DEFAULT_CONFIG)
     if test_config:
         flask_app.config.update(test_config)
+    public_base_url = flask_app.config.get("PUBLIC_BASE_URL")
+    parts = urlsplit(public_base_url) if type(public_base_url) is str else None
+    if (
+        parts is None or parts.scheme != "https" or not parts.netloc
+        or parts.username is not None or parts.password is not None
+        or parts.path or parts.query or parts.fragment
+    ):
+        raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
+    flask_app.config["PUBLIC_BASE_URL"] = public_base_url
     if not flask_app.config.get("MEDIA_UPLOAD_ROOT"):
         flask_app.config["MEDIA_UPLOAD_ROOT"] = str(
             Path(__file__).resolve().parent / "data" / "media"
@@ -175,6 +187,7 @@ def create_app(test_config=None):
     flask_app.after_request(audit_admin_actions)
 
     flask_app.register_blueprint(public_bp)
+    flask_app.register_blueprint(public_catalog_bp)
     flask_app.register_blueprint(api_bp)
     flask_app.register_blueprint(assessment_bp)
     flask_app.register_blueprint(admin_bp)

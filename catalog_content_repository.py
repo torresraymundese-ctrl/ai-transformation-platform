@@ -1,10 +1,12 @@
 """Read models and transaction services for the core content catalog."""
 
 from dataclasses import dataclass
-from typing import Any
+import json
+from types import MappingProxyType
+from typing import Any, Mapping
 
 import models
-from content_clock import as_shanghai
+from content_clock import as_shanghai, format_shanghai
 from content_contracts import ContentDraft
 from content_validation import ContentValidationError
 from pagination import Page, PageRequest
@@ -137,6 +139,289 @@ class SaveResult:
     content_id: int
     lock_version: int
     published: bool
+
+
+MATURITY_LABELS = {
+    "explore": "探索",
+    "pilot": "试点",
+    "scale": "规模化",
+    "collaborate": "协同",
+}
+
+
+@dataclass(frozen=True)
+class ScenarioFilters:
+    industry: str = ""
+    department: str = ""
+    maturity: str = ""
+
+
+@dataclass(frozen=True)
+class ScenarioCard:
+    code: str
+    slug: str
+    title: str
+    summary: str
+    industries: tuple[str, ...]
+    departments: tuple[str, ...]
+    maturity: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ScenarioAuthority:
+    """Frozen V2 scenario controls; 5B may replace this with an active snapshot."""
+    scenario_id: int
+    code: str
+    category_code: str
+    minimum_business_value: int
+    minimum_process: int
+    minimum_data: int
+    minimum_systems: int
+    minimum_organization: int
+    minimum_delivery: int
+    integration_level: str
+    min_weeks: int
+    max_weeks: int
+    risk_codes: tuple[str, ...]
+    fallback_only: bool
+
+
+def _public_item_where(now):
+    return "ci.status='published' AND (ci.publish_at IS NULL OR ci.publish_at<=?)", (format_shanghai(now),)
+
+
+def _published_codes(db, table):
+    return {
+        row[0] for row in db.execute(
+            f"SELECT code FROM {table} WHERE status='published' AND code IS NOT NULL"
+        )
+    }
+
+
+def parse_public_scenario_filters(values) -> ScenarioFilters:
+    """GET filters intentionally degrade unknown values to the empty filter."""
+    db = models.get_db()
+    try:
+        def valid(name, allowed):
+            raw = values.get(name) if hasattr(values, "get") else None
+            return raw if type(raw) is str and raw in allowed else ""
+
+        return ScenarioFilters(
+            industry=valid("industry", _published_codes(db, "industries")),
+            department=valid("department", _published_codes(db, "departments")),
+            maturity=valid("maturity", set(MATURITY_LABELS)),
+        )
+    finally:
+        db.close()
+
+
+def _names(db, sql, arguments):
+    return tuple(row[0] for row in db.execute(sql, arguments))
+
+
+def _scenario_card(db, row) -> ScenarioCard:
+    scenario_id = row["scenario_id"]
+    return ScenarioCard(
+        code=row["code"], slug=row["slug"], title=row["title"], summary=row["summary"],
+        industries=_names(
+            db,
+            "SELECT DISTINCT i.name FROM scenario_branches sb "
+            "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+            "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+            "ORDER BY i.sort_order,i.id",
+            (scenario_id,),
+        ),
+        departments=_names(
+            db,
+            "SELECT d.name FROM scenario_departments sd JOIN departments d ON d.id=sd.department_id "
+            "WHERE sd.scenario_id=? ORDER BY d.industry_id,d.sort_order,d.id",
+            (scenario_id,),
+        ),
+        maturity=_names(
+            db,
+            "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
+            "ORDER BY sort_order,maturity_code",
+            (row["content_id"],),
+        ),
+    )
+
+
+def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, now) -> Page[ScenarioCard]:
+    clause, arguments = _public_item_where(now)
+    joins = [
+        "FROM scenarios s JOIN content_groups g ON g.scenario_id=s.id "
+        "JOIN content_items ci ON ci.content_group_id=g.id",
+    ]
+    conditions = ["s.status='published'", clause]
+    parameters = list(arguments)
+    if filters.industry:
+        joins.append("JOIN scenario_branches filter_branch ON filter_branch.scenario_id=s.id "
+                     "JOIN industry_branches filter_industry_branch ON filter_industry_branch.id=filter_branch.industry_branch_id "
+                     "JOIN industries filter_industry ON filter_industry.id=filter_industry_branch.industry_id")
+        conditions.append("filter_industry.code=? AND filter_industry.status='published'")
+        parameters.append(filters.industry)
+    if filters.department:
+        joins.append("JOIN scenario_departments filter_department_link ON filter_department_link.scenario_id=s.id "
+                     "JOIN departments filter_department ON filter_department.id=filter_department_link.department_id")
+        conditions.append("filter_department.code=? AND filter_department.status='published'")
+        parameters.append(filters.department)
+    if filters.maturity:
+        joins.append("JOIN content_maturity_levels filter_maturity ON filter_maturity.content_item_id=ci.id")
+        conditions.append("filter_maturity.maturity_code=?")
+        parameters.append(filters.maturity)
+    query_from = " ".join(joins) + " WHERE " + " AND ".join(conditions)
+    total = db.execute("SELECT COUNT(DISTINCT s.id) " + query_from, parameters).fetchone()[0]
+    if total == 0:
+        return Page((), 1, page_request.per_page, 0, 0)
+    total_pages = (total + page_request.per_page - 1) // page_request.per_page
+    page_number = page_request.page if page_request.page <= total_pages else 1
+    rows = db.execute(
+        "SELECT DISTINCT s.id AS scenario_id,s.code,ci.id AS content_id,ci.slug,ci.title,ci.summary "
+        + query_from + " ORDER BY s.sort_order,s.id LIMIT ? OFFSET ?",
+        [*parameters, page_request.per_page, (page_number - 1) * page_request.per_page],
+    ).fetchall()
+    return Page(tuple(_scenario_card(db, row) for row in rows), page_number, page_request.per_page, total, total_pages)
+
+
+def public_industries(now) -> tuple[Mapping[str, Any], ...]:
+    db = models.get_db()
+    try:
+        clause, arguments = _public_item_where(now)
+        rows = db.execute(
+            "SELECT i.id AS industry_id,i.code,ci.slug,ci.title,ci.summary "
+            "FROM industries i JOIN content_groups g ON g.industry_id=i.id "
+            "JOIN content_items ci ON ci.content_group_id=g.id "
+            f"WHERE i.status='published' AND {clause} ORDER BY i.sort_order,i.id",
+            arguments,
+        ).fetchall()
+        return tuple(MappingProxyType(dict(row)) for row in rows)
+    finally:
+        db.close()
+
+
+def _resolution(db, entry_type, slug, now):
+    clause, arguments = _public_item_where(now)
+    row = db.execute(
+        "SELECT ci.*,g.canonical_slug FROM content_items ci JOIN content_groups g "
+        f"ON g.id=ci.content_group_id WHERE ci.entry_type=? AND ci.slug=? AND {clause}",
+        (entry_type, slug, *arguments),
+    ).fetchone()
+    if row is not None:
+        return row, False
+    row = db.execute(
+        "SELECT ci.*,g.canonical_slug FROM content_slug_aliases alias "
+        "JOIN content_items ci ON ci.content_group_id=alias.content_group_id "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        f"WHERE alias.entry_type=? AND alias.old_slug=? AND ci.entry_type=? AND {clause}",
+        (entry_type, slug, entry_type, *arguments),
+    ).fetchone()
+    return (row, row is not None)
+
+
+def _blocks(db, content_id):
+    return tuple(
+        MappingProxyType(dict(row)) for row in db.execute(
+            "SELECT block_type,title,body_html FROM content_blocks WHERE content_item_id=? "
+            "ORDER BY sort_order,id", (content_id,)
+        )
+    )
+
+
+def _services_for_scenario(db, scenario_id):
+    rows = db.execute(
+        "SELECT s.id,s.code,s.public_name,s.min_budget,s.max_budget,s.min_weeks,s.max_weeks,"
+        "s.implementation_steps_json,s.prerequisites_json FROM scenario_services link "
+        "JOIN services s ON s.id=link.service_id WHERE link.scenario_id=? "
+        "AND s.status='published' ORDER BY s.sort_order,s.id", (scenario_id,)
+    ).fetchall()
+    result = []
+    for row in rows:
+        values = dict(row)
+        values["steps"] = tuple(json.loads(values.pop("implementation_steps_json") or "[]"))
+        values["prerequisites"] = tuple(json.loads(values.pop("prerequisites_json") or "[]"))
+        values["deliverables"] = _names(
+            db, "SELECT title FROM service_deliverables WHERE service_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)
+        )
+        result.append(MappingProxyType(values))
+    return tuple(result)
+
+
+def _scenario_authority(db, scenario_id):
+    row = db.execute("SELECT * FROM scenarios WHERE id=? AND status='published'", (scenario_id,)).fetchone()
+    if row is None:
+        return None
+    return ScenarioAuthority(
+        scenario_id=row["id"], code=row["code"], category_code=row["category_code"],
+        minimum_business_value=row["minimum_business_value"], minimum_process=row["minimum_process"],
+        minimum_data=row["minimum_data"], minimum_systems=row["minimum_systems"],
+        minimum_organization=row["minimum_organization"], minimum_delivery=row["minimum_delivery"],
+        integration_level=row["integration_level"], min_weeks=row["min_weeks"], max_weeks=row["max_weeks"],
+        risk_codes=tuple(json.loads(row["risk_codes_json"])), fallback_only=bool(row["fallback_only"]),
+    )
+
+
+def public_industry(slug: str, now) -> Mapping[str, Any] | None:
+    db = models.get_db()
+    try:
+        item, redirect = _resolution(db, "industry", slug, now)
+        if item is None:
+            return None
+        row = db.execute("SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id WHERE g.id=? AND i.status='published'", (item["content_group_id"],)).fetchone()
+        if row is None:
+            return None
+        page = _public_scenarios(db, ScenarioFilters(industry=row["code"]), PageRequest(1, 50), now)
+        service_ids = tuple({service["id"] for card in page.items for service in _services_for_scenario(db, db.execute("SELECT id FROM scenarios WHERE code=?", (card.code,)).fetchone()[0])})
+        services = tuple(
+            MappingProxyType(dict(service)) for service in db.execute(
+                f"SELECT id,code,public_name FROM services WHERE id IN ({','.join('?' for _ in service_ids)}) ORDER BY sort_order,id", service_ids
+            )
+        ) if service_ids else ()
+        return MappingProxyType({
+            "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
+            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": _blocks(db, item["id"]),
+            "pains": _names(db, "SELECT name FROM pain_points WHERE industry_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)),
+            "departments": _names(db, "SELECT name FROM departments WHERE industry_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)),
+            "company_sizes": _names(db, "SELECT name FROM company_sizes WHERE status='published' ORDER BY sort_order,id", ()),
+            "scenarios": page.items, "services": services,
+        })
+    finally:
+        db.close()
+
+
+def public_scenarios(filters: ScenarioFilters, page: PageRequest, now) -> Page[ScenarioCard]:
+    db = models.get_db()
+    try:
+        return _public_scenarios(db, filters, page, now)
+    finally:
+        db.close()
+
+
+def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) -> Mapping[str, Any] | None:
+    db = models.get_db()
+    try:
+        item, redirect = _resolution(db, "scenario", slug, now)
+        if item is None:
+            return None
+        authority = authority or _scenario_authority(db, item["content_group_id"] and db.execute("SELECT scenario_id FROM content_groups WHERE id=?", (item["content_group_id"],)).fetchone()[0])
+        if authority is None:
+            return None
+        services = _services_for_scenario(db, authority.scenario_id)
+        return MappingProxyType({
+            "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
+            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": _blocks(db, item["id"]),
+            "industries": _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? ORDER BY i.sort_order,i.id", (authority.scenario_id,)),
+            "departments": _names(db, "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? ORDER BY d.industry_id,d.sort_order,d.id", (authority.scenario_id,)),
+            "pains": _names(db, "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? ORDER BY p.industry_id,p.sort_order,p.id", (authority.scenario_id,)),
+            "maturity": tuple(MATURITY_LABELS[code] for code in _names(db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],))),
+            "services": services,
+            "prerequisites": tuple(value for service in services for value in service["prerequisites"]),
+            "outputs": tuple(value for service in services for value in service["deliverables"]),
+            "steps": tuple(value for service in services for value in service["steps"]),
+            "timeline": tuple((service["min_weeks"], service["max_weeks"]) for service in services),
+            "budget": tuple((service["min_budget"], service["max_budget"]) for service in services),
+        })
+    finally:
+        db.close()
 
 
 def _config(kind):

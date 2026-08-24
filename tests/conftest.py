@@ -1,8 +1,12 @@
 import shutil
+import os
 from pathlib import Path
 
 import pytest
 from werkzeug.security import generate_password_hash
+
+# The module-level WSGI application validates this deployment setting at import.
+os.environ.setdefault("AI_PLATFORM_PUBLIC_BASE_URL", "https://test.example")
 
 import app as app_module
 import migrations
@@ -29,6 +33,7 @@ def client(tmp_path, monkeypatch):
             "SESSION_COOKIE_HTTPONLY": True,
             "SESSION_COOKIE_SAMESITE": "Lax",
             "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+            "PUBLIC_BASE_URL": "https://test.example",
         }
     )
     return test_app.test_client()

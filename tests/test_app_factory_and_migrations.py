@@ -29,6 +29,7 @@ def secure_config(username, password):
         "ADMIN_USERNAME": username,
         "ADMIN_PASSWORD_HASH": generate_password_hash(password),
         "SESSION_COOKIE_SECURE": False,
+        "PUBLIC_BASE_URL": "https://test.example",
     }
 
 
