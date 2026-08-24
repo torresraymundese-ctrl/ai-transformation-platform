@@ -1410,6 +1410,121 @@ outcome remains **UNKNOWN** and was not rerun; the historical PyPI-network
 violation remains **CONFIRMED**; the frozen `data_process_foundation`
 product-data limitation remains unchanged.
 
+## Fix1j — WHATWG IPv4 ambiguity and IDNA2008 strict-origin boundary
+
+Fix1j began from clean baseline
+`0decde0bf9457c8b69ae318c751939337ce8ca23`. It used only local
+`create_app` calls and disposable test SQLite databases. No full suite,
+network access, dependency installation, production server, Nginx, or real
+database was used.
+
+The assigned interpreter was Python `3.12.13`; every pytest command set
+`PYTHONPATH` process-scoped to
+`.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps`, used
+`-p no:cacheprovider`, and used its own `pytest-task6-fix1j-*` basetemp. The
+already-present offline environment provided `pypdf 6.10.0` and `idna 3.19`.
+`requirements.txt` now declares the direct production dependency
+`idna>=3.10,<4`; no installation was attempted.
+
+### TDD evidence
+
+Before production edits, this genuine RED was run:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1j-red-authority-001 \
+  tests\\test_public_catalog.py::test_public_base_url_rejects_invalid_hostname_shape \
+  tests\\test_public_catalog.py::test_public_base_url_rejects_ambiguous_authority_forms \
+  tests\\test_public_catalog.py::test_public_base_url_rejects_dns_forms_that_whatwg_can_treat_as_ipv4 \
+  tests\\test_public_catalog.py::test_public_base_url_keeps_a_non_numeric_final_label_as_dns \
+  tests\\test_public_catalog.py::test_public_base_url_accepts_lossless_idna2008_origins \
+  tests\\test_public_catalog.py::test_public_base_url_accepts_exact_https_origins
+
+8 failed, 19 passed in 1.31s
+tool exit_code=1
+```
+
+The six alternate/numeric-final host spellings (`0x7f000001`, split/mixed
+hex, `0x`, `test.123`, and `test.09`) were accepted through the DNS fallback.
+Both valid IDNA2008 spellings `faß.de` and `xn--fa-hia.de` were rejected by the
+standard-library IDNA2003 codec. Existing Chinese U-label/A-label, U+034F, and
+invalid A-label cases were included in this boundary set.
+
+The minimal local correction rejects a DNS fallback whose last ASCII label is
+all decimal digits or `0x`/`0X` followed by zero or more ASCII hex digits.
+Canonical dotted IPv4 continues through `ipaddress.IPv4Address`; an ordinary
+DNS host ending in `test`, such as `0x7f000001.test`, remains valid. IDN
+validation now uses the existing offline `idna` 3.19 package with
+`strict=True`, `uts46=False`, and `std3_rules=True`, followed by exact
+encode/decode/re-encode checks. It performs no DNS lookup or global-address
+policy.
+
+The focused GREEN was:
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp .superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1j-green-authority-002 [same six authority nodes]
+27 passed in 0.55s
+tool exit_code=0
+```
+
+After code freeze, the required once-only responsibility command was launched
+with fresh basetemp `pytest-task6-fix1j-responsibility-final-003` over:
+
+```text
+tests/test_public_catalog.py
+tests/test_catalog_content_admin.py
+tests/test_content_seed.py
+tests/test_content_migrations.py
+tests/test_app_factory_and_migrations.py
+tests/test_content_publishing.py
+tests/test_content_validation.py
+tests/test_media_service.py
+tests/test_media_http.py
+tests/test_v2_migrations.py
+```
+
+Its direct terminal stream retained interpreter/PYTHONPATH/pypdf evidence and
+progress through `13%`, but the host omitted the original terminal-session ID
+and later final stdout/target exit. Read-only process polling confirmed the
+assigned-venv pytest child ended naturally; the final summary and target exit
+are **UNKNOWN**. No retry was run, because this responsibility command was
+explicitly once-only and dots are not pass evidence.
+
+### Static checks, self-review, and inventory
+
+```text
+..\\..\\.venv\\Scripts\\python.exe -m py_compile app.py tests\\test_public_catalog.py
+PYCOMPILE_EXIT=0
+
+..\\..\\.venv\\Scripts\\python.exe -c "import idna; print(idna.__version__)"
+idna=3.19
+IDNA_DEPENDENCY_EXIT=0
+
+git diff --check
+DIFF_CHECK_EXIT=0
+
+Blueprint direct-SQL guard: blueprints\\public_catalog.py = PASS
+Blueprint direct-SQL guard: blueprints\\admin\\catalog.py = PASS
+```
+
+Fix1j changed only:
+
+- `app.py`
+- `requirements.txt`
+- `tests/test_public_catalog.py`
+- this report
+
+Self-review confirmed the new guard is local and only applies after canonical
+IPv4 parsing fails; valid Unicode/punycode IDNA2008, Chinese IDN, IPv4/IPv6,
+and allowed ports retain exact-origin behavior. No Host/X-Forwarded-Host,
+analytics/private-cache, publication/read model, media, frozen product data,
+Task 7, ledger, or task-card behavior was broadened.
+
+Known evidence limits: this Fix1j once-only responsibility run has an
+**UNKNOWN** final outcome because the terminal host lost its final result; the
+sole historical full-suite outcome remains **UNKNOWN** and was not rerun; the
+historical PyPI-network violation remains **CONFIRMED**; and the frozen
+`data_process_foundation` product-data limitation remains unchanged.
+
 ## Fix1i controller verification
 
 The controller independently verified frozen implementation commit
@@ -1457,3 +1572,14 @@ dependency installation, production server, Nginx, or real database was used.
 The original full-suite outcome remains **UNKNOWN**; the historical
 PyPI-network violation remains **CONFIRMED**; and the frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1j final evidence addendum
+
+The preceding Fix1j section applies after the controller's frozen Fix1i
+verification recorded immediately above. Its authoritative evidence is the
+genuine RED (`8 failed, 19 passed`, exit 1) and focused GREEN (`27 passed`,
+exit 0), both against the assigned offline environment. The one required
+Fix1j responsibility command was started exactly once and has an unrecoverable
+final summary/exit; it remains **UNKNOWN**, was not rerun, and must not be
+reported as passing from partial dot output. No full suite, network, install,
+production endpoint, Nginx, or real database was used in Fix1j.

@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from flask import Flask, abort, g, request, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
+import idna
 
 import analytics_repository
 from blueprints.admin import bp as admin_bp
@@ -147,10 +148,16 @@ def media_download_url(asset_id):
 def _validated_dns_idn_host(raw_host):
     """Return a non-lossy DNS/IDN host spelling, without resolving it."""
     try:
-        ascii_host = raw_host.encode("idna").decode("ascii")
-        decoded_host = ascii_host.encode("ascii").decode("idna")
-        reencoded_host = decoded_host.encode("idna").decode("ascii")
-    except UnicodeError:
+        ascii_host = idna.encode(
+            raw_host, strict=True, uts46=False, std3_rules=True,
+        ).decode("ascii")
+        decoded_host = idna.decode(
+            ascii_host, strict=True, uts46=False, std3_rules=True,
+        )
+        reencoded_host = idna.encode(
+            decoded_host, strict=True, uts46=False, std3_rules=True,
+        ).decode("ascii")
+    except (idna.IDNAError, UnicodeError):
         return None
     if (
         raw_host != (ascii_host if raw_host.isascii() else decoded_host)
@@ -166,6 +173,12 @@ def _validated_dns_idn_host(raw_host):
     ):
         return None
     return raw_host
+
+
+def _whatwg_ends_in_number(raw_host):
+    """Identify the local DNS spellings browsers can reinterpret as IPv4."""
+    last_label = raw_host.rsplit(".", 1)[-1]
+    return bool(re.fullmatch(r"[0-9]+|0[xX][0-9A-Fa-f]*", last_label))
 
 
 def _strict_public_authority(raw_netloc):
@@ -204,6 +217,8 @@ def _strict_public_authority(raw_netloc):
                 return None
         except ValueError:
             if re.fullmatch(r"[0-9.]+", raw_host):
+                return None
+            if _whatwg_ends_in_number(raw_host):
                 return None
             host = _validated_dns_idn_host(raw_host)
             if host is None:

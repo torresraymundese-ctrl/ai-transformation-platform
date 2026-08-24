@@ -272,6 +272,56 @@ def test_public_base_url_rejects_ambiguous_authority_forms(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("value", (
+    "https://0x7f000001",
+    "https://0x7f.0.0.1",
+    "https://127.0x0.0.1",
+    "https://0x",
+    "https://test.123",
+    "https://test.09",
+), ids=("single-hex", "split-hex", "mixed-hex", "empty-hex", "numeric-last-label", "zero-prefixed-last-label"))
+def test_public_base_url_rejects_dns_forms_that_whatwg_can_treat_as_ipv4(tmp_path, monkeypatch, value):
+    """Prevent an alternate IPv4 spelling from being accepted through the DNS fallback."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    with pytest.raises(ValueError):
+        app_module.create_app({
+            "TESTING": False,
+            "SECRET_KEY": "test",
+            "PUBLIC_BASE_URL": value,
+            "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+        })
+
+
+def test_public_base_url_keeps_a_non_numeric_final_label_as_dns(tmp_path, monkeypatch):
+    """Keep an ordinary valid DNS label that only starts with an alternate-IP prefix."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    application = app_module.create_app({
+        "TESTING": False,
+        "SECRET_KEY": "test",
+        "PUBLIC_BASE_URL": "https://0x7f000001.test",
+        "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+    })
+
+    assert application.config["PUBLIC_BASE_URL"] == "https://0x7f000001.test"
+
+
+@pytest.mark.parametrize("value", (
+    "https://faß.de",
+    "https://xn--fa-hia.de",
+), ids=("unicode-idna2008", "punycode-idna2008"))
+def test_public_base_url_accepts_lossless_idna2008_origins(tmp_path, monkeypatch, value):
+    """Accept the valid ß U-label and its verified IDNA2008 A-label counterpart."""
+    monkeypatch.delenv("AI_PLATFORM_PUBLIC_BASE_URL", raising=False)
+    application = app_module.create_app({
+        "TESTING": False,
+        "SECRET_KEY": "test",
+        "PUBLIC_BASE_URL": value,
+        "MEDIA_UPLOAD_ROOT": str(tmp_path / "media"),
+    })
+
+    assert application.config["PUBLIC_BASE_URL"] == value
+
+
+@pytest.mark.parametrize("value", (
     "https://example.test",
     "https://example.test:1",
     "https://example.test:443",
