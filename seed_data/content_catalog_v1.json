@@ -1,0 +1,177 @@
+{
+  "seed_version": "content_catalog_v1",
+  "source": "reviewed-neutral-stage5a",
+  "industries": [
+    {
+      "code": "manufacturing",
+      "group": "industry:manufacturing",
+      "slug": "manufacturing",
+      "title": "制造业",
+      "summary": "围绕生产、质量、设备和供应链等环节梳理可评估的 AI 应用方向。",
+      "seo_title": "制造业 AI 应用方向",
+      "seo_description": "了解制造业 AI 场景的适用环节、准备条件和实施边界。",
+      "body_html": "<p>结合业务目标、数据条件和系统现状，分阶段确认适用场景与实施范围。</p>"
+    },
+    {
+      "code": "retail",
+      "group": "industry:retail",
+      "slug": "retail",
+      "title": "零售电商",
+      "summary": "围绕商品、门店、供应链、营销和客户服务梳理可评估的 AI 应用方向。",
+      "seo_title": "零售电商 AI 应用方向",
+      "seo_description": "了解零售电商 AI 场景的适用环节、准备条件和实施边界。",
+      "body_html": "<p>从业务流程和数据可用性出发，确认场景优先级、审核机制与人工兜底。</p>"
+    },
+    {
+      "code": "professional_knowledge",
+      "group": "industry:professional_knowledge",
+      "slug": "professional-knowledge",
+      "title": "知识型专业服务",
+      "summary": "围绕知识研究、项目交付、合同风险和客户服务梳理可评估的 AI 应用方向。",
+      "seo_title": "知识型专业服务 AI 应用",
+      "seo_description": "了解知识型专业服务的 AI 场景、准备条件和应用边界。",
+      "body_html": "<p>重点确认资料权限、专业审核、例外处理和知识更新责任。</p>"
+    },
+    {
+      "code": "software_creative",
+      "group": "industry:software_creative",
+      "slug": "software-creative",
+      "title": "软件与创意服务",
+      "summary": "围绕产品交付、工程研发、设计内容和客户成功梳理可评估的 AI 应用方向。",
+      "seo_title": "软件与创意服务 AI 应用",
+      "seo_description": "了解软件与创意服务的 AI 场景、准备条件和应用边界。",
+      "body_html": "<p>结合现有工作流确认可自动化步骤、审核节点、数据权限和质量标准。</p>"
+    }
+  ],
+  "scenarios": [
+    {
+      "code": "mfg_knowledge_assistant", "group": "scenario:mfg_knowledge_assistant", "slug": "mfg-knowledge-assistant",
+      "title": "制造知识助手", "summary": "面向设备、生产和办公资料的受控检索与问答辅助场景。",
+      "seo_title": "制造知识助手场景", "seo_description": "了解制造知识助手的适用资料、权限准备和评测边界。",
+      "body_html": "<p>实施前需确认资料范围、访问权限、更新责任和回答评测方法。</p>",
+      "maturity_codes": ["explore", "pilot"]
+    },
+    {
+      "code": "mfg_quality_inspection", "group": "scenario:mfg_quality_inspection", "slug": "mfg-quality-inspection",
+      "title": "制造质量检测", "summary": "面向质量与生产环节的视觉检测辅助和缺陷复核场景。",
+      "seo_title": "制造质量检测场景", "seo_description": "了解视觉质量检测的样本、设备、复核和集成准备。",
+      "body_html": "<p>实施范围取决于样本代表性、检测环境、误报复核和设备接口条件。</p>",
+      "maturity_codes": ["pilot", "scale", "collaborate"]
+    },
+    {
+      "code": "mfg_operations_reporting", "group": "scenario:mfg_operations_reporting", "slug": "mfg-operations-reporting",
+      "title": "制造经营报表", "summary": "面向生产、排程和库存信息的指标整理、报表与异常提示场景。",
+      "seo_title": "制造经营报表场景", "seo_description": "了解制造经营报表的指标口径、数据映射和刷新准备。",
+      "body_html": "<p>实施前需统一指标口径、数据来源、对账方式和异常处理流程。</p>",
+      "maturity_codes": ["pilot", "scale"]
+    },
+    {
+      "code": "retail_ai_service", "group": "scenario:retail_ai_service", "slug": "retail-ai-service",
+      "title": "零售智能服务", "summary": "面向客户咨询与门店服务的受控应答、转人工和记录辅助场景。",
+      "seo_title": "零售智能服务场景", "seo_description": "了解零售智能服务的知识准备、转人工和审核边界。",
+      "body_html": "<p>需明确可回答范围、转人工条件、内容审核和服务记录规则。</p>",
+      "maturity_codes": ["explore", "pilot", "scale"]
+    },
+    {
+      "code": "retail_marketing_content", "group": "scenario:retail_marketing_content", "slug": "retail-marketing-content",
+      "title": "零售营销内容协作", "summary": "面向营销与商品运营的内容草拟、版本协作和人工审核场景。",
+      "seo_title": "零售营销内容协作", "seo_description": "了解营销内容协作的品牌规范、审批流程和使用边界。",
+      "body_html": "<p>生成内容需遵循品牌规范，并经过约定的人工审核后使用。</p>",
+      "maturity_codes": ["explore", "pilot"]
+    },
+    {
+      "code": "retail_inventory_insight", "group": "scenario:retail_inventory_insight", "slug": "retail-inventory-insight",
+      "title": "零售库存洞察", "summary": "面向库存、补货和销售信息的数据对账、分析与辅助判断场景。",
+      "seo_title": "零售库存洞察场景", "seo_description": "了解库存洞察的数据一致性、预测误差和系统集成准备。",
+      "body_html": "<p>需先确认数据一致性、业务口径、误差处理和系统接口范围。</p>",
+      "maturity_codes": ["scale", "collaborate"]
+    },
+    {
+      "code": "pro_document_knowledge", "group": "scenario:pro_document_knowledge", "slug": "pro-document-knowledge",
+      "title": "专业文档知识助手", "summary": "面向研究、交付和人才知识资料的权限化检索与问答辅助场景。",
+      "seo_title": "专业文档知识助手", "seo_description": "了解专业文档助手的资料权限、保密和回答范围准备。",
+      "body_html": "<p>实施前需明确文档权限、保密要求、回答范围和专业复核责任。</p>",
+      "maturity_codes": ["explore", "pilot"]
+    },
+    {
+      "code": "pro_delivery_drafting", "group": "scenario:pro_delivery_drafting", "slug": "pro-delivery-drafting",
+      "title": "专业交付文稿协作", "summary": "面向方案和项目文稿的模板化草拟、校对与人工复核场景。",
+      "seo_title": "专业交付文稿协作", "seo_description": "了解交付文稿协作的模板、例外处理和人工复核准备。",
+      "body_html": "<p>需确认模板版本、输入资料、例外处理和最终复核责任。</p>",
+      "maturity_codes": ["explore", "pilot"]
+    },
+    {
+      "code": "pro_contract_review", "group": "scenario:pro_contract_review", "slug": "pro-contract-review",
+      "title": "专业合同审阅辅助", "summary": "面向合同条款比对、风险提示和人工复核的辅助场景。",
+      "seo_title": "专业合同审阅辅助", "seo_description": "了解合同审阅辅助的规则范围、保密和专业复核边界。",
+      "body_html": "<p>输出用于辅助检查，需由具备相应职责的人员完成专业复核。</p>",
+      "maturity_codes": ["pilot", "scale"]
+    },
+    {
+      "code": "creative_content_workflow", "group": "scenario:creative_content_workflow", "slug": "creative-content-workflow",
+      "title": "创意内容工作流", "summary": "面向设计与营销内容的草拟、版本管理和审核协作场景。",
+      "seo_title": "创意内容工作流", "seo_description": "了解创意内容工作流的品牌、知识产权和审批准备。",
+      "body_html": "<p>需明确素材来源、品牌规范、知识产权检查和审批节点。</p>",
+      "maturity_codes": ["explore", "pilot"]
+    },
+    {
+      "code": "software_support_knowledge", "group": "scenario:software_support_knowledge", "slug": "software-support-knowledge",
+      "title": "软件支持知识助手", "summary": "面向客户支持与工程知识的检索、答复建议和转交辅助场景。",
+      "seo_title": "软件支持知识助手", "seo_description": "了解软件支持助手的资料更新、权限和转交准备。",
+      "body_html": "<p>需明确知识更新、访问控制、答复范围和人工升级路径。</p>",
+      "maturity_codes": ["explore", "pilot", "scale"]
+    },
+    {
+      "code": "project_delivery_automation", "group": "scenario:project_delivery_automation", "slug": "project-delivery-automation",
+      "title": "项目交付自动化", "summary": "面向跨团队项目流程的任务流转、质量检查和异常队列场景。",
+      "seo_title": "项目交付自动化", "seo_description": "了解项目交付自动化的流程稳定性、接口和变更准备。",
+      "body_html": "<p>实施范围取决于流程稳定性、接口条件、异常兜底和变更管理。</p>",
+      "maturity_codes": ["scale", "collaborate"]
+    },
+    {
+      "code": "data_process_foundation", "group": "scenario:data_process_foundation", "slug": "data-process-foundation",
+      "title": "数据与流程基础", "summary": "面向数据清单、流程基线和场景优先级梳理的基础准备场景。",
+      "seo_title": "数据与流程基础", "seo_description": "了解 AI 场景启动前的数据、流程和负责人准备事项。",
+      "body_html": "<p>通过现状梳理确认负责人、数据范围、流程基线和后续优先级。</p>",
+      "maturity_codes": ["explore"]
+    }
+  ],
+  "services": [
+    {
+      "code": "foundation_workshop", "group": "service:foundation_workshop", "slug": "foundation-workshop",
+      "title": "AI 就绪基础工作坊", "summary": "用于梳理流程基线、数据清单、场景优先级和阶段计划的工作坊。",
+      "seo_title": "AI 就绪基础工作坊", "seo_description": "了解基础工作坊的适用范围、协作准备和交付结构。",
+      "body_html": "<p>具体范围、参与人员和交付安排以需求确认结果为准。</p>"
+    },
+    {
+      "code": "knowledge_assistant_pilot", "group": "service:knowledge_assistant_pilot", "slug": "knowledge-assistant-pilot",
+      "title": "企业知识助手试点", "summary": "用于验证资料权限、检索问答、评测集和管理员操作的试点服务。",
+      "seo_title": "企业知识助手试点", "seo_description": "了解知识助手试点的范围、准备条件和交付结构。",
+      "body_html": "<p>具体资料范围、评测方法和交付安排以需求确认结果为准。</p>"
+    },
+    {
+      "code": "customer_growth_pilot", "group": "service:customer_growth_pilot", "slug": "customer-growth-pilot",
+      "title": "客户增长助手试点", "summary": "用于验证服务或营销流程、审核话术、事件记录和用户操作的试点服务。",
+      "seo_title": "客户增长助手试点", "seo_description": "了解客户增长助手试点的范围、准备条件和交付结构。",
+      "body_html": "<p>具体流程、文案审批和交付安排以需求确认结果为准。</p>"
+    },
+    {
+      "code": "workflow_automation", "group": "service:workflow_automation", "slug": "workflow-automation",
+      "title": "流程自动化交付包", "summary": "用于配置稳定流程、异常队列、执行记录、人工兜底和验收用例的交付服务。",
+      "seo_title": "流程自动化交付包", "seo_description": "了解流程自动化的适用范围、准备条件和交付结构。",
+      "body_html": "<p>具体流程、接口、例外处理和交付安排以需求确认结果为准。</p>"
+    },
+    {
+      "code": "data_insight", "group": "service:data_insight", "slug": "data-insight",
+      "title": "数据洞察交付包", "summary": "用于确认指标字典、数据映射、看板、预警规则和对账方法的交付服务。",
+      "seo_title": "数据洞察交付包", "seo_description": "了解数据洞察的适用范围、准备条件和交付结构。",
+      "body_html": "<p>具体指标、数据源、对账方法和交付安排以需求确认结果为准。</p>"
+    },
+    {
+      "code": "industry_integration", "group": "service:industry_integration", "slug": "industry-integration",
+      "title": "行业场景集成交付包", "summary": "用于确认方案架构、约定接口、场景配置、安全检查和验收安排的交付服务。",
+      "seo_title": "行业场景集成交付包", "seo_description": "了解行业场景集成的适用范围、准备条件和交付结构。",
+      "body_html": "<p>具体架构、接口、测试环境和交付安排以需求确认结果为准。</p>"
+    }
+  ]
+}

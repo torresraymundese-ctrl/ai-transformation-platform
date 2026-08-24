@@ -31,6 +31,60 @@ from publishing_service import (
 NOW = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
 
 
+def _remove_task5_seed_aggregates(db):
+    rows = db.execute(
+        "SELECT DISTINCT ci.id,ci.content_group_id FROM content_items ci "
+        "JOIN content_audit_events audit ON audit.content_item_id=ci.id "
+        "WHERE ci.entry_type IN ('industry','scenario','service') "
+        "AND audit.actor_text='reviewed-neutral-stage5a'"
+    ).fetchall()
+    item_ids = tuple(row["id"] for row in rows)
+    group_ids = tuple(row["content_group_id"] for row in rows)
+    if not item_ids:
+        return
+    trigger_sql = {
+        row["name"]: row["sql"]
+        for row in db.execute(
+            "SELECT name,sql FROM sqlite_master WHERE type='trigger' "
+            "AND name IN ('prevent_content_item_delete','prevent_content_group_delete')"
+        )
+    }
+    assert set(trigger_sql) == {
+        "prevent_content_item_delete",
+        "prevent_content_group_delete",
+    }
+    db.execute("DROP TRIGGER prevent_content_item_delete")
+    db.execute("DROP TRIGGER prevent_content_group_delete")
+    item_marks = ",".join("?" for _ in item_ids)
+    for table, owner in (
+        ("scenario_cases", "scenario_content_item_id"),
+        ("scenario_resources", "scenario_content_item_id"),
+        ("service_cases", "service_content_item_id"),
+        ("service_resources", "service_content_item_id"),
+        ("industry_cases", "industry_content_item_id"),
+        ("industry_resources", "industry_content_item_id"),
+        ("content_maturity_levels", "content_item_id"),
+        ("content_blocks", "content_item_id"),
+        ("industry_content", "content_item_id"),
+        ("scenario_content", "content_item_id"),
+        ("service_content", "content_item_id"),
+        ("content_audit_events", "content_item_id"),
+    ):
+        db.execute(f"DELETE FROM {table} WHERE {owner} IN ({item_marks})", item_ids)
+    db.execute(f"DELETE FROM content_items WHERE id IN ({item_marks})", item_ids)
+    group_marks = ",".join("?" for _ in group_ids)
+    db.execute(f"DELETE FROM content_groups WHERE id IN ({group_marks})", group_ids)
+    for sql in trigger_sql.values():
+        db.execute(sql)
+    db.commit()
+
+
+@pytest.fixture(autouse=True)
+def task3_content_tests_use_an_explicit_unseeded_catalog(request):
+    if "db" in request.fixturenames:
+        _remove_task5_seed_aggregates(request.getfixturevalue("db"))
+
+
 def _announcement(slug="platform-news", **changes):
     values = {
         "entry_type": "announcement",

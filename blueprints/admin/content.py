@@ -104,23 +104,12 @@ def admin_cases():
 
 @bp.route("/admin/case/new", methods=["GET", "POST"])
 def admin_case_new():
-    if request.method == "POST":
-        item = case_payload(request.form)
-        content_repository.create_case(item)
-        return redirect("/admin/cases")
-    return render_template("admin/case_edit.html", case=None)
+    return "旧案例编辑器已停用；请等待案例迁移审阅流程。", 410
 
 
 @bp.route("/admin/case/<int:case_id>", methods=["GET", "POST"])
 def admin_case_edit(case_id):
-    if request.method == "POST":
-        item = case_payload(request.form)
-        content_repository.update_case(case_id, item)
-        return redirect("/admin/cases")
-    case = content_repository.get_case(case_id)
-    if case is None:
-        abort(404)
-    return render_template("admin/case_edit.html", case=case)
+    return "旧案例编辑器已停用；请等待案例迁移审阅流程。", 410
 
 
 @bp.route("/admin/assessments")

@@ -141,7 +141,6 @@ def test_admin_post_forms_render_matching_csrf_tokens(admin_client):
     """Every rendered admin POST form must carry the session CSRF token."""
     for path in (
         "/admin/article/new",
-        "/admin/case/new",
         "/admin/announcement/new",
         "/admin/assets/code/new",
         "/admin/assets/departments/new",
@@ -158,3 +157,36 @@ def test_admin_post_forms_render_matching_csrf_tokens(admin_client):
             token = form.select_one('input[name="csrf_token"]')
             assert token is not None
             assert token["value"] == "test-csrf-token"
+
+
+def test_retired_case_editor_keeps_auth_csrf_cache_and_audit_boundaries(client):
+    anonymous = client.get("/admin/case/new")
+    assert anonymous.status_code == 302
+    assert "/admin/login" in anonymous.headers["Location"]
+
+    with client.session_transaction() as session:
+        session["admin_username"] = "test-admin"
+        session["csrf_token"] = "test-csrf-token"
+    retired = client.get("/admin/case/new")
+    assert retired.status_code == 410
+    assert retired.headers["Cache-Control"] == "private, no-store"
+
+    with client.session_transaction() as session:
+        session.pop("csrf_token")
+    assert client.post("/admin/case/1").status_code == 403
+
+    with client.session_transaction() as session:
+        session["csrf_token"] = "test-csrf-token"
+    attempted = client.post(
+        "/admin/case/1", data={"csrf_token": "test-csrf-token"}
+    )
+    assert attempted.status_code == 410
+    assert attempted.headers["Cache-Control"] == "private, no-store"
+    db = models.get_db()
+    try:
+        audit = db.execute(
+            "SELECT action,status_code FROM admin_audit_logs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        db.close()
+    assert tuple(audit) == ("admin_case_edit", 410)

@@ -7,6 +7,7 @@ import os                               # 文件系统操作（路径、目录�
 import json                             # JSON 数据（备用）
 from migrations import apply_migrations
 from assessment.seed import seed_v2_defaults
+from content_clock import shanghai_now
 
 DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     os.path.dirname(__file__),          # 当前脚本所在目录
@@ -25,6 +26,8 @@ def get_db():                           # 🔌 获取数据库连接
 
 def init_db():                          # 🏗️ 初始化数据库
     """创建所有表结构 + 插入种子数据（如果表为空）"""
+    from content_seed import seed_content_defaults
+
     conn = get_db()
     apply_migrations(conn)
     # 🌱 如果服务表为空，插入种子数据
@@ -38,6 +41,7 @@ def init_db():                          # 🏗️ 初始化数据库
         seed_asset_codes(conn)
 
     seed_v2_defaults(conn)
+    seed_content_defaults(conn, now=shanghai_now())
 
     conn.commit()                        # 提交所有变更
     conn.close()                         # 关闭连接

@@ -1,0 +1,76 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+  <div>
+    <h2>维护核心目录公开文案</h2>
+    <code>{{ view.group_key }}</code>
+  </div>
+  <a class="btn btn-outline" href="{{ url_for('admin.admin_catalog', kind=view.kind) }}">返回目录</a>
+</div>
+
+{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+
+<section class="card" style="padding:20px;margin-bottom:20px;">
+  <h3>核心业务字段（只读）</h3>
+  <dl style="display:grid;grid-template-columns:180px 1fr;gap:8px 16px;">
+  {% for label, value in view.readonly_fields %}
+    <dt>{{ label }}</dt><dd style="margin:0;word-break:break-word;">{{ value }}</dd>
+  {% endfor %}
+  </dl>
+</section>
+
+{% if view.public_revision %}
+<section class="card" style="padding:20px;margin-bottom:20px;">
+  <h3>当前公开修订 #{{ view.public_revision.revision_number }}</h3>
+  <p><strong>{{ view.public_revision.title }}</strong></p>
+  <p>{{ view.public_revision.summary }}</p>
+</section>
+{% endif %}
+
+<form method="POST" class="card" style="padding:20px;" data-content-editor>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="content_id" value="{{ form.id }}">
+  <input type="hidden" name="lock_version" value="{{ form.lock_version }}">
+  <div class="form-group"><label>公开标题</label><input type="text" name="title" value="{{ form.title }}" maxlength="120" required></div>
+  <div class="form-group"><label>公开摘要</label><textarea name="summary" maxlength="300" required>{{ form.summary }}</textarea></div>
+  <div class="form-group"><label>SEO 标题</label><input type="text" name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></div>
+  <div class="form-group"><label>SEO 摘要</label><textarea name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></div>
+  <div class="form-group">
+    <label>分享图</label>
+    <select name="share_image_media_id">
+      <option value="">不使用</option>
+      {% for media in view.media_choices %}
+      <option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if view.kind == 'scenario' %}
+  <fieldset class="form-group">
+    <legend>适用成熟度（明确选择）</legend>
+    {% for code in ('explore','pilot','scale','collaborate') %}
+    <label style="display:inline-flex;gap:6px;margin-right:16px;"><input type="checkbox" name="maturity_codes" value="{{ code }}" {% if code in form.maturity_codes %}checked{% endif %}>{{ code }}</label>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+
+  {% include "admin/_content_blocks.html" %}
+  {% include "admin/_content_relations.html" %}
+
+  <div style="display:flex;gap:10px;margin-top:20px;">
+    <button class="btn btn-outline" type="submit" name="action" value="save">保存草稿</button>
+    <button class="btn btn-outline" type="submit" name="action" value="review">发布前检查</button>
+    <button class="btn btn-primary" type="submit" name="action" value="publish">发布</button>
+  </div>
+</form>
+
+{% if view.public_revision %}
+<form method="POST" style="margin-top:16px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="content_id" value="{{ view.public_revision.id }}">
+  <input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}">
+  <button class="btn btn-outline" type="submit" name="action" value="archive">归档当前公开修订</button>
+</form>
+{% endif %}
+<script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>
+{% endblock %}

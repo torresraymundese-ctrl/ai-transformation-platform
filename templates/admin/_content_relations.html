@@ -1,0 +1,30 @@
+<fieldset class="form-group">
+  <legend>推荐关系（只可选择已发布目标）</legend>
+  <div data-content-relations>
+  {% for relation in form.relations %}
+    <div data-content-relation style="display:flex;gap:8px;margin:8px 0;">
+      <select name="relations-{{ loop.index0 }}-type" data-relation-field="type">
+      {% for suffix in ('case','resource') %}
+        {% set relation_type = view.kind ~ '_' ~ suffix %}
+        <option value="{{ relation_type }}" {% if relation.relation_type == relation_type %}selected{% endif %}>{{ relation_type }}</option>
+      {% endfor %}
+      </select>
+      <select name="relations-{{ loop.index0 }}-target_group_id" data-relation-field="target_group_id">
+      {% for choice in view.relation_choices %}
+        {% if choice.entry_type in relation.relation_type %}<option value="{{ choice.group_id }}" {% if relation.target_group_id == choice.group_id %}selected{% endif %}>{{ choice.title }}</option>{% endif %}
+      {% endfor %}
+      </select>
+      <button type="button" data-relation-action="up">上移</button>
+      <button type="button" data-relation-action="down">下移</button>
+      <button type="button" data-relation-action="remove">移除</button>
+    </div>
+  {% endfor %}
+  </div>
+  {% if view.relation_choices %}
+  <div style="display:flex;gap:8px;">
+    <select data-new-relation-type><option value="{{ view.kind }}_case">{{ view.kind }}_case</option><option value="{{ view.kind }}_resource">{{ view.kind }}_resource</option></select>
+    <select data-new-relation-target>{% for choice in view.relation_choices %}<option value="{{ choice.group_id }}" data-entry-type="{{ choice.entry_type }}">{{ choice.title }}</option>{% endfor %}</select>
+    <button type="button" data-add-relation>添加关系</button>
+  </div>
+  {% else %}<p>目前没有可选择的已发布案例或资源。</p>{% endif %}
+</fieldset>

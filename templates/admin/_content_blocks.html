@@ -1,0 +1,36 @@
+<fieldset class="form-group">
+  <legend>受控内容区块</legend>
+  <div data-content-blocks>
+  {% for block in form.blocks %}
+    <fieldset data-content-block data-block-index="{{ loop.index0 }}" style="border:1px solid #E5E7EB;padding:16px;margin:12px 0;">
+      <legend>{{ block.block_type }}</legend>
+      <input type="hidden" name="blocks-{{ loop.index0 }}-type" value="{{ block.block_type }}" data-field-suffix="type">
+      <div class="form-group"><label>区块标题</label><input type="text" name="blocks-{{ loop.index0 }}-title" value="{{ block.title or '' }}" data-field-suffix="title"></div>
+      <div class="form-group"><label>正文</label><textarea name="blocks-{{ loop.index0 }}-body" data-field-suffix="body">{{ block.body_html or '' }}</textarea></div>
+      <div class="form-group"><label>媒体</label><select name="blocks-{{ loop.index0 }}-media_id" data-field-suffix="media_id"><option value="">不使用</option>{% for media in view.media_choices %}<option value="{{ media.id }}" {% if block.media_asset_id == media.id %}selected{% endif %}>{{ media.display_name }}</option>{% endfor %}</select></div>
+      {% if block.block_type == 'heading' %}
+      <label>标题级别<select name="blocks-{{ loop.index0 }}-heading_level" data-field-suffix="heading_level">{% for level in (2,3,4) %}<option value="{{ level }}" {% if block.settings.get('level') == level %}selected{% endif %}>H{{ level }}</option>{% endfor %}</select></label>
+      {% elif block.block_type == 'image_text' %}
+      <label>图片位置<select name="blocks-{{ loop.index0 }}-image_alignment" data-field-suffix="image_alignment"><option value="left" {% if block.settings.get('alignment') == 'left' %}selected{% endif %}>left</option><option value="right" {% if block.settings.get('alignment') == 'right' %}selected{% endif %}>right</option></select></label>
+      <label>替代文字<input name="blocks-{{ loop.index0 }}-image_alt_text" value="{{ block.settings.get('alt_text','') }}" data-field-suffix="image_alt_text"></label>
+      {% elif block.block_type == 'metric' %}
+      <label>数值<input name="blocks-{{ loop.index0 }}-metric_value" value="{{ block.settings.get('value','') }}" data-field-suffix="metric_value"></label>
+      <label>单位<input name="blocks-{{ loop.index0 }}-metric_unit" value="{{ block.settings.get('unit','') }}" data-field-suffix="metric_unit"></label>
+      {% elif block.block_type == 'steps' %}
+      <label>步骤（每行一项）<textarea name="blocks-{{ loop.index0 }}-steps_items" data-field-suffix="steps_items">{{ block.settings.get('items',())|join('\n') }}</textarea></label>
+      {% elif block.block_type == 'download' %}
+      <label>下载标签<input name="blocks-{{ loop.index0 }}-download_label" value="{{ block.settings.get('label','') }}" data-field-suffix="download_label"></label>
+      {% elif block.block_type == 'cta' %}
+      <label>按钮标签<input name="blocks-{{ loop.index0 }}-cta_label" value="{{ block.settings.get('label','') }}" data-field-suffix="cta_label"></label>
+      <label>按钮地址<input name="blocks-{{ loop.index0 }}-cta_url" value="{{ block.settings.get('url','') }}" data-field-suffix="cta_url"></label>
+      <label>按钮样式<select name="blocks-{{ loop.index0 }}-cta_style" data-field-suffix="cta_style">{% for style in ('primary','secondary','text') %}<option value="{{ style }}" {% if block.settings.get('style') == style %}selected{% endif %}>{{ style }}</option>{% endfor %}</select></label>
+      {% endif %}
+      <div><button type="button" data-block-action="up">上移</button> <button type="button" data-block-action="down">下移</button> <button type="button" data-block-action="remove">移除</button></div>
+    </fieldset>
+  {% endfor %}
+  </div>
+  <div style="display:flex;gap:8px;">
+    <select data-new-block-type>{% for block_type in ('heading','rich_text','image_text','metric','steps','download','cta') %}<option value="{{ block_type }}">{{ block_type }}</option>{% endfor %}</select>
+    <button type="button" data-add-block>添加区块</button>
+  </div>
+</fieldset>
