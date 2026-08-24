@@ -8,7 +8,7 @@ import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
 from content_clock import parse_shanghai
-from content_contracts import CaseMetric, ContentBlock, ContentDraft
+from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from security import sanitize_html
 from source_url_checker import normalize_source_url
 
@@ -44,16 +44,36 @@ class ContentValidationError(ValueError):
 
 
 def _require_text(value, maximum, code):
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+    if type(value) is not str or not value.strip() or len(value) > maximum:
         raise ContentValidationError(code)
     return value.strip()
+
+
+def _valid_id(value, *, nullable=True):
+    return (nullable and value is None) or (type(value) is int and value >= 1)
+
+
+def _valid_optional_text(value, maximum):
+    return value is None or (
+        type(value) is str and 1 <= len(value) <= maximum
+    )
+
+
+def _valid_sha256(value):
+    return value is None or (
+        type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    )
+
+
+def _valid_flag(value):
+    return type(value) is int and value in (0, 1)
 
 
 def _valid_timestamp(value):
     if value is None:
         return True
     if not (
-        isinstance(value, str)
+        type(value) is str
         and re.fullmatch(
             r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value
         )
@@ -103,10 +123,18 @@ def _container_depth(value, depth=0):
 
 
 def _validate_block(block, index):
-    if not isinstance(block, ContentBlock) or block.block_type not in BLOCK_TYPES:
+    if (
+        type(block) is not ContentBlock
+        or type(block.block_type) is not str
+        or block.block_type not in BLOCK_TYPES
+    ):
         raise ContentValidationError("block_type_invalid")
-    if block.title is not None and (not isinstance(block.title, str) or len(block.title) > 120):
+    if block.title is not None and (
+        type(block.title) is not str or len(block.title) > 120
+    ):
         raise ContentValidationError("block_title_invalid")
+    if block.body_html is not None and type(block.body_html) is not str:
+        raise ContentValidationError("block_body_invalid")
     body = str(sanitize_html(block.body_html or "")) if block.body_html is not None else None
     if body is not None and len(body.encode("utf-8")) > 20_000:
         raise ContentValidationError("block_body_too_large")
@@ -119,31 +147,44 @@ def _validate_block(block, index):
         raise ContentValidationError("block_settings_invalid")
     if len(json.dumps(settings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 2_000:
         raise ContentValidationError("block_settings_too_large")
-    if block.block_type == "heading" and settings["level"] not in (2, 3, 4):
+    if block.block_type == "heading" and (
+        type(settings["level"]) is not int or settings["level"] not in (2, 3, 4)
+    ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "image_text":
-        if settings["alignment"] not in {"left", "right"} or not isinstance(settings["alt_text"], str):
+        if (
+            type(settings["alignment"]) is not str
+            or settings["alignment"] not in {"left", "right"}
+            or type(settings["alt_text"]) is not str
+        ):
             raise ContentValidationError("block_settings_invalid")
-    if block.block_type == "metric" and not all(isinstance(settings[key], str) and settings[key] for key in ("value", "unit")):
+    if block.block_type == "metric" and not all(
+        type(settings[key]) is str and settings[key] for key in ("value", "unit")
+    ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "steps" and not (
         isinstance(settings["items"], tuple)
         and settings["items"]
-        and all(isinstance(item, str) and item for item in settings["items"])
+        and all(type(item) is str and item for item in settings["items"])
     ):
         raise ContentValidationError("block_settings_invalid")
-    if block.block_type == "download" and not isinstance(settings["label"], str):
+    if block.block_type == "download" and not (
+        type(settings["label"]) is str and settings["label"]
+    ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "cta" and not (
-        isinstance(settings["label"], str)
+        type(settings["label"]) is str
         and settings["label"]
+        and type(settings["style"]) is str
         and settings["style"] in {"primary", "secondary", "text"}
         and _safe_cta(settings["url"])
     ):
         raise ContentValidationError("block_settings_invalid")
+    if not _valid_id(block.media_asset_id):
+        raise ContentValidationError("block_media_invalid")
     if block.media_asset_id is not None and block.block_type not in {"image_text", "download"}:
         raise ContentValidationError("block_media_invalid")
-    if not isinstance(block.sort_order, int) or block.sort_order < 0:
+    if type(block.sort_order) is not int or block.sort_order < 0:
         raise ContentValidationError("block_order_invalid")
     return replace(block, body_html=body, sort_order=index)
 
@@ -153,7 +194,9 @@ def _validate_extension(draft):
     entry_type = draft.entry_type
     if entry_type in {"industry", "scenario", "service"}:
         key = f"{entry_type}_id"
-        if frozenset(extension) != frozenset({key}) or not isinstance(extension[key], int) or extension[key] < 1:
+        if frozenset(extension) != frozenset({key}) or not _valid_id(
+            extension[key], nullable=False
+        ):
             raise ContentValidationError("extension_invalid")
     elif entry_type == "announcement":
         allowed = {"valid_from", "valid_until", "cta_url"}
@@ -175,15 +218,35 @@ def _validate_extension(draft):
         defaults = {key: None for key in allowed}
         defaults.update(extension)
         extension = defaults
-        if extension["resource_type"] not in {"article", "guide", "report", "template", "policy"} or extension["is_original"] not in (0, 1):
+        if (
+            type(extension["resource_type"]) is not str
+            or extension["resource_type"]
+            not in {"article", "guide", "report", "template", "policy"}
+            or not _valid_flag(extension["is_original"])
+            or not _valid_optional_text(extension["source_name"], 200)
+            or not _valid_optional_text(extension["copyright_notice"], 500)
+            or not _valid_id(extension["attachment_media_id"])
+            or not _valid_sha256(extension["source_url_sha256"])
+            or not _valid_optional_text(extension["source_check_code"], 64)
+            or not _valid_sha256(extension["source_check_url_sha256"])
+        ):
             raise ContentValidationError("extension_invalid")
         if extension["is_original"] == 0:
-            if not extension["source_name"]:
+            if extension["source_name"] is None:
                 raise ContentValidationError("source_required")
             extension["source_url"] = _normalize_https_url(extension["source_url"])
             import hashlib
 
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
+        elif extension["source_url"] is not None:
+            extension["source_url"] = _normalize_https_url(extension["source_url"])
+            import hashlib
+
+            extension["source_url_sha256"] = hashlib.sha256(
+                extension["source_url"].encode()
+            ).hexdigest()
+        elif extension["source_url_sha256"] is not None:
+            raise ContentValidationError("extension_invalid")
         check = [
             extension["source_check_code"], extension["source_checked_at"],
             extension["source_check_expires_at"], extension["source_check_url_sha256"],
@@ -208,13 +271,46 @@ def _validate_extension(draft):
         }
         if set(extension) != allowed:
             raise ContentValidationError("extension_invalid")
+        if (
+            not _valid_optional_text(extension["verification_code"], 64)
+            or extension["verification_code"] is None
+            or not _valid_flag(extension["is_anonymized"])
+            or type(extension["basis_type"]) is not str
+            or extension["basis_type"] not in {"public_source", "private_authorization"}
+            or not _valid_optional_text(extension["private_basis_reference"], 300)
+            or not _valid_sha256(extension["source_url_sha256"])
+            or not _valid_optional_text(extension["source_check_code"], 64)
+            or not _valid_sha256(extension["source_check_url_sha256"])
+            or not _valid_flag(extension["is_verified"])
+            or not _valid_flag(extension["review_confirmed"])
+        ):
+            raise ContentValidationError("extension_invalid")
         if extension["basis_type"] == "public_source":
             extension["source_url"] = _normalize_https_url(extension["source_url"])
             import hashlib
 
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
-        elif extension["basis_type"] != "private_authorization" or not extension["private_basis_reference"]:
+        elif extension["private_basis_reference"] is None:
             raise ContentValidationError("extension_invalid")
+        elif extension["source_url"] is not None:
+            extension["source_url"] = _normalize_https_url(extension["source_url"])
+            import hashlib
+
+            extension["source_url_sha256"] = hashlib.sha256(
+                extension["source_url"].encode()
+            ).hexdigest()
+        elif extension["source_url_sha256"] is not None:
+            raise ContentValidationError("extension_invalid")
+        check = [
+            extension["source_check_code"],
+            extension["source_checked_at"],
+            extension["source_check_expires_at"],
+            extension["source_check_url_sha256"],
+        ]
+        if any(value is not None for value in check) and not all(
+            value is not None for value in check
+        ):
+            raise ContentValidationError("source_check_invalid")
         if not all(
             _valid_timestamp(value)
             for value in (
@@ -228,7 +324,7 @@ def _validate_extension(draft):
 
 
 def _metric_text(value, maximum, code):
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+    if type(value) is not str or not value.strip() or len(value) > maximum:
         raise ContentValidationError(code)
     return value.strip()
 
@@ -242,7 +338,7 @@ def _validate_metrics(draft):
         raise ContentValidationError("too_many_metrics")
     validated = []
     for index, metric in enumerate(draft.metrics):
-        if not isinstance(metric, CaseMetric):
+        if type(metric) is not CaseMetric:
             raise ContentValidationError("metric_invalid")
         if type(metric.sort_order) is not int or metric.sort_order < 0:
             raise ContentValidationError("metric_order_invalid")
@@ -270,14 +366,22 @@ def _validate_metrics(draft):
 
 
 def validate_content_draft(draft: ContentDraft) -> ContentDraft:
-    if not isinstance(draft, ContentDraft) or draft.entry_type not in ENTRY_TYPES:
+    if (
+        not isinstance(draft, ContentDraft)
+        or type(draft.entry_type) is not str
+        or draft.entry_type not in ENTRY_TYPES
+    ):
         raise ContentValidationError("entry_type_invalid")
-    if not isinstance(draft.slug, str) or len(draft.slug) > 80 or not SLUG_PATTERN.fullmatch(draft.slug):
+    if type(draft.slug) is not str or len(draft.slug) > 80 or not SLUG_PATTERN.fullmatch(draft.slug):
         raise ContentValidationError("slug_invalid")
     title = _require_text(draft.title, 120, "title_invalid")
     summary = _require_text(draft.summary, 300, "summary_invalid")
     seo_title = _require_text(draft.seo_title, 60, "seo_title_invalid")
     seo_description = _require_text(draft.seo_description, 160, "seo_description_invalid")
+    if not _valid_id(draft.content_group_id):
+        raise ContentValidationError("content_group_id_invalid")
+    if not _valid_id(draft.share_image_media_id):
+        raise ContentValidationError("share_image_media_invalid")
     if draft.publish_at is not None and not _valid_timestamp(draft.publish_at):
         raise ContentValidationError("publish_at_invalid")
     if len(draft.blocks) > 40:
@@ -288,17 +392,26 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
     seen_relations = set()
     relations = []
     for index, relation in enumerate(draft.relations):
-        if RELATION_OWNERS.get(relation.relation_type) != draft.entry_type:
+        if (
+            type(relation) is not ContentRelation
+            or type(relation.relation_type) is not str
+            or RELATION_OWNERS.get(relation.relation_type) != draft.entry_type
+        ):
             raise ContentValidationError("relation_type_invalid")
-        if not isinstance(relation.target_group_id, int) or relation.target_group_id < 1:
+        if not _valid_id(relation.target_group_id, nullable=False):
             raise ContentValidationError("relation_target_invalid")
+        if type(relation.sort_order) is not int or relation.sort_order < 0:
+            raise ContentValidationError("relation_order_invalid")
         key = (relation.relation_type, relation.target_group_id)
         if key in seen_relations:
             raise ContentValidationError("relation_duplicate")
         seen_relations.add(key)
         relations.append(replace(relation, sort_order=index))
     if draft.entry_type == "scenario":
-        if len(set(draft.maturity_codes)) != len(draft.maturity_codes) or any(code not in MATURITY_CODES for code in draft.maturity_codes):
+        if len(set(draft.maturity_codes)) != len(draft.maturity_codes) or any(
+            type(code) is not str or code not in MATURITY_CODES
+            for code in draft.maturity_codes
+        ):
             raise ContentValidationError("maturity_invalid")
     elif draft.maturity_codes:
         raise ContentValidationError("maturity_invalid")

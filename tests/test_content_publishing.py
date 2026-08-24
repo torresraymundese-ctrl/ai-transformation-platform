@@ -194,6 +194,23 @@ def test_caller_owned_insert_and_update_never_commit(db):
     assert db.execute("SELECT COUNT(*) FROM content_audit_events").fetchone()[0] == 0
 
 
+def test_invalid_resource_scalar_rolls_back_without_sqlite_error_or_residue(db):
+    invalid = _resource("invalid-resource-scalar")
+    invalid = replace(
+        invalid,
+        extension={**dict(invalid.extension), "source_name": ["not", "scalar"]},
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        create_content_draft(invalid, actor="admin", now=NOW)
+
+    assert error.value.code == "extension_invalid"
+    assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM content_groups").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM resource_content").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM content_audit_events").fetchone()[0] == 0
+
+
 def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
     scenario_ids = [
         row[0]

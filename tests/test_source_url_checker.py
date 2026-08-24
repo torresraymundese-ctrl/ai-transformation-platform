@@ -130,6 +130,58 @@ def test_transport_rejects_unsafe_mixed_or_excessive_dns_answers(answers):
     assert connection_calls == []
 
 
+@pytest.mark.parametrize(
+    "answer",
+    (
+        "64:ff9b::7f00:1",
+        "64:ff9b::a9fe:a9fe",
+    ),
+)
+def test_transport_rejects_nat64_addresses_embedding_non_public_ipv4(answer):
+    transport, _, connection_calls = _transport(
+        [FakeResponse(peer_ip=answer)], answers=(answer,)
+    )
+
+    result = transport.fetch(
+        "https://example.com/resource",
+        allowed_hosts=frozenset({"example.com"}),
+        allowed_schemes=frozenset({"https"}),
+        max_compressed_bytes=1024,
+        max_decompressed_bytes=1024,
+        allowed_content_types=frozenset({"text/html"}),
+    )
+
+    assert result.ok is False
+    assert result.code == "unsafe_address"
+    assert connection_calls == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    (
+        "93.184.216.34",
+        "2606:4700:4700::1111",
+    ),
+)
+def test_transport_keeps_literal_public_addresses_eligible(answer):
+    transport, _, connection_calls = _transport(
+        [FakeResponse(peer_ip=answer)], answers=(answer,)
+    )
+
+    result = transport.fetch(
+        "https://example.com/resource",
+        allowed_hosts=frozenset({"example.com"}),
+        allowed_schemes=frozenset({"https"}),
+        max_compressed_bytes=1024,
+        max_decompressed_bytes=1024,
+        allowed_content_types=frozenset({"text/html"}),
+    )
+
+    assert result.ok is True
+    assert result.code == "https_ok"
+    assert len(connection_calls) == 1
+
+
 def test_redirect_to_unlisted_host_is_rejected_before_second_dns_or_socket():
     transport, resolver_calls, connection_calls = _transport(
         [FakeResponse(status=302, headers={"Location": "https://evil.invalid/next"})]

@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import dataclass, field, FrozenInstanceError, replace
 from datetime import datetime, timezone
 
 import pytest
@@ -100,6 +100,74 @@ def test_content_draft_requires_frozen_contract_types(field, value):
         _draft(**{field: value})
 
 
+class _UnhashableString(str):
+    __hash__ = None
+
+
+def test_contract_rejects_non_exact_maturity_code_strings_before_validation():
+    with pytest.raises(ContentContractError):
+        _draft(maturity_codes=(_UnhashableString("explore"),))
+
+
+@dataclass(frozen=True)
+class _MutableBlockSubclass(ContentBlock):
+    mutable_extra: list = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _MutableRelationSubclass(ContentRelation):
+    mutable_extra: list = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _MutableMetricSubclass(CaseMetric):
+    mutable_extra: list = field(default_factory=list)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("blocks", (_MutableBlockSubclass("rich_text"),)),
+        ("relations", (_MutableRelationSubclass("industry_case", 1),)),
+        (
+            "metrics",
+            (
+                _MutableMetricSubclass(
+                    "处理时间",
+                    "8",
+                    "2",
+                    "小时",
+                    "连续 30 天",
+                    "由项目记录验证。",
+                ),
+            ),
+        ),
+    ],
+)
+def test_contract_rejects_dataclass_subclasses_with_mutable_extra_state(
+    field_name, value
+):
+    with pytest.raises(ContentContractError):
+        _draft(**{field_name: value})
+
+
+def test_contract_rejects_cyclic_json_with_a_stable_contract_error():
+    cyclic = {}
+    cyclic["self"] = cyclic
+
+    with pytest.raises(ContentContractError):
+        _draft(extension={**dict(_draft().extension), "cyclic": cyclic})
+
+
+def test_contract_rejects_json_beyond_the_finite_depth_budget():
+    nested = "leaf"
+    for _ in range(70):
+        nested = {"child": nested}
+
+    with pytest.raises(ContentContractError):
+        _draft(extension={**dict(_draft().extension), "nested": nested})
+
+
 @pytest.mark.parametrize(
     ("field", "value", "code"),
     [
@@ -114,6 +182,146 @@ def test_content_draft_requires_frozen_contract_types(field, value):
 def test_content_limits_fail_with_stable_codes(field, value, code):
     with pytest.raises(ContentValidationError) as error:
         validate_content_draft(_draft(**{field: value}))
+
+    assert error.value.code == code
+
+
+def _external_resource(**extension_changes):
+    extension = {
+        "resource_type": "report",
+        "is_original": 0,
+        "source_name": "Example",
+        "source_url": "https://example.com/report",
+        "source_url_sha256": None,
+        "source_check_code": None,
+        "source_checked_at": None,
+        "source_check_expires_at": None,
+        "source_check_url_sha256": None,
+        "original_published_at": "2026-08-20 09:00:00",
+        "copyright_notice": "转载请注明来源",
+        "attachment_media_id": None,
+    }
+    extension.update(extension_changes)
+    return ContentDraft(
+        entry_type="resource",
+        slug="schema-resource",
+        title="资源架构验证",
+        summary="验证资源扩展字段在持久化前具有精确类型与长度约束。",
+        seo_title="资源架构验证",
+        seo_description="验证资源发布输入不会将类型错误泄漏到 SQLite。",
+        extension=extension,
+    )
+
+
+def _industry_draft(*, relations):
+    return ContentDraft(
+        entry_type="industry",
+        slug="schema-industry",
+        title="行业关系验证",
+        summary="验证内容关系目标和排序字段的精确整数类型。",
+        seo_title="行业关系验证",
+        seo_description="验证布尔值不能伪装成内容关系外键或排序值。",
+        extension={"industry_id": 1},
+        relations=relations,
+    )
+
+
+@pytest.mark.parametrize(
+    ("draft", "code"),
+    [
+        (_draft(content_group_id=True), "content_group_id_invalid"),
+        (_draft(share_image_media_id=True), "share_image_media_invalid"),
+        (
+            _draft(
+                blocks=(
+                    ContentBlock(
+                        "image_text",
+                        settings={"alignment": "left", "alt_text": "图片"},
+                        media_asset_id=True,
+                    ),
+                )
+            ),
+            "block_media_invalid",
+        ),
+        (
+            _draft(blocks=(ContentBlock("rich_text", sort_order=True),)),
+            "block_order_invalid",
+        ),
+        (
+            _draft(blocks=(ContentBlock("heading", settings={"level": 2.0}),)),
+            "block_settings_invalid",
+        ),
+        (
+            ContentDraft(
+                entry_type="scenario",
+                slug="bool-scenario-id",
+                title="场景类型验证",
+                summary="验证布尔值不能被静默当作整数场景 ID。",
+                seo_title="场景类型验证",
+                seo_description="验证核心场景外键必须是真实正整数。",
+                extension={"scenario_id": True},
+                maturity_codes=("explore",),
+            ),
+            "extension_invalid",
+        ),
+        (
+            _industry_draft(relations=(ContentRelation("industry_case", True),)),
+            "relation_target_invalid",
+        ),
+        (
+            _industry_draft(relations=(ContentRelation("industry_case", 1, True),)),
+            "relation_order_invalid",
+        ),
+        (_external_resource(is_original=True), "extension_invalid"),
+        (_external_resource(attachment_media_id=True), "extension_invalid"),
+    ],
+)
+def test_ids_flags_orders_and_heading_level_require_exact_integers(draft, code):
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(draft)
+
+    assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("draft", "code"),
+    [
+        (_draft(entry_type=[]), "entry_type_invalid"),
+        (_draft(blocks=(ContentBlock([], settings={}),)), "block_type_invalid"),
+        (
+            _draft(blocks=(ContentBlock("rich_text", body_html=[]),)),
+            "block_body_invalid",
+        ),
+        (
+            _draft(
+                blocks=(
+                    ContentBlock(
+                        "cta",
+                        settings={
+                            "label": "继续",
+                            "url": "/assessment",
+                            "style": [],
+                        },
+                    ),
+                )
+            ),
+            "block_settings_invalid",
+        ),
+        (
+            _industry_draft(relations=(ContentRelation([], 1),)),
+            "relation_type_invalid",
+        ),
+        (_external_resource(source_name=[]), "extension_invalid"),
+        (_external_resource(source_name="s" * 201), "extension_invalid"),
+        (_external_resource(copyright_notice=[]), "extension_invalid"),
+        (_external_resource(copyright_notice="c" * 501), "extension_invalid"),
+    ],
+)
+def test_unhashable_and_oversized_schema_values_have_stable_validation_errors(
+    draft, code
+):
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(draft)
 
     assert error.value.code == code
 
@@ -341,6 +549,31 @@ def _case_draft(*, metrics):
         },
         metrics=metrics,
     )
+
+
+@pytest.mark.parametrize(
+    "extension_change",
+    [
+        {"verification_code": []},
+        {"is_anonymized": True},
+        {"is_verified": True},
+        {"review_confirmed": True},
+        {"source_check_code": [], "source_checked_at": "2026-08-24 09:00:00", "source_check_expires_at": "2026-08-31 09:00:00", "source_check_url_sha256": "a" * 64},
+    ],
+)
+def test_case_extension_scalars_and_flags_require_exact_schema_types(
+    extension_change
+):
+    draft = _case_draft(metrics=())
+    invalid = replace(
+        draft,
+        extension={**dict(draft.extension), **extension_change},
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(invalid)
+
+    assert error.value.code == "extension_invalid"
 
 
 def test_case_metrics_are_bounded_and_reindexed_by_the_server():

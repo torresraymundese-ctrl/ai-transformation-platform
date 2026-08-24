@@ -10,26 +10,52 @@ class ContentContractError(ValueError):
     """Raised when a contract would retain unsafe or mutable input."""
 
 
-def _freeze_json(value):
+MAX_JSON_DEPTH = 64
+
+
+def _freeze_json(value, *, _depth=0, _active=None):
+    if _depth > MAX_JSON_DEPTH:
+        raise ContentContractError("content contract JSON is too deep")
+    if _active is None:
+        _active = set()
     if isinstance(value, Mapping):
-        frozen = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ContentContractError("JSON object keys must be strings")
-            frozen[key] = _freeze_json(item)
-        return MappingProxyType(frozen)
+        identity = id(value)
+        if identity in _active:
+            raise ContentContractError("content contract JSON must not be cyclic")
+        _active.add(identity)
+        try:
+            frozen = {}
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ContentContractError("JSON object keys must be strings")
+                frozen[key] = _freeze_json(
+                    item, _depth=_depth + 1, _active=_active
+                )
+            return MappingProxyType(frozen)
+        finally:
+            _active.remove(identity)
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_json(item) for item in value)
-    if value is None or isinstance(value, (str, bool, int)):
+        identity = id(value)
+        if identity in _active:
+            raise ContentContractError("content contract JSON must not be cyclic")
+        _active.add(identity)
+        try:
+            return tuple(
+                _freeze_json(item, _depth=_depth + 1, _active=_active)
+                for item in value
+            )
+        finally:
+            _active.remove(identity)
+    if value is None or type(value) in (str, bool, int):
         return value
-    if isinstance(value, float) and math.isfinite(value):
+    if type(value) is float and math.isfinite(value):
         return value
     raise ContentContractError("content contract values must be finite JSON data")
 
 
 def _contract_sequence(value, expected_type, field_name):
     if not isinstance(value, (list, tuple)) or any(
-        not isinstance(item, expected_type) for item in value
+        type(item) is not expected_type for item in value
     ):
         raise ContentContractError(
             f"{field_name} must contain only {expected_type.__name__} values"
@@ -102,7 +128,7 @@ class ContentDraft:
             _contract_sequence(self.relations, ContentRelation, "relations"),
         )
         if not isinstance(self.maturity_codes, (list, tuple)) or any(
-            not isinstance(code, str) for code in self.maturity_codes
+            type(code) is not str for code in self.maturity_codes
         ):
             raise ContentContractError("maturity_codes must contain only strings")
         object.__setattr__(self, "maturity_codes", tuple(self.maturity_codes))

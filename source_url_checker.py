@@ -20,6 +20,7 @@ ONE_MIB = 1_048_576
 MAX_REDIRECTS = 3
 MAX_DNS_ANSWERS = 8
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,37 @@ def _valid_host_shape(host):
         1 <= len(label) <= 63
         and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
         for label in labels
+    )
+
+
+def _embedded_ipv4_addresses(address):
+    if not isinstance(address, ipaddress.IPv6Address):
+        return ()
+    embedded = []
+    if address.ipv4_mapped is not None:
+        embedded.append(address.ipv4_mapped)
+    if address.sixtofour is not None:
+        embedded.append(address.sixtofour)
+    if address.teredo is not None:
+        embedded.extend(address.teredo)
+    if address in NAT64_WELL_KNOWN_PREFIX:
+        embedded.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return tuple(embedded)
+
+
+def _is_safe_public_address(address):
+    embedded = _embedded_ipv4_addresses(address)
+    if any(not _is_safe_public_address(item) for item in embedded):
+        return False
+    return address.is_global and not any(
+        (
+            address.is_private,
+            address.is_loopback,
+            address.is_link_local,
+            address.is_reserved,
+            address.is_multicast,
+            address.is_unspecified,
+        )
     )
 
 
@@ -202,7 +234,7 @@ class PinnedHttpTransport:
                 parsed_answers = tuple(ipaddress.ip_address(answer) for answer in answers)
             except ValueError:
                 return FetchResult(False, "dns_failed", normalized, None, None, b"")
-            if any(not address.is_global for address in parsed_answers):
+            if any(not _is_safe_public_address(address) for address in parsed_answers):
                 return FetchResult(False, "unsafe_address", normalized, None, None, b"")
             pinned_ip = str(parsed_answers[0])
             connection = None
@@ -238,7 +270,7 @@ class PinnedHttpTransport:
                     peer = ipaddress.ip_address(connection.peer_ip)
                 except (ValueError, OSError):
                     return FetchResult(False, "peer_mismatch", normalized, None, None, b"")
-                if peer != parsed_answers[0] or not peer.is_global:
+                if peer != parsed_answers[0] or not _is_safe_public_address(peer):
                     return FetchResult(False, "peer_mismatch", normalized, None, None, b"")
                 if response.status in REDIRECT_STATUSES:
                     location = response.getheader("Location")
