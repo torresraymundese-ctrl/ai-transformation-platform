@@ -649,3 +649,40 @@ Known limitations remain the original full-suite result **UNKNOWN** and the
 historical PyPI network violation **CONFIRMED**. Controller-side final
 verification remains the appropriate next step; Fix1e did not run a full
 suite.
+
+## Fix1e controller verification
+
+The controller independently verified code commit
+`b4bc7e895ed848b75af1bd24171d12e2f4ae44fc` from a clean worktree. All
+commands used the assigned project interpreter, process-scoped `PYTHONPATH`
+pointing to the offline `local-deps` overlay (pypdf `6.10.0`),
+`-p no:cacheprovider`, and a unique basetemp.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_content_publishing.py tests\test_media_http.py tests\test_content_migrations.py tests\test_content_seed.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1e-focused-001
+```
+
+Result: `218 passed in 124.15s (0:02:04)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1e-public-partition-001
+```
+
+Result: `269 passed in 149.64s (0:02:29)`, tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1e-related-partition-001
+```
+
+Result: `208 passed in 74.00s (0:01:14)`, tool `exit_code=0`.
+
+Controller static verification returned `py_compile=0` for the new JSON
+boundary and all related Python modules/tests,
+`git diff --check 1c359a7..b4bc7e8=0`, and no direct SQL call in
+`blueprints/public_catalog.py`. No full suite, network access, installation,
+production server, Nginx, or real database was used. The original full-suite
+outcome remains **UNKNOWN** and the historical PyPI-network violation remains
+**CONFIRMED**.
