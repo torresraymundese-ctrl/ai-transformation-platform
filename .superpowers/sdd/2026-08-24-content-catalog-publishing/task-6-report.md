@@ -1583,3 +1583,53 @@ Fix1j responsibility command was started exactly once and has an unrecoverable
 final summary/exit; it remains **UNKNOWN**, was not rerun, and must not be
 reported as passing from partial dot output. No full suite, network, install,
 production endpoint, Nginx, or real database was used in Fix1j.
+
+## Fix1j controller verification
+
+The controller independently verified frozen implementation commit
+`ca36c12232992edea5d81bfa4a9b03690147d672` from a clean tracked tree. Every
+pytest command set `PYTHONPATH` process-scoped to the offline `local-deps`
+overlay, used the assigned Python `3.12.13` interpreter,
+`-p no:cacheprovider`, and a unique basetemp. The three commands ran in
+parallel against isolated temporary databases and did not edit the repository.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_content_publishing.py tests\test_content_validation.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1j-focused-001
+```
+
+Result: `526 passed in 309.47s (0:05:09)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1j-public-partition-001
+```
+
+Result: `372 passed in 250.95s (0:04:10)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1j-related-partition-001
+```
+
+Result: `314 passed in 181.31s (0:03:01)`, pytest and PowerShell host both
+returned `exit_code=0`.
+
+The process-scoped import probe reported `idna.__version__ == 3.19` and
+`pypdf.__version__ == 6.10.0` from the offline overlay. For transparency, the
+assigned venv still contains `pypdf` distribution metadata `6.16.2`; one
+focused-agent metadata probe reported that distribution version even with the
+overlay active. The imported module version used through `PYTHONPATH` is
+`6.10.0`, while the underlying venv distribution remains `6.16.2`. This is the
+pre-existing two-layer environment documented by the review, not an install
+or environment mutation.
+
+Controller `py_compile` over `app.py` and `tests/test_public_catalog.py`,
+`git diff --check 1c359a7..ca36c12`, and no-direct-SQL scans for both public
+and admin catalog Blueprints all passed. The tracked tree was clean before
+this report-only append. The implementation agent's once-only responsibility
+run remains **UNKNOWN** and is not relabelled by these separate controller
+runs. The historical full suite remains **UNKNOWN** and was not rerun; the
+historical PyPI-network violation remains **CONFIRMED**; the frozen
+`data_process_foundation` product-data limitation remains unchanged. No
+network, installation, production server, Nginx, or real database was used.
