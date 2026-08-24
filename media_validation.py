@@ -10,7 +10,7 @@ import unicodedata
 from urllib.parse import unquote, urlsplit
 import warnings
 import zipfile
-from xml.etree import ElementTree
+from xml.parsers import expat
 
 from PIL import Image, ImageOps
 from pypdf import PdfReader
@@ -46,6 +46,28 @@ IMAGE_FORMATS = {
     "WEBP": (WEBP_MIME, ".webp"),
 }
 
+OOXML_CORE_PROPERTIES_ROOT = (
+    "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}"
+    "coreProperties"
+)
+OOXML_CORE_PERSONAL_FIELDS = frozenset(
+    {
+        "{http://purl.org/dc/elements/1.1/}creator",
+        "{http://schemas.openxmlformats.org/package/2006/metadata/"
+        "core-properties}lastModifiedBy",
+    }
+)
+OOXML_EXTENDED_PROPERTIES_ROOT = (
+    "{http://schemas.openxmlformats.org/officeDocument/2006/"
+    "extended-properties}Properties"
+)
+OOXML_COMPANY_FIELD = frozenset(
+    {
+        "{http://schemas.openxmlformats.org/officeDocument/2006/"
+        "extended-properties}Company"
+    }
+)
+
 
 class MediaValidationError(ValidationError):
     """Raised when an upload violates the fixed media policy."""
@@ -63,13 +85,33 @@ class ValidatedMedia:
 class _OoxmlXmlBudget:
     remaining_nodes: int
     maximum_depth: int
+    remaining_characters: int
 
-    def consume(self, depth):
+    def consume_node(self, depth):
         self.remaining_nodes -= 1
         if self.remaining_nodes < 0:
             raise MediaValidationError("OOXML XML node count exceeds the limit")
         if depth > self.maximum_depth:
             raise MediaValidationError("OOXML XML depth exceeds the limit")
+
+    def consume_characters(self, *values):
+        self.remaining_characters -= sum(len(value) for value in values if value)
+        if self.remaining_characters < 0:
+            raise MediaValidationError("OOXML XML character work exceeds the limit")
+
+
+@dataclass
+class _OoxmlXmlFrame:
+    tag: str
+    attributes: dict
+    has_non_whitespace_text: bool = False
+
+
+def _validated_ooxml_limit(config, key, maximum):
+    value = config.get(key)
+    if type(value) is not int or value < 1 or value > maximum:
+        raise MediaValidationError(f"{key} is invalid")
+    return value
 
 
 def upload_contract(filename, declared_mime):
@@ -320,8 +362,15 @@ def _validate_ooxml(path, config):
             if content_types_member is None:
                 raise MediaValidationError("OOXML content types are missing")
             xml_budget = _OoxmlXmlBudget(
-                int(config["MEDIA_OOXML_XML_MAX_NODES"]),
-                int(config["MEDIA_OOXML_XML_MAX_DEPTH"]),
+                _validated_ooxml_limit(
+                    config, "MEDIA_OOXML_XML_MAX_NODES", 1_000_000
+                ),
+                _validated_ooxml_limit(
+                    config, "MEDIA_OOXML_XML_MAX_DEPTH", 256
+                ),
+                _validated_ooxml_limit(
+                    config, "MEDIA_OOXML_XML_MAX_CHARACTERS", 16_000_000
+                ),
             )
             overrides, defaults = _parse_ooxml_content_types(
                 package, content_types_member, xml_budget
@@ -372,7 +421,7 @@ def _validate_ooxml(path, config):
             return (DOCX_MIME, ".docx") if has_docx else (XLSX_MIME, ".xlsx")
     except MediaValidationError:
         raise
-    except (OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
+    except (OSError, ValueError, zipfile.BadZipFile, expat.ExpatError):
         raise MediaValidationError("OOXML cannot be safely parsed") from None
 
 
@@ -414,27 +463,81 @@ def _canonical_ooxml_part_name(name):
     return _safe_zip_member_name(unquote(value[1:])).casefold()
 
 
+def _expanded_ooxml_name(name):
+    value = str(name)
+    if "}" in value:
+        return "{" + value
+    return value
+
+
 def _parse_ooxml_xml(
     package, member, budget, *, expected_root=None, on_end=None
 ):
     root_tag = None
     stack = []
+
+    def reject_dtd_or_entity(*_args):
+        raise MediaValidationError("OOXML DTD and entities are not allowed")
+
+    def inspect_namespace(prefix, uri):
+        budget.consume_characters(prefix or "", uri or "")
+
+    def inspect_start(name, attributes):
+        nonlocal root_tag
+        tag = _expanded_ooxml_name(name)
+        exact_attributes = {
+            _expanded_ooxml_name(key): str(value)
+            for key, value in attributes.items()
+        }
+        budget.consume_characters(name)
+        for key, value in attributes.items():
+            budget.consume_characters(key, value)
+        stack.append(_OoxmlXmlFrame(tag, exact_attributes))
+        budget.consume_node(len(stack))
+        if root_tag is None:
+            root_tag = tag
+            if expected_root is not None and root_tag != expected_root:
+                raise MediaValidationError("OOXML XML root is invalid")
+
+    def inspect_text(value):
+        budget.consume_characters(value)
+        if stack and value.strip():
+            stack[-1].has_non_whitespace_text = True
+
+    def inspect_end(_name):
+        frame = stack.pop()
+        if on_end is not None:
+            on_end(frame)
+        if stack and frame.has_non_whitespace_text:
+            stack[-1].has_non_whitespace_text = True
+
+    def inspect_xml_declaration(version, encoding, standalone):
+        budget.consume_characters(
+            version or "", encoding or "", "" if standalone == -1 else str(standalone)
+        )
+
+    def inspect_processing_instruction(target, data):
+        budget.consume_characters(target or "", data or "")
+
+    parser = expat.ParserCreate(namespace_separator="}")
+    parser.buffer_text = True
+    parser.StartNamespaceDeclHandler = inspect_namespace
+    parser.StartElementHandler = inspect_start
+    parser.CharacterDataHandler = inspect_text
+    parser.EndElementHandler = inspect_end
+    parser.XmlDeclHandler = inspect_xml_declaration
+    parser.ProcessingInstructionHandler = inspect_processing_instruction
+    parser.CommentHandler = budget.consume_characters
+    parser.StartDoctypeDeclHandler = reject_dtd_or_entity
+    parser.EntityDeclHandler = reject_dtd_or_entity
+    parser.UnparsedEntityDeclHandler = reject_dtd_or_entity
+    parser.ExternalEntityRefHandler = reject_dtd_or_entity
+    parser.NotationDeclHandler = reject_dtd_or_entity
+    parser.SkippedEntityHandler = reject_dtd_or_entity
     with package.open(member) as stream:
-        for event, element in ElementTree.iterparse(stream, events=("start", "end")):
-            if event == "start":
-                stack.append(element)
-                budget.consume(len(stack))
-                if root_tag is None:
-                    root_tag = str(element.tag)
-                    if expected_root is not None and root_tag != expected_root:
-                        raise MediaValidationError("OOXML XML root is invalid")
-                continue
-            if on_end is not None:
-                on_end(element)
-            stack.pop()
-            if stack:
-                stack[-1].remove(element)
-            element.clear()
+        for chunk in iter(lambda: stream.read(64 * 1024), b""):
+            parser.Parse(chunk, False)
+        parser.Parse(b"", True)
     if root_tag is None:
         raise MediaValidationError("OOXML XML document is empty")
 
@@ -447,21 +550,21 @@ def _parse_ooxml_content_types(package, member, budget):
         local_name = _local_name(element.tag)
         if local_name == "Override":
             part_name = _canonical_ooxml_part_name(
-                element.attrib.get("PartName", "")
+                element.attributes.get("PartName", "")
             )
             if part_name in overrides:
                 raise MediaValidationError("OOXML content type declaration is ambiguous")
-            content_type = str(element.attrib.get("ContentType", "")).strip()
+            content_type = str(element.attributes.get("ContentType", "")).strip()
             if not content_type:
                 raise MediaValidationError("OOXML content type is invalid")
             overrides[part_name] = content_type
         elif local_name == "Default":
             extension = (
-                str(element.attrib.get("Extension", "")).lstrip(".").casefold()
+                str(element.attributes.get("Extension", "")).lstrip(".").casefold()
             )
             if not extension or extension in defaults:
                 raise MediaValidationError("OOXML content type declaration is ambiguous")
-            content_type = str(element.attrib.get("ContentType", "")).strip()
+            content_type = str(element.attributes.get("ContentType", "")).strip()
             if not content_type:
                 raise MediaValidationError("OOXML content type is invalid")
             defaults[extension] = content_type
@@ -505,13 +608,19 @@ def _reject_ooxml_semantic_content_types(
             _reject_ooxml_metadata_part(
                 package,
                 member,
-                {"creator", "lastModifiedBy"},
+                OOXML_CORE_PERSONAL_FIELDS,
                 budget,
                 metadata_scans,
-                expected_root=(
-                    "{http://schemas.openxmlformats.org/package/2006/metadata/"
-                    "core-properties}coreProperties"
-                ),
+                expected_root=OOXML_CORE_PROPERTIES_ROOT,
+            )
+        if "extended-properties" in semantic_type:
+            _reject_ooxml_metadata_part(
+                package,
+                member,
+                OOXML_COMPANY_FIELD,
+                budget,
+                metadata_scans,
+                expected_root=OOXML_EXTENDED_PROPERTIES_ROOT,
             )
 
 
@@ -524,14 +633,14 @@ def _reject_ooxml_metadata_part(
     *,
     expected_root,
 ):
-    scan_key = (member.filename.casefold(), frozenset(fields))
+    scan_key = (member.filename.casefold(), expected_root, frozenset(fields))
     if scan_key in metadata_scans:
         return
     has_personal_metadata = False
 
     def inspect(element):
         nonlocal has_personal_metadata
-        if _local_name(element.tag) in fields and (element.text or "").strip():
+        if element.tag in fields and element.has_non_whitespace_text:
             has_personal_metadata = True
 
     _parse_ooxml_xml(
@@ -550,15 +659,13 @@ def _reject_ooxml_personal_metadata(package, names, budget, metadata_scans):
     for member_name, fields, expected_root in (
         (
             "docprops/core.xml",
-            {"creator", "lastModifiedBy"},
-            "{http://schemas.openxmlformats.org/package/2006/metadata/"
-            "core-properties}coreProperties",
+            OOXML_CORE_PERSONAL_FIELDS,
+            OOXML_CORE_PROPERTIES_ROOT,
         ),
         (
             "docprops/app.xml",
-            {"Company"},
-            "{http://schemas.openxmlformats.org/officeDocument/2006/"
-            "extended-properties}Properties",
+            OOXML_COMPANY_FIELD,
+            OOXML_EXTENDED_PROPERTIES_ROOT,
         ),
     ):
         member = names.get(member_name)
@@ -607,6 +714,16 @@ def _resolve_ooxml_relationship_target(relationship_name, target):
 
 
 def _reject_ooxml_relationships(package, names, budget, metadata_scans):
+    relationships_root = (
+        "{http://schemas.openxmlformats.org/package/2006/relationships}"
+        "Relationships"
+    )
+    relationship_element = (
+        "{http://schemas.openxmlformats.org/package/2006/relationships}"
+        "Relationship"
+    )
+    allowed_attributes = {"Id", "Type", "Target", "TargetMode"}
+    required_attributes = {"Id", "Type", "Target"}
     forbidden_types = {
         "oleobject",
         "package",
@@ -619,39 +736,61 @@ def _reject_ooxml_relationships(package, names, budget, metadata_scans):
         if not name.endswith(".rels"):
             continue
         relationship_ids = set()
-        core_targets = []
+        metadata_targets = []
 
         def inspect(relationship):
-            if _local_name(relationship.tag) != "Relationship":
+            if relationship.tag == relationships_root:
                 return
+            if relationship.tag != relationship_element:
+                raise MediaValidationError("OOXML relationship element is invalid")
+            if set(relationship.attributes) - allowed_attributes:
+                raise MediaValidationError("OOXML relationship attributes are invalid")
             attributes = {
-                _local_name(key).casefold(): str(value).strip()
-                for key, value in relationship.attrib.items()
+                key: str(value).strip()
+                for key, value in relationship.attributes.items()
             }
-            relationship_id = attributes.get("id", "")
+            if any(not attributes.get(key) for key in required_attributes):
+                raise MediaValidationError("OOXML relationship attributes are invalid")
+            target_mode = attributes.get("TargetMode", "Internal")
+            if target_mode not in {"Internal", "External"}:
+                raise MediaValidationError("OOXML relationship target mode is invalid")
+            relationship_id = attributes["Id"]
             if not relationship_id or relationship_id in relationship_ids:
                 raise MediaValidationError("OOXML relationship ID is ambiguous")
             relationship_ids.add(relationship_id)
-            if attributes.get("targetmode", "").casefold() == "external":
+            if target_mode == "External":
                 raise MediaValidationError("external OOXML relationships are not allowed")
-            relationship_type = attributes.get("type", "").rstrip("/")
+            relationship_type = attributes["Type"].rstrip("/")
             semantic_type = relationship_type.rsplit("/", 1)[-1].casefold()
             if semantic_type in forbidden_types:
                 raise MediaValidationError("active OOXML content is not allowed")
             if semantic_type == "core-properties":
-                core_targets.append(attributes.get("target", ""))
+                metadata_targets.append(
+                    (
+                        attributes["Target"],
+                        OOXML_CORE_PERSONAL_FIELDS,
+                        OOXML_CORE_PROPERTIES_ROOT,
+                    )
+                )
+            if semantic_type == "extended-properties":
+                metadata_targets.append(
+                    (
+                        attributes["Target"],
+                        OOXML_COMPANY_FIELD,
+                        OOXML_EXTENDED_PROPERTIES_ROOT,
+                    )
+                )
 
         _parse_ooxml_xml(
             package,
             member,
             budget,
             expected_root=(
-                "{http://schemas.openxmlformats.org/package/2006/relationships}"
-                "Relationships"
+                relationships_root
             ),
             on_end=inspect,
         )
-        for target in core_targets:
+        for target, fields, expected_root in metadata_targets:
             target_name = _resolve_ooxml_relationship_target(name, target)
             target_member = names.get(target_name)
             if target_member is None:
@@ -659,11 +798,8 @@ def _reject_ooxml_relationships(package, names, budget, metadata_scans):
             _reject_ooxml_metadata_part(
                 package,
                 target_member,
-                {"creator", "lastModifiedBy"},
+                fields,
                 budget,
                 metadata_scans,
-                expected_root=(
-                    "{http://schemas.openxmlformats.org/package/2006/metadata/"
-                    "core-properties}coreProperties"
-                ),
+                expected_root=expected_root,
             )

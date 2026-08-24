@@ -31,6 +31,7 @@ DEFAULT_MEDIA_CONFIG = {
     # Cumulative across inspected XML parts; depth is per XML document.
     "MEDIA_OOXML_XML_MAX_NODES": 250_000,
     "MEDIA_OOXML_XML_MAX_DEPTH": 128,
+    "MEDIA_OOXML_XML_MAX_CHARACTERS": 8_000_000,
     "MEDIA_PDF_MAX_PAGES": 500,
 }
 

@@ -287,6 +287,7 @@ def test_media_limits_use_exact_policy_defaults_and_bound_the_stream(client):
     assert config["MEDIA_OOXML_MAX_COMPRESSION_RATIO"] == 20
     assert config["MEDIA_OOXML_XML_MAX_NODES"] == 250_000
     assert config["MEDIA_OOXML_XML_MAX_DEPTH"] == 128
+    assert config["MEDIA_OOXML_XML_MAX_CHARACTERS"] == 8_000_000
     assert config["MEDIA_PDF_MAX_PAGES"] == 500
 
     with pytest.raises(MediaValidationError):
@@ -710,6 +711,256 @@ def test_ooxml_rejects_duplicate_relationship_ids(client, media_root):
         _store(client, "ambiguous.docx", OOXML_MIMES["docx"], data, confirmed=True)
 
     assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_rejects_utf16_dtd_entity_expansion(client, media_root):
+    main_xml = (
+        '<?xml version="1.0" encoding="UTF-16"?>'
+        '<!DOCTYPE w:document [<!ENTITY expanded "private expanded text">]>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:t>&expanded;</w:t>"
+        "</w:document>"
+    ).encode("utf-16")
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            "entity.docx",
+            OOXML_MIMES["docx"],
+            _ooxml_bytes("docx", main_xml=main_xml),
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_rejects_cumulative_character_work_across_relationship_parts(
+    client, media_root
+):
+    client.application.config["MEDIA_OOXML_XML_MAX_CHARACTERS"] = 1_500
+
+    def relationships(target):
+        return (
+            b'<?xml version="1.0"?>'
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" TargetMode="Internal" Target="'
+            + target
+            + b'"/>'
+            b"</Relationships>"
+        )
+
+    safe_data = _ooxml_bytes(
+        "docx",
+        extra=(
+            (
+                "word/_rels/document.xml.rels",
+                relationships(b"media/aaaaaaaaaaaaaaaaaaaa.png"),
+            ),
+            ("word/header1.xml", b"<header/>"),
+        ),
+    )
+    safe = _store(
+        client,
+        "one-relationship.docx",
+        OOXML_MIMES["docx"],
+        safe_data,
+        confirmed=True,
+    )
+
+    over_budget_data = _ooxml_bytes(
+        "docx",
+        extra=(
+            (
+                "word/_rels/document.xml.rels",
+                relationships(b"media/aaaaaaaaaaaaaaaaaaaa.png"),
+            ),
+            (
+                "word/_rels/header1.xml.rels",
+                relationships(b"media/bbbbbbbbbbbbbbbbbbbb.png"),
+            ),
+            ("word/header1.xml", b"<header/>"),
+        ),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            "text-work.docx",
+            OOXML_MIMES["docx"],
+            over_budget_data,
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == [media_root / safe.storage_name]
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("MEDIA_OOXML_XML_MAX_NODES", "250000"),
+        ("MEDIA_OOXML_XML_MAX_NODES", 1_000_001),
+        ("MEDIA_OOXML_XML_MAX_DEPTH", 128.0),
+        ("MEDIA_OOXML_XML_MAX_DEPTH", 257),
+        ("MEDIA_OOXML_XML_MAX_CHARACTERS", 0),
+        ("MEDIA_OOXML_XML_MAX_CHARACTERS", 16_000_001),
+    ],
+    ids=[
+        "node-type",
+        "node-upper-bound",
+        "depth-type",
+        "depth-upper-bound",
+        "characters-positive",
+        "characters-upper-bound",
+    ],
+)
+def test_ooxml_rejects_non_integer_non_positive_or_unbounded_xml_limits(
+    client, media_root, key, value
+):
+    client.application.config[key] = value
+
+    with pytest.raises(MediaValidationError):
+        _store(
+            client,
+            "limits.docx",
+            OOXML_MIMES["docx"],
+            _ooxml_bytes("docx"),
+            confirmed=True,
+        )
+
+    assert list(media_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "relationships",
+    [
+        pytest.param(
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:evil="urn:evil"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png" TargetMode="External" evil:TargetMode="Internal"/></Relationships>',
+            id="shadowed-external-mode",
+        ),
+        pytest.param(
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png" TargetMode="Elsewhere"/></Relationships>',
+            id="invalid-target-mode",
+        ),
+        pytest.param(
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:evil="urn:evil"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" evil:Target="media/a.png" TargetMode="Internal"/></Relationships>',
+            id="namespaced-required-target",
+        ),
+        pytest.param(
+            b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships" xmlns:evil="urn:evil"><evil:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png" TargetMode="Internal"/></Relationships>',
+            id="namespaced-relationship-element",
+        ),
+    ],
+)
+def test_ooxml_rejects_relationship_qname_aliases_and_invalid_attributes(
+    client, media_root, relationships
+):
+    data = _ooxml_bytes(
+        "docx",
+        extra=(
+            ("word/_rels/document.xml.rels", relationships),
+            ("word/media/a.png", b"image"),
+        ),
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "aliases.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_accepts_exact_internal_relationship_attributes(client, media_root):
+    relationships = (
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png" TargetMode="Internal"/>'
+        b"</Relationships>"
+    )
+    data = _ooxml_bytes(
+        "docx",
+        extra=(
+            ("word/_rels/document.xml.rels", relationships),
+            ("word/media/a.png", b"image"),
+        ),
+    )
+
+    result = _store(
+        client, "internal.docx", OOXML_MIMES["docx"], data, confirmed=True
+    )
+
+    assert result.status == "ready"
+    assert (media_root / result.storage_name).read_bytes() == data
+
+
+@pytest.mark.parametrize("discovery", ["content-type", "relationship"])
+def test_ooxml_rejects_renamed_extended_properties_company(
+    client, media_root, discovery
+):
+    renamed_app = (
+        b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+        b"<Company>Private Co</Company>"
+        b"</Properties>"
+    )
+    extra = [("metadata/renamed.xml", renamed_app)]
+    content_type_overrides = ()
+    if discovery == "content-type":
+        content_type_overrides = (
+            (
+                "metadata/renamed.xml",
+                "application/vnd.openxmlformats-officedocument.extended-properties+xml",
+            ),
+        )
+    else:
+        extra.append(
+            (
+                "word/_rels/document.xml.rels",
+                b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="../metadata/renamed.xml" TargetMode="Internal"/></Relationships>',
+            )
+        )
+    data = _ooxml_bytes(
+        "docx",
+        extra=tuple(extra),
+        content_type_overrides=content_type_overrides,
+    )
+
+    with pytest.raises(MediaValidationError):
+        _store(client, "company.docx", OOXML_MIMES["docx"], data, confirmed=True)
+
+    assert list(media_root.iterdir()) == []
+
+
+def test_ooxml_deduplicates_safe_extended_properties_discovered_twice(
+    client, media_root
+):
+    client.application.config["MEDIA_OOXML_XML_MAX_NODES"] = 12
+    renamed_app = (
+        b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+        b"<Company/>"
+        b"</Properties>"
+    )
+    relationships = (
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="../metadata/renamed.xml" TargetMode="Internal"/>'
+        b"</Relationships>"
+    )
+    data = _ooxml_bytes(
+        "docx",
+        extra=(
+            ("metadata/renamed.xml", renamed_app),
+            ("word/_rels/document.xml.rels", relationships),
+        ),
+        content_type_overrides=(
+            (
+                "metadata/renamed.xml",
+                "application/vnd.openxmlformats-officedocument.extended-properties+xml",
+            ),
+        ),
+    )
+
+    result = _store(
+        client, "safe-company.docx", OOXML_MIMES["docx"], data, confirmed=True
+    )
+
+    assert result.status == "ready"
+    assert (media_root / result.storage_name).read_bytes() == data
 
 
 @pytest.mark.parametrize(
