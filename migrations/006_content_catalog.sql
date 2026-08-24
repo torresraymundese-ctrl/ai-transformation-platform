@@ -103,7 +103,6 @@ CREATE TABLE content_groups (
         length(updated_at) = 19 AND
         updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]'
     ),
-    UNIQUE(entry_type, canonical_slug),
     FOREIGN KEY (industry_id) REFERENCES industries(id),
     FOREIGN KEY (scenario_id) REFERENCES scenarios(id),
     FOREIGN KEY (service_id) REFERENCES services(id),

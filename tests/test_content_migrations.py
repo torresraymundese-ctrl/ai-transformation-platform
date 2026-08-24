@@ -227,6 +227,21 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         (lead_id, "privacy-v1", SHANGHAI_TIME, "assessment", "identity-hash", SHANGHAI_TIME),
     )
     db.execute(
+        "INSERT INTO lead_status_history "
+        "(lead_id,previous_status,new_status,note,actor_text,created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (lead_id, None, "new", "created in 005", "migration-test", SHANGHAI_TIME),
+    )
+    db.execute(
+        "INSERT INTO lead_followups "
+        "(lead_id,note,next_followup_at,effective_at,actor_text,created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            lead_id, "Follow up after upgrade", "2026-08-25 09:00:00",
+            SHANGHAI_TIME, "migration-test", SHANGHAI_TIME,
+        ),
+    )
+    db.execute(
         "INSERT INTO data_subject_requests "
         "(lead_id,identity_hash,request_type,status,channel,requested_at,"
         "admin_received_at,admin_updated_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -272,6 +287,8 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         "report": ("roi_estimates", "assessment_id=?", (assessment_id,)),
         "lead": ("leads", "id=?", (lead_id,)),
         "consent": ("lead_consents", "lead_id=?", (lead_id,)),
+        "lead_status_history": ("lead_status_history", "lead_id=?", (lead_id,)),
+        "lead_followups": ("lead_followups", "lead_id=?", (lead_id,)),
         "privacy": ("data_subject_requests", "lead_id=?", (lead_id,)),
         "appointment": ("appointments", "assessment_id=?", (assessment_id,)),
         "analytics": ("analytics_events", "assessment_id=?", (assessment_id,)),
@@ -294,16 +311,20 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
 
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
     migrations.apply_migrations(db)
-    migrations.apply_migrations(db)
-
-    assert EXPECTED_CONTENT_TABLES <= database_tables(db)
-    assert frozen_catalog_counts(db) == (4, 13, 6)
-    assert [row[0] for row in db.execute(
-        "SELECT version FROM schema_migrations ORDER BY version"
-    )][-1] == "006_content_catalog"
-    for label, before in protected.items():
-        table, where, parameters = protected_queries[label]
-        assert exact_rows(db, table, where, parameters) == before, label
+    for application_number in (1, 2):
+        assert EXPECTED_CONTENT_TABLES <= database_tables(db)
+        assert frozen_catalog_counts(db) == (4, 13, 6)
+        assert [row[0] for row in db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        )][-1] == "006_content_catalog"
+        for label, before in protected.items():
+            table, where, parameters = protected_queries[label]
+            assert exact_rows(db, table, where, parameters) == before, (
+                application_number,
+                label,
+            )
+        if application_number == 1:
+            migrations.apply_migrations(db)
 
 
 def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
@@ -505,25 +526,105 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         if predicate is not None:
             assert predicate in normalized_sql
 
-    required_triggers = {
+    expected_triggers = {
+        "prevent_assessment_version_code_update",
         "require_new_media_pending",
+        "prevent_media_storage_name_update",
         "enforce_media_status_transition",
         "freeze_ready_media_identity",
-        "prevent_referenced_ready_media_archive",
+        "prevent_content_group_identity_update",
+        "require_new_content_item_draft",
+        "check_content_item_entry_type_insert",
+        "check_content_item_entry_type_update",
+        "enforce_content_item_status_transition",
         "prevent_published_content_edit",
-        "validate_content_publication",
+        "prevent_archived_content_edit",
         "validate_content_maturity_insert",
         "validate_content_maturity_update",
         "validate_content_slug_alias_insert",
+        "validate_content_slug_alias_update",
+        "prevent_canonical_slug_alias_collision_insert",
         "prevent_canonical_slug_alias_collision_update",
+        "validate_industry_content_insert",
+        "validate_industry_content_update",
+        "validate_scenario_content_insert",
+        "validate_scenario_content_update",
+        "validate_service_content_insert",
+        "validate_service_content_update",
+        "validate_case_content_insert",
+        "validate_case_content_update",
+        "validate_resource_content_insert",
+        "validate_resource_content_update",
+        "validate_announcement_content_insert",
+        "validate_announcement_content_update",
+        "validate_case_metric_insert",
+        "validate_case_metric_update",
+        "validate_content_relation_scenario_cases_insert",
+        "validate_content_relation_scenario_cases_update",
+        "validate_content_relation_scenario_resources_insert",
+        "validate_content_relation_scenario_resources_update",
+        "validate_content_relation_service_cases_insert",
+        "validate_content_relation_service_cases_update",
+        "validate_content_relation_service_resources_insert",
+        "validate_content_relation_service_resources_update",
+        "validate_content_relation_industry_cases_insert",
+        "validate_content_relation_industry_cases_update",
+        "validate_content_relation_industry_resources_insert",
+        "validate_content_relation_industry_resources_update",
+        "protect_industry_content_update",
+        "protect_scenario_content_update",
+        "protect_service_content_update",
+        "protect_case_content_update",
+        "protect_resource_content_update",
+        "protect_announcement_content_update",
+        "protect_content_blocks_insert",
+        "protect_content_blocks_update",
+        "protect_content_blocks_delete",
+        "protect_case_metrics_insert",
+        "protect_case_metrics_update",
+        "protect_case_metrics_delete",
+        "protect_content_maturity_insert",
+        "protect_content_maturity_update",
+        "protect_content_maturity_delete",
+        "protect_scenario_cases_insert",
+        "protect_scenario_cases_update",
+        "protect_scenario_cases_delete",
+        "protect_scenario_resources_insert",
+        "protect_scenario_resources_update",
+        "protect_scenario_resources_delete",
+        "protect_service_cases_insert",
+        "protect_service_cases_update",
+        "protect_service_cases_delete",
+        "protect_service_resources_insert",
+        "protect_service_resources_update",
+        "protect_service_resources_delete",
+        "protect_industry_cases_insert",
+        "protect_industry_cases_update",
+        "protect_industry_cases_delete",
+        "protect_industry_resources_insert",
+        "protect_industry_resources_update",
+        "protect_industry_resources_delete",
+        "validate_content_publication",
+        "prevent_published_extension_delete_industry",
+        "prevent_published_extension_delete_scenario",
+        "prevent_published_extension_delete_service",
+        "prevent_published_extension_delete_case",
+        "prevent_published_extension_delete_resource",
+        "prevent_published_extension_delete_announcement",
+        "prevent_referenced_ready_media_archive",
+        "prevent_media_asset_delete",
         "prevent_content_item_delete",
+        "prevent_content_group_delete",
         "prevent_legacy_article_delete",
+        "prevent_legacy_case_delete",
+        "prevent_legacy_service_delete",
+        "prevent_legacy_announcement_delete",
     }
     actual_triggers = {
         row[0]
         for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
     }
-    assert required_triggers <= actual_triggers
+    assert actual_triggers == expected_triggers
 
     industry_id = db.execute("SELECT id FROM industries LIMIT 1").fetchone()[0]
     with pytest.raises(sqlite3.IntegrityError):
@@ -631,20 +732,22 @@ def test_slug_change_order_allows_archive_alias_group_update_then_publish(db):
 
 
 def test_public_slug_is_unique_per_type_while_draft_duplicates_are_allowed(db):
-    public_group = insert_group(db, slug="shared-public-slug")
-    public_item = insert_item(db, public_group, slug="shared-public-slug")
-    add_announcement_extension(db, public_item)
-    publish(db, public_item)
+    first_group = insert_group(db, slug="shared-public-slug")
+    second_group = insert_group(db, slug="shared-public-slug")
+    first_item = insert_item(db, first_group, slug="shared-public-slug")
+    second_item = insert_item(db, second_group, slug="shared-public-slug")
+    add_announcement_extension(db, first_item)
+    add_announcement_extension(db, second_item)
+    publish(db, first_item)
 
-    draft_group = insert_group(db, slug="different-canonical")
-    draft_item = insert_item(db, draft_group, slug="shared-public-slug")
-    add_announcement_extension(db, draft_item)
     assert db.execute(
-        "SELECT status FROM content_items WHERE id=?", (draft_item,)
+        "SELECT status FROM content_items WHERE id=?", (second_item,)
     ).fetchone()[0] == "draft"
-
-    with pytest.raises(sqlite3.IntegrityError):
-        publish(db, draft_item)
+    with pytest.raises(
+        sqlite3.IntegrityError,
+        match=r"UNIQUE constraint failed: content_items.entry_type, content_items.slug",
+    ):
+        publish(db, second_item)
     with pytest.raises(sqlite3.IntegrityError):
         db.execute(
             "INSERT INTO content_groups "
