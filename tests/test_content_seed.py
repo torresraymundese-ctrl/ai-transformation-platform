@@ -1,4 +1,5 @@
 import ast
+import copy
 from datetime import datetime
 import json
 from pathlib import Path
@@ -133,12 +134,88 @@ def test_scenario_input_seed_is_idempotent_and_preserves_draft_operator_input(db
     ).fetchone()[0]
     db.execute(
         "UPDATE scenario_public_inputs SET input_text='运营审核后的输入' "
-        "WHERE content_item_id=? AND sort_order=0", (draft,)
+        "WHERE content_item_id=? AND sort_order=1", (draft,)
     )
     db.commit()
 
     seed_content_defaults(db, now=NOW)
 
     assert db.execute(
-        "SELECT input_text FROM scenario_public_inputs WHERE content_item_id=? AND sort_order=0", (draft,)
+        "SELECT input_text FROM scenario_public_inputs WHERE content_item_id=? AND sort_order=1", (draft,)
     ).fetchone()[0] == "运营审核后的输入"
+
+
+def _structured_input_seed():
+    payload = copy.deepcopy(content_seed.load_scenario_input_seed())
+    for entry in payload["scenarios"]:
+        entry["inputs"] = [
+            {
+                "input_text": value if type(value) is str else value["input_text"],
+                "sort_order": index if type(value) is str else value["sort_order"],
+            }
+            for index, value in enumerate(entry["inputs"], 1)
+        ]
+    return payload
+
+
+def test_scenario_input_seed_writes_a_whole_explicit_schema_group_to_an_empty_draft(db, monkeypatch):
+    payload = _structured_input_seed()
+    draft = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
+    ).fetchone()[0]
+    db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=?", (draft,))
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    content_seed.seed_scenario_public_inputs(db)
+
+    assert [tuple(row) for row in db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order", (draft,)
+    )] == [
+        ("设备与工艺知识文档的受控副本", 1),
+        ("近三个月高频现场问题清单", 2),
+    ]
+
+
+@pytest.mark.parametrize("mutate", (
+    lambda payload: payload.__setitem__("scenarios", {}),
+    lambda payload: payload["scenarios"][-1]["inputs"].__setitem__(0, {"input_text": "x" * 301, "sort_order": 1}),
+    lambda payload: payload["scenarios"][-1]["inputs"].__setitem__(0, {"input_text": "有效输入", "sort_order": True}),
+))
+def test_invalid_explicit_input_seed_is_value_error_before_any_write(db, monkeypatch, mutate):
+    payload = _structured_input_seed()
+    mutate(payload)
+    before = db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0]
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    with pytest.raises(ValueError):
+        content_seed.seed_scenario_public_inputs(db)
+
+    assert db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0] == before
+
+
+def test_non_mapping_scenario_input_seed_is_value_error_before_any_write(db, monkeypatch):
+    before = db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0]
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: [])
+
+    with pytest.raises(ValueError):
+        content_seed.seed_scenario_public_inputs(db)
+
+    assert db.execute("SELECT COUNT(*) FROM scenario_public_inputs").fetchone()[0] == before
+
+
+def test_existing_draft_input_delete_or_reorder_is_not_replaced_by_seed(db, monkeypatch):
+    payload = _structured_input_seed()
+    draft = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
+    ).fetchone()[0]
+    db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=? AND sort_order=1", (draft,))
+    db.execute("UPDATE scenario_public_inputs SET sort_order=77 WHERE content_item_id=?", (draft,))
+    monkeypatch.setattr(content_seed, "load_scenario_input_seed", lambda: payload)
+
+    content_seed.seed_scenario_public_inputs(db)
+
+    assert [tuple(row) for row in db.execute(
+        "SELECT input_text,sort_order FROM scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order", (draft,)
+    )] == [("近三个月高频现场问题清单", 77)]

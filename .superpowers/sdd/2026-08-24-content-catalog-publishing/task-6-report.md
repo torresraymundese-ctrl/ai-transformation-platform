@@ -288,3 +288,150 @@ BLUEPRINT_DIRECT_SQL_GUARD=PASS (no matches)
 - this report
 
 Reviewed: exact revision ownership/order/immutability; transactional copy and due publication; nonblank/numeric/JSON fail-closed checks; live versus archived association handling; published-code filter parsing; exact block scalar handling; no direct Blueprint SQL; and public card/detail consistency for required relations.  Known limitations remain the original full-suite UNKNOWN, the historical dependency-network violation, and the two Fix1c partition outcomes above requiring fresh controller verification.
+
+## Fix1d — public completeness, exact containers, and 007 upgrade correction
+
+**Status: DONE_WITH_CONCERNS.** This is a Task-6-only offline correction. The original full-suite outcome remains UNKNOWN and the historical PyPI-network violation remains CONFIRMED. No full suite, network access, dependency installation, production server, Nginx, or real database was used in Fix1d.
+
+### Offline environment
+
+Every Fix1d pytest command used the assigned project interpreter, the existing immutable local dependency overlay, `-p no:cacheprovider`, and a fresh `pytest-task6-fix1d-*` basetemp:
+
+```text
+PYTHON=D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe
+PYTHONPATH=D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.worktrees\core-assessment-report\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps
+PYPDF_VERSION=6.10.0
+PYPDF_SOURCE=...\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps\pypdf\__init__.py
+TASK6_ENV_EXIT=0
+```
+
+### TDD evidence
+
+The first public-integrity RED was run before Fix1d production edits:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest <Fix1d public integrity selection> -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-red-public-integrity-001
+14 failed, 9 passed in 13.65s
+TASK6_PYTEST_EXIT=1
+```
+
+It proved that a scenario with no pains could still be formally published and served at HTTP 200; wrong JSON containers for service lists/risk codes were iterated rather than rejected; and industry/list availability did not require real public sections. The initial seed/migration and owner-boundary REDs were also retained:
+
+```text
+pytest-task6-fix1d-red-seed-migration-002: 8 failed in 4.22s
+pytest-task6-fix1d-red-owner-003: 3 failed in 2.08s
+```
+
+They covered the raw string input seed shape, absent 007 revision backfill, and industry/service draft ownership being incorrectly accepted for input rows. The corresponding targeted migration/seed GREEN was `9 passed in 6.55s`, exit 0 (`pytest-task6-fix1d-green-seed-migration-004`).
+
+The added list/detail service-completeness regression was first RED:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py::test_public_scenario_list_and_filtered_list_omit_detail_incomplete_cards -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-list-services-009
+1 failed, 1 passed in 2.24s
+TASK6_PYTEST_EXIT=1
+```
+
+Investigation showed that the archived knowledge-assistant package is shared by three complete scenarios, so the test's expected total was wrong (the repository correctly returned 9, not 11). The test now asserts the true shared-service result, confirms that the target cannot remain a clickable card in either the unfiltered or industry-filtered HTTP list, and retains an unrelated retail scenario as a normal control. GREEN:
+
+```text
+pytest-task6-fix1d-green-list-services-010
+2 passed in 1.64s
+TASK6_PYTEST_EXIT=0
+```
+
+### Fixes
+
+- Publication now requires at least one nonblank, published pain relation; public scenario projection requires the same nonempty, valid section.
+- Service `steps`, `prerequisites`, and `acceptance`, plus scenario risks, are decoded only as exact nonempty `list[str]` containers. Booleans, numbers, strings, dictionaries, malformed JSON, and blank elements fail closed to a private 404 rather than being converted into characters or mapping keys.
+- Scenario cards are built from the same full detail projection before totals, pagination, and stable slicing. An incomplete detail can no longer be advertised by unfiltered or AND-filtered lists.
+- Industry cards/details are available only with meaningful overview content, nonblank published pains/departments/company sizes, at least one public-complete scenario, and a real published service package. Case/resource recommendations remain optional.
+- Unreleased migration 007 now stores input rows by `content_item_id`, has a positive revision-local order, backfills all reviewed inputs for every existing scenario draft/published/archived revision before protections are installed, and requires the exact draft `scenario` owner on insert/update/delete. Revision copy retains independently mutable ordered inputs.
+- The checked-in input seed uses explicit `{input_text, sort_order}` records. It fully validates the top-level and entry schema before writing, validates trimmed text length 1..300 and exact positive non-bool integers, inserts a whole group only into an empty draft revision, and never restores an administrator's partial deletion/reorder/edit.
+
+### GREEN / focused verification
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_content_seed.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-seed-011
+12 passed in 7.44s
+TASK6_PYTEST_EXIT=0
+
+..\..\.venv\Scripts\python.exe -m pytest tests/test_content_migrations.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-migrations-013
+31 passed in 18.42s
+TASK6_PYTEST_EXIT=0
+
+..\..\.venv\Scripts\python.exe -m pytest tests/test_content_publishing.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-publishing-014
+34 passed in 21.61s
+TASK6_PYTEST_EXIT=0
+
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-public-016
+85 passed in 47.83s
+tool exit_code=0
+
+..\..\.venv\Scripts\python.exe -m pytest tests/test_app_factory_and_migrations.py tests/test_catalog_content_admin.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-factory-admin-016
+21 passed in 11.63s
+TASK6_PYTEST_EXIT=0
+
+..\..\.venv\Scripts\python.exe -m pytest tests/test_content_migrations.py::test_scenario_input_rows_require_a_positive_sort_order tests/test_content_seed.py::test_non_mapping_scenario_input_seed_is_value_error_before_any_write tests/test_public_catalog.py::test_every_public_complete_detail_has_its_required_sections tests/test_public_catalog.py::test_all_public_complete_seeded_scenario_drafts_pass_the_formal_publish_gate -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-final-changed-tests-017
+4 passed in 3.44s
+TASK6_PYTEST_EXIT=0
+```
+
+`pytest-task6-fix1d-green-public-015` previously retained `85 passed in 47.87s` but the host detached before its exit marker. It is stdout-only with exit UNKNOWN and is superseded by the direct-session `-016` result above. An initial `-012` migration wrapper placed its log files inside its basetemp; pytest could not remove those open Windows files and reported 31 setup errors. That was an evidence-wrapper error, not a product failure; `-013` used logs outside the basetemp and is the valid result.
+
+After the final changed migration-inventory test and report freeze, the complete
+Fix1d focused set was re-run in a direct pytest session:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_public_catalog.py tests/test_content_seed.py tests/test_content_migrations.py tests/test_content_publishing.py tests/test_v2_migrations.py tests/test_app_factory_and_migrations.py tests/test_catalog_content_admin.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-final-focused-020
+188 passed in 103.92s (0:01:43)
+tool exit_code=0
+```
+
+### Static checks and self-review
+
+```text
+..\..\.venv\Scripts\python.exe -m py_compile catalog_content_repository.py publishing_repository.py publishing_service.py content_seed.py tests\test_public_catalog.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_content_publishing.py tests\test_v2_migrations.py
+TASK6_PYCOMPILE_EXIT=0
+
+git diff --check
+TASK6_DIFF_CHECK_EXIT=0
+
+rg -n '\b(execute|executemany|executescript|cursor)\s*\(' blueprints\public_catalog.py
+BLUEPRINT_DIRECT_SQL_GUARD=PASS
+```
+
+Reviewed the complete changed range for exact query/container bounds, stable ordering and pagination-after-completeness, publication/time/status guards, canonical/filter behavior, archived-target handling, safe public-only block and media boundaries, absence of internal/contact/admin leaks, and Blueprint SQL ownership. No share-image/resource-attachment MIME scope was expanded.
+
+### Changed files
+
+- `catalog_content_repository.py`
+- `publishing_repository.py`
+- `content_seed.py`
+- `migrations/007_scenario_public_inputs.sql`
+- `seed_data/scenario_public_inputs_v1.json`
+- `tests/test_public_catalog.py`
+- `tests/test_content_seed.py`
+- `tests/test_content_migrations.py`
+- `tests/test_v2_migrations.py`
+- `tests/test_content_publishing.py`
+- this report
+
+### Verification correction
+
+The first related V2-migration run after the initial report edit exposed one
+missed migration inventory assertion, not a runtime migration defect:
+
+```text
+..\..\.venv\Scripts\python.exe -m pytest tests/test_v2_migrations.py -q -p no:cacheprovider --basetemp ...\pytest-task6-fix1d-green-v2-migrations-018
+1 failed, 3 passed in 0.66s
+TASK6_PYTEST_EXIT=1
+```
+
+The expected ledger was updated to include `007_scenario_public_inputs`; the
+fresh GREEN was `4 passed in 0.47s`, `TASK6_PYTEST_EXIT=0`, with basetemp
+`pytest-task6-fix1d-green-v2-migrations-019`.
+
+### Known limitation / required product decision
+
+The frozen assessment manifest deliberately defines `data_process_foundation` as a fallback-only scenario with `pain_codes=[]`. The later Fix1d requirement makes a published pain mandatory for every public scenario. To avoid changing shared assessment/private matching behavior, this Fix1d change does not invent or add a pain association: 12 public-complete seeded scenarios formally publish and that fallback scenario is rejected and private. Publishing it publicly now requires an explicit product-approved core association change outside this Task-6 implementation scope.

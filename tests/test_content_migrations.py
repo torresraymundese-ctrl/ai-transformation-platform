@@ -1,11 +1,21 @@
 import hashlib
+import json
 import sqlite3
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+from assessment.seed import seed_v2_defaults
+import catalog_content_repository as catalog
+from content_clock import SHANGHAI
+from content_contracts import ContentBlock, ContentDraft
+from content_seed import CATALOG_SEED_PATH, SCENARIO_INPUT_SEED_PATH
 import migrations
 import models
+import publishing_repository
+from publishing_service import copy_revision
 
 
 SHANGHAI_TIME = "2026-08-24 12:34:56"
@@ -374,6 +384,139 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
             )
         if application_number == 1:
             migrations.apply_migrations(db)
+
+
+@pytest.mark.parametrize("entry_type", ("industry", "service"))
+def test_scenario_input_rows_reject_non_scenario_draft_owners(db, entry_type):
+    content_id = insert_item(
+        db, insert_group(db, entry_type, f"{entry_type}-input-owner"),
+        entry_type=entry_type, slug=f"{entry_type}-input-owner",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,'错误归属',99)",
+            (content_id,),
+        )
+
+
+def test_scenario_input_rows_reject_update_to_non_scenario_draft_owner(db):
+    scenario_group = insert_group(db, "scenario", "scenario-input-owner")
+    scenario_id = db.execute(
+        "SELECT scenario_id FROM content_groups WHERE id=?", (scenario_group,)
+    ).fetchone()[0]
+    scenario_item = insert_item(
+        db, scenario_group, entry_type="scenario", slug="scenario-input-owner",
+    )
+    db.execute(
+        "INSERT INTO scenario_content (content_item_id,scenario_id) VALUES (?,?)",
+        (scenario_item, scenario_id),
+    )
+    db.execute(
+        "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,'场景输入',1)",
+        (scenario_item,),
+    )
+    industry_item = insert_item(
+        db, insert_group(db, "industry", "industry-input-target"),
+        entry_type="industry", slug="industry-input-target",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "UPDATE scenario_public_inputs SET content_item_id=? WHERE content_item_id=?",
+            (industry_item, scenario_item),
+        )
+
+
+def test_scenario_input_rows_require_a_positive_sort_order(db):
+    scenario_item = insert_item(
+        db, insert_group(db, "scenario", "scenario-input-sort-order"),
+        entry_type="scenario", slug="scenario-input-sort-order",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(
+            "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) VALUES (?,'场景输入',0)",
+            (scenario_item,),
+        )
+
+
+def test_007_upgrade_backfills_published_revision_without_a_draft_and_copy_keeps_inputs(tmp_path, monkeypatch):
+    legacy_migrations = tmp_path / "migrations-through-006"
+    legacy_migrations.mkdir()
+    for migration_path in sorted((PROJECT_ROOT / "migrations").glob("00[1-6]_*.sql")):
+        shutil.copy2(migration_path, legacy_migrations / migration_path.name)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "upgrade.db"))
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", legacy_migrations)
+    db = models.get_db()
+    try:
+        migrations.apply_migrations(db)
+        seed_v2_defaults(db)
+        catalog_entries = json.loads(CATALOG_SEED_PATH.read_text(encoding="utf-8"))["scenarios"]
+        input_entries = json.loads(SCENARIO_INPUT_SEED_PATH.read_text(encoding="utf-8"))["scenarios"]
+        expected_inputs = {
+            entry["code"]: [
+                value if type(value) is str else value["input_text"]
+                for value in entry["inputs"]
+            ]
+            for entry in input_entries
+        }
+        old_ids = {}
+        for entry in catalog_entries:
+            scenario_id = db.execute(
+                "SELECT id FROM scenarios WHERE code=?", (entry["code"],)
+            ).fetchone()[0]
+            old_id = publishing_repository.insert_content_draft(
+                db,
+                ContentDraft(
+                    entry_type="scenario", slug=entry["slug"], title=entry["title"],
+                    summary=entry["summary"], seo_title=entry["seo_title"],
+                    seo_description=entry["seo_description"], extension={"scenario_id": scenario_id},
+                    maturity_codes=tuple(entry["maturity_codes"]),
+                    blocks=(ContentBlock("rich_text", body_html=entry["body_html"]),),
+                ),
+                actor="migration-test", now=datetime(2026, 8, 24, 10, 0, tzinfo=SHANGHAI),
+            )
+            old_ids[entry["code"]] = old_id
+            db.execute(
+                "UPDATE content_items SET status='published',published_at=?,updated_at=? WHERE id=?",
+                (SHANGHAI_TIME, SHANGHAI_TIME, old_id),
+            )
+        db.commit()
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+        migrations.apply_migrations(db)
+        actual_inputs = {
+            row["code"]: [item[0] for item in db.execute(
+                "SELECT spi.input_text FROM scenario_public_inputs spi JOIN content_items ci ON ci.id=spi.content_item_id "
+                "JOIN content_groups g ON g.id=ci.content_group_id JOIN scenarios s ON s.id=g.scenario_id "
+                "WHERE ci.id=? ORDER BY spi.sort_order,spi.id",
+                (old_ids[row["code"]],),
+            )]
+            for row in input_entries
+        }
+        assert actual_inputs == expected_inputs
+    finally:
+        db.close()
+
+    assert catalog.public_scenario(
+        "mfg-knowledge-assistant", datetime(2026, 8, 24, 12, 0, tzinfo=SHANGHAI)
+    ) is not None
+    old_id = old_ids["mfg_knowledge_assistant"]
+    copied_id = copy_revision(
+        old_id, actor="migration-test", now=datetime(2026, 8, 24, 12, 0, tzinfo=SHANGHAI)
+    )
+    upgraded = models.get_db()
+    try:
+        assert [row[0] for row in upgraded.execute(
+            "SELECT input_text FROM scenario_public_inputs WHERE content_item_id=? ORDER BY sort_order,id",
+            (copied_id,),
+        )] == ["设备与工艺知识文档的受控副本", "近三个月高频现场问题清单"]
+        with pytest.raises(sqlite3.IntegrityError):
+            upgraded.execute(
+                "UPDATE scenario_public_inputs SET input_text='不可更改' WHERE content_item_id=?", (old_id,)
+            )
+    finally:
+        upgraded.close()
 
 
 def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):

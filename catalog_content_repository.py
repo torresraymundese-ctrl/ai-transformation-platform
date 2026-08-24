@@ -223,34 +223,6 @@ def _names(db, sql, arguments):
     return tuple(row[0] for row in db.execute(sql, arguments))
 
 
-def _scenario_card(db, row) -> ScenarioCard:
-    scenario_id = row["scenario_id"]
-    return ScenarioCard(
-        code=row["code"], slug=row["slug"], title=row["title"], summary=row["summary"],
-        industries=_names(
-            db,
-            "SELECT DISTINCT i.name FROM scenario_branches sb "
-            "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
-            "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
-            "AND ib.status='published' AND i.status='published' "
-            "ORDER BY i.sort_order,i.id",
-            (scenario_id,),
-        ),
-        departments=_names(
-            db,
-            "SELECT d.name FROM scenario_departments sd JOIN departments d ON d.id=sd.department_id "
-            "WHERE sd.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id",
-            (scenario_id,),
-        ),
-        maturity=_names(
-            db,
-            "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
-            "ORDER BY sort_order,maturity_code",
-            (row["content_id"],),
-        ),
-    )
-
-
 def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, now) -> Page[ScenarioCard]:
     clause, arguments = _public_item_where(now)
     joins = [
@@ -258,7 +230,7 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
         "JOIN content_items ci ON ci.content_group_id=g.id",
     ]
     conditions = [
-        "s.status='published'", clause,
+        "s.status='published'", "ci.entry_type='scenario'", clause,
         "EXISTS (SELECT 1 FROM scenario_branches visible_branch "
         "JOIN industry_branches visible_industry_branch ON visible_industry_branch.id=visible_branch.industry_branch_id "
         "JOIN industries visible_industry ON visible_industry.id=visible_industry_branch.industry_id "
@@ -289,17 +261,28 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
         conditions.append("filter_maturity.maturity_code=?")
         parameters.append(filters.maturity)
     query_from = " ".join(joins) + " WHERE " + " AND ".join(conditions)
-    total = db.execute("SELECT COUNT(DISTINCT s.id) " + query_from, parameters).fetchone()[0]
+    rows = db.execute(
+        "SELECT DISTINCT s.id AS scenario_id,s.code AS scenario_code,ci.* "
+        + query_from + " ORDER BY s.sort_order,s.id",
+        parameters,
+    ).fetchall()
+    cards = []
+    for row in rows:
+        scenario = _scenario_projection(db, row, False)
+        if scenario is None:
+            continue
+        cards.append(ScenarioCard(
+            code=row["scenario_code"], slug=scenario["slug"], title=scenario["title"],
+            summary=scenario["summary"], industries=scenario["industries"],
+            departments=scenario["departments"], maturity=scenario["maturity"],
+        ))
+    total = len(cards)
     if total == 0:
         return Page((), 1, page_request.per_page, 0, 0)
     total_pages = (total + page_request.per_page - 1) // page_request.per_page
     page_number = page_request.page if page_request.page <= total_pages else 1
-    rows = db.execute(
-        "SELECT DISTINCT s.id AS scenario_id,s.code,ci.id AS content_id,ci.slug,ci.title,ci.summary "
-        + query_from + " ORDER BY s.sort_order,s.id LIMIT ? OFFSET ?",
-        [*parameters, page_request.per_page, (page_number - 1) * page_request.per_page],
-    ).fetchall()
-    return Page(tuple(_scenario_card(db, row) for row in rows), page_number, page_request.per_page, total, total_pages)
+    first = (page_number - 1) * page_request.per_page
+    return Page(tuple(cards[first:first + page_request.per_page]), page_number, page_request.per_page, total, total_pages)
 
 
 def public_industries(now) -> tuple[Mapping[str, Any], ...]:
@@ -307,13 +290,16 @@ def public_industries(now) -> tuple[Mapping[str, Any], ...]:
     try:
         clause, arguments = _public_item_where(now)
         rows = db.execute(
-            "SELECT i.id AS industry_id,i.code,ci.slug,ci.title,ci.summary "
+            "SELECT ci.* "
             "FROM industries i JOIN content_groups g ON g.industry_id=i.id "
             "JOIN content_items ci ON ci.content_group_id=g.id "
-            f"WHERE i.status='published' AND {clause} ORDER BY i.sort_order,i.id",
+            f"WHERE i.status='published' AND ci.entry_type='industry' AND {clause} ORDER BY i.sort_order,i.id",
             arguments,
         ).fetchall()
-        return tuple(MappingProxyType(dict(row)) for row in rows)
+        return tuple(
+            industry for row in rows
+            if (industry := _industry_projection(db, row, False, now)) is not None
+        )
     finally:
         db.close()
 
@@ -419,12 +405,14 @@ def _services_for_scenario(db, scenario_id):
     result = []
     for row in rows:
         values = dict(row)
-        try:
-            values["steps"] = tuple(json.loads(values.pop("implementation_steps_json") or "[]"))
-            values["prerequisites"] = tuple(json.loads(values.pop("prerequisites_json") or "[]"))
-            values["acceptance"] = tuple(json.loads(values.pop("acceptance_json") or "[]"))
-        except (TypeError, json.JSONDecodeError):
+        steps = _exact_nonblank_json_list(values.pop("implementation_steps_json"))
+        prerequisites = _exact_nonblank_json_list(values.pop("prerequisites_json"))
+        acceptance = _exact_nonblank_json_list(values.pop("acceptance_json"))
+        if steps is None or prerequisites is None or acceptance is None:
             return ()
+        values["steps"] = steps
+        values["prerequisites"] = prerequisites
+        values["acceptance"] = acceptance
         values["deliverables"] = _names(
             db, "SELECT title FROM service_deliverables WHERE service_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)
         )
@@ -434,6 +422,16 @@ def _services_for_scenario(db, scenario_id):
 
 def _nonblank_values(values):
     return bool(values) and all(type(value) is str and value.strip() for value in values)
+
+
+def _exact_nonblank_json_list(value):
+    try:
+        decoded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if type(decoded) is not list or not _nonblank_values(decoded):
+        return None
+    return tuple(decoded)
 
 
 def _valid_range(minimum, maximum):
@@ -473,11 +471,8 @@ def _scenario_authority(db, scenario_id):
     row = db.execute("SELECT * FROM scenarios WHERE id=? AND status='published'", (scenario_id,)).fetchone()
     if row is None:
         return None
-    try:
-        risk_codes = tuple(json.loads(row["risk_codes_json"]))
-    except (TypeError, json.JSONDecodeError):
-        return None
-    if not all(type(code) is str for code in risk_codes):
+    risk_codes = _exact_nonblank_json_list(row["risk_codes_json"])
+    if risk_codes is None:
         return None
     return ScenarioAuthority(
         scenario_id=row["id"], code=row["code"], category_code=row["category_code"],
@@ -492,7 +487,7 @@ def _scenario_authority(db, scenario_id):
 def _scenario_inputs(db, content_id):
     return _names(
         db, "SELECT input_text FROM scenario_public_inputs "
-        "WHERE content_item_id=? AND trim(input_text)<>'' ORDER BY sort_order,id", (content_id,)
+        "WHERE content_item_id=? ORDER BY sort_order,id", (content_id,)
     )
 
 
@@ -507,30 +502,144 @@ def _public_risks(authority):
     return tuple(risks)
 
 
+def _scenario_projection(db, item, redirect, authority: ScenarioAuthority | None = None):
+    """Return a public scenario only when every required public section is real."""
+    if "scenario_id" in item.keys():
+        scenario_id = item["scenario_id"]
+    else:
+        group = db.execute(
+            "SELECT scenario_id FROM content_groups WHERE id=?", (item["content_group_id"],)
+        ).fetchone()
+        scenario_id = group["scenario_id"] if group is not None else None
+    if scenario_id is None:
+        return None
+    if authority is not None and authority.scenario_id != scenario_id:
+        return None
+    authority = authority or _scenario_authority(db, scenario_id)
+    if authority is None:
+        return None
+    services = _services_for_scenario(db, authority.scenario_id)
+    blocks = _blocks(db, item["id"])
+    departments = _names(
+        db,
+        "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
+        "WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id",
+        (authority.scenario_id,),
+    )
+    pains = _names(
+        db,
+        "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
+        "WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id",
+        (authority.scenario_id,),
+    )
+    inputs = _scenario_inputs(db, item["id"])
+    prerequisites = tuple(value for service in services for value in service["prerequisites"])
+    outputs = tuple(value for service in services for value in service["deliverables"])
+    steps = tuple(value for service in services for value in service["steps"])
+    metrics = tuple(
+        MappingProxyType({"label": "验收条件", "value": value})
+        for service in services for value in service["acceptance"]
+    )
+    risks = _public_risks(authority)
+    timeline = tuple((service["min_weeks"], service["max_weeks"]) for service in services)
+    budget = tuple((service["min_budget"], service["max_budget"]) for service in services)
+    industries = _names(
+        db,
+        "SELECT DISTINCT i.name FROM scenario_branches sb "
+        "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+        "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+        "AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id",
+        (authority.scenario_id,),
+    )
+    maturity_codes = _names(
+        db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
+        "ORDER BY sort_order,maturity_code", (item["id"],),
+    )
+    if not all((
+        industries, departments, pains,
+        _nonblank_values(industries), _nonblank_values(departments), _nonblank_values(pains),
+        _nonblank_values(inputs), _meaningful_blocks(blocks), _valid_services(services),
+        prerequisites, outputs, steps,
+        _nonblank_values(prerequisites), _nonblank_values(outputs), _nonblank_values(steps),
+        _nonblank_values(tuple(metric["value"] for metric in metrics)), risks,
+        all(_nonblank_values((risk["label"], risk["description"])) for risk in risks),
+        maturity_codes, all(code in MATURITY_LABELS for code in maturity_codes), timeline, budget,
+        all(_valid_range(*value) for value in timeline), all(_valid_range(*value) for value in budget),
+    )):
+        return None
+    return MappingProxyType({
+        "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
+        "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": blocks,
+        "industries": industries,
+        "departments": departments,
+        "pains": pains,
+        "maturity": tuple(MATURITY_LABELS[code] for code in maturity_codes),
+        "services": services,
+        "prerequisites": prerequisites,
+        "inputs": inputs,
+        "outputs": outputs,
+        "steps": steps,
+        "metrics": metrics,
+        "risks": risks,
+        "timeline": timeline,
+        "budget": budget,
+    })
+
+
+def _industry_projection(db, item, redirect, now):
+    row = db.execute(
+        "SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id "
+        "WHERE g.id=? AND i.status='published'", (item["content_group_id"],)
+    ).fetchone()
+    if row is None or type(row["name"]) is not str or not row["name"].strip():
+        return None
+    blocks = _blocks(db, item["id"])
+    pains = _names(
+        db, "SELECT name FROM pain_points WHERE industry_id=? AND status='published' "
+        "ORDER BY sort_order,id", (row["id"],),
+    )
+    departments = _names(
+        db, "SELECT name FROM departments WHERE industry_id=? AND status='published' "
+        "ORDER BY sort_order,id", (row["id"],),
+    )
+    company_sizes = _names(
+        db, "SELECT name FROM company_sizes WHERE status='published' ORDER BY sort_order,id", ()
+    )
+    page = _public_scenarios(db, ScenarioFilters(industry=row["code"]), PageRequest(1, 50), now)
+    service_ids = set()
+    for card in page.items:
+        scenario = db.execute("SELECT id FROM scenarios WHERE code=?", (card.code,)).fetchone()
+        if scenario is not None:
+            service_ids.update(service["id"] for service in _services_for_scenario(db, scenario["id"]))
+    services = ()
+    if service_ids:
+        placeholders = ",".join("?" for _ in service_ids)
+        services = tuple(
+            MappingProxyType(dict(service)) for service in db.execute(
+                f"SELECT id,code,public_name FROM services WHERE id IN ({placeholders}) "
+                "AND status='published' ORDER BY sort_order,id", tuple(sorted(service_ids))
+            )
+        )
+    if not all((
+        _meaningful_blocks(blocks), _nonblank_values(pains), _nonblank_values(departments),
+        _nonblank_values(company_sizes), page.items,
+        _nonblank_values(tuple(service["public_name"] for service in services)),
+    )):
+        return None
+    return MappingProxyType({
+        "code": row["code"], "slug": item["slug"], "redirect": redirect,
+        "title": item["title"], "summary": item["summary"],
+        "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": blocks,
+        "pains": pains, "departments": departments, "company_sizes": company_sizes,
+        "scenarios": page.items, "services": services,
+    })
+
+
 def public_industry(slug: str, now) -> Mapping[str, Any] | None:
     db = models.get_db()
     try:
         item, redirect = _resolution(db, "industry", slug, now)
-        if item is None:
-            return None
-        row = db.execute("SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id WHERE g.id=? AND i.status='published'", (item["content_group_id"],)).fetchone()
-        if row is None:
-            return None
-        page = _public_scenarios(db, ScenarioFilters(industry=row["code"]), PageRequest(1, 50), now)
-        service_ids = tuple({service["id"] for card in page.items for service in _services_for_scenario(db, db.execute("SELECT id FROM scenarios WHERE code=?", (card.code,)).fetchone()[0])})
-        services = tuple(
-            MappingProxyType(dict(service)) for service in db.execute(
-                f"SELECT id,code,public_name FROM services WHERE id IN ({','.join('?' for _ in service_ids)}) ORDER BY sort_order,id", service_ids
-            )
-        ) if service_ids else ()
-        return MappingProxyType({
-            "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
-            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": _blocks(db, item["id"]),
-            "pains": _names(db, "SELECT name FROM pain_points WHERE industry_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)),
-            "departments": _names(db, "SELECT name FROM departments WHERE industry_id=? AND status='published' ORDER BY sort_order,id", (row["id"],)),
-            "company_sizes": _names(db, "SELECT name FROM company_sizes WHERE status='published' ORDER BY sort_order,id", ()),
-            "scenarios": page.items, "services": services,
-        })
+        return _industry_projection(db, item, redirect, now) if item is not None else None
     finally:
         db.close()
 
@@ -549,54 +658,7 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         item, redirect = _resolution(db, "scenario", slug, now)
         if item is None:
             return None
-        authority = authority or _scenario_authority(db, item["content_group_id"] and db.execute("SELECT scenario_id FROM content_groups WHERE id=?", (item["content_group_id"],)).fetchone()[0])
-        if authority is None:
-            return None
-        services = _services_for_scenario(db, authority.scenario_id)
-        blocks = _blocks(db, item["id"])
-        departments = _names(db, "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id", (authority.scenario_id,))
-        pains = _names(db, "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id", (authority.scenario_id,))
-        inputs = _scenario_inputs(db, item["id"])
-        prerequisites = tuple(value for service in services for value in service["prerequisites"])
-        outputs = tuple(value for service in services for value in service["deliverables"])
-        steps = tuple(value for service in services for value in service["steps"])
-        metrics = tuple(
-            MappingProxyType({"label": "验收条件", "value": value})
-            for service in services for value in service["acceptance"]
-        )
-        risks = _public_risks(authority)
-        timeline = tuple((service["min_weeks"], service["max_weeks"]) for service in services)
-        budget = tuple((service["min_budget"], service["max_budget"]) for service in services)
-        industries = _names(db, "SELECT DISTINCT i.name FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id", (authority.scenario_id,))
-        maturity_codes = _names(db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],))
-        if not all((
-            industries, departments, _nonblank_values(industries), _nonblank_values(departments),
-            (not pains or _nonblank_values(pains)), _nonblank_values(inputs),
-            _meaningful_blocks(blocks), _valid_services(services), prerequisites, outputs, steps,
-            _nonblank_values(prerequisites), _nonblank_values(outputs), _nonblank_values(steps),
-            _nonblank_values(tuple(metric["value"] for metric in metrics)), risks,
-            all(_nonblank_values((risk["label"], risk["description"])) for risk in risks),
-            maturity_codes, all(code in MATURITY_LABELS for code in maturity_codes), timeline, budget,
-            all(_valid_range(*value) for value in timeline), all(_valid_range(*value) for value in budget),
-        )):
-            return None
-        return MappingProxyType({
-            "slug": item["slug"], "redirect": redirect, "title": item["title"], "summary": item["summary"],
-            "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": blocks,
-            "industries": industries,
-            "departments": departments,
-            "pains": pains,
-            "maturity": tuple(MATURITY_LABELS[code] for code in maturity_codes),
-            "services": services,
-            "prerequisites": prerequisites,
-            "inputs": inputs,
-            "outputs": outputs,
-            "steps": steps,
-            "metrics": metrics,
-            "risks": risks,
-            "timeline": timeline,
-            "budget": budget,
-        })
+        return _scenario_projection(db, item, redirect, authority)
     finally:
         db.close()
 

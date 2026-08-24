@@ -223,7 +223,7 @@ def _create_complete_scenario_draft(db, draft, *, actor="admin"):
     content_id = create_content_draft(_complete_scenario_draft(draft), actor=actor, now=NOW)
     db.execute(
         "INSERT INTO scenario_public_inputs (content_item_id,input_text,sort_order) "
-        "VALUES (?,'受控测试输入',0)",
+        "VALUES (?,'受控测试输入',1)",
         (content_id,),
     )
     db.commit()

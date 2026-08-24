@@ -132,6 +132,7 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
         "004_v2_assessment_leads",
         "005_v2_appointments_analytics",
         "006_content_catalog",
+        "007_scenario_public_inputs",
     ]
     assert {
         "submission_key",

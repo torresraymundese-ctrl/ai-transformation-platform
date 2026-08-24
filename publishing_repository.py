@@ -504,7 +504,8 @@ def _validate_scenario_publication(db, content_id, draft):
         ("SELECT 1 FROM scenario_departments WHERE scenario_id=?",
          "SELECT 1 FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
          "WHERE link.scenario_id=? AND (d.status<>'published' OR trim(d.name)='')"),
-        ("SELECT 1 WHERE ? IS NOT NULL",
+        ("SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
+         "WHERE link.scenario_id=? AND p.status='published' AND trim(p.name)<>''",
          "SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
          "WHERE link.scenario_id=? AND (p.status<>'published' OR trim(p.name)='')"),
         ("SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? AND trim(input_text)<>''",

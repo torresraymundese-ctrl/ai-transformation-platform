@@ -60,7 +60,7 @@ def test_public_catalog_lists_use_the_shared_shell_and_private_analytics(publish
     assert {card["data-industry-code"] for card in industries.select("[data-industry-code]")} == {
         "manufacturing", "retail", "professional_knowledge", "software_creative"
     }
-    assert len(scenarios.select("[data-scenario-code]")) == 13
+    assert len(scenarios.select("[data-scenario-code]")) == 12
     for document in (industries, scenarios):
         assert document.select_one('a[href="/assessment"]') is not None
         assert document.select_one('body[data-analytics-page]') is not None
@@ -73,7 +73,7 @@ def test_scenario_filters_are_intersection_not_union(published_catalog):
     document = page(response)
     codes = {card["data-scenario-code"] for card in document.select("[data-scenario-code]")}
 
-    assert codes == {"mfg_knowledge_assistant", "data_process_foundation"}
+    assert codes == {"mfg_knowledge_assistant"}
 
 
 @pytest.mark.parametrize("query", (
@@ -82,7 +82,7 @@ def test_scenario_filters_are_intersection_not_union(published_catalog):
 ))
 def test_invalid_get_filters_fall_back_to_safe_defaults(published_catalog, query):
     document = page(published_catalog.get(f"/scenarios{query}"))
-    expected_count = 13 if "industry=invalid" in query else 4
+    expected_count = 12 if "industry=invalid" in query else 3
     assert len(document.select("[data-scenario-code]")) == expected_count
     assert document.select_one('select[name="maturity"] option[selected]')["value"] == ""
 
@@ -174,17 +174,22 @@ def test_alias_redirects_to_the_canonical_published_slug(published_catalog, db):
     assert alias.headers["Location"].endswith(f"/industries/{row['slug']}")
 
 
-def test_every_published_detail_has_its_required_sections(published_catalog, db):
-    expected = (("industry", "/industries", INDUSTRY_REQUIRED_SECTIONS),
-                ("scenario", "/scenarios", SCENARIO_REQUIRED_SECTIONS))
-    for entry_type, prefix, sections in expected:
-        slugs = [row[0] for row in db.execute(
-            "SELECT slug FROM content_items WHERE entry_type=? AND status='published' ORDER BY id",
-            (entry_type,),
-        )]
+def test_every_public_complete_detail_has_its_required_sections(published_catalog):
+    expected = (
+        ("/industries", INDUSTRY_REQUIRED_SECTIONS, tuple(
+            item["slug"] for item in catalog.public_industries(NOW_DATETIME)
+        )),
+        ("/scenarios", SCENARIO_REQUIRED_SECTIONS, tuple(
+            item.slug for item in catalog.public_scenarios(
+                catalog.ScenarioFilters(), catalog.PageRequest(1, 20), NOW_DATETIME
+            ).items
+        )),
+    )
+    for prefix, sections, slugs in expected:
         for slug in slugs:
             document = page(published_catalog.get(f"{prefix}/{slug}"))
             assert sections <= {node["data-content-section"] for node in document.select("[data-content-section]")}
+    assert published_catalog.get("/scenarios/data-process-foundation").status_code == 404
 
 
 def test_public_catalog_has_private_no_store_analytics_response(published_catalog):
@@ -499,13 +504,25 @@ def test_public_scenario_fails_closed_for_incomplete_or_malformed_required_data(
     assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
 
 
-def test_all_seeded_scenario_drafts_pass_the_formal_publish_gate(db):
+def test_all_public_complete_seeded_scenario_drafts_pass_the_formal_publish_gate(db):
     rows = db.execute("SELECT id,lock_version FROM content_items WHERE entry_type='scenario' AND status='draft' ORDER BY id").fetchall()
 
-    results = [publish_content(row["id"], row["lock_version"], actor="test-admin", now=NOW_DATETIME) for row in rows]
+    results = []
+    rejected = []
+    for row in rows:
+        try:
+            results.append(publish_content(row["id"], row["lock_version"], actor="test-admin", now=NOW_DATETIME))
+        except ContentValidationError:
+            rejected.append(row["id"])
 
-    assert len(results) == 13
-    assert db.execute("SELECT COUNT(*) FROM content_items WHERE entry_type='scenario' AND status='published'").fetchone()[0] == 13
+    assert len(results) == 12
+    assert len(rejected) == 1
+    rejected_code = db.execute(
+        "SELECT s.code FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE ci.id=?", (rejected[0],)
+    ).fetchone()[0]
+    assert rejected_code == "data_process_foundation"
+    assert db.execute("SELECT COUNT(*) FROM content_items WHERE entry_type='scenario' AND status='published'").fetchone()[0] == 12
 
 
 @pytest.mark.parametrize("target", ("industry", "department", "pain"))
@@ -590,3 +607,136 @@ def test_public_catalog_list_has_trusted_canonical_and_description(published_cat
     document = page(published_catalog.get(path, headers={"Host": "untrusted.example"}))
     assert document.select_one('link[rel="canonical"]')["href"] == f"https://test.example{path}"
     assert document.select_one('meta[name="description"]')["content"]
+
+
+def test_scenario_without_published_pains_cannot_replace_current_revision(db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    db.execute("DELETE FROM scenario_pains WHERE scenario_id=?", (current["scenario_id"],))
+    db.commit()
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 0
+
+
+def test_scenario_without_published_pains_is_private_404(client, db):
+    scenario_id = db.execute(
+        "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
+    ).fetchone()[0]
+    publish_catalog(db)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+    db.execute("DELETE FROM scenario_pains WHERE scenario_id=?", (scenario_id,))
+    db.commit()
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+
+
+@pytest.mark.parametrize(("column", "raw_json"), (
+    ("implementation_steps_json", "true"),
+    ("implementation_steps_json", "1"),
+    ("implementation_steps_json", '"步骤"'),
+    ("implementation_steps_json", '{"步骤":"一"}'),
+    ("prerequisites_json", "true"),
+    ("prerequisites_json", "1"),
+    ("prerequisites_json", '"前置条件"'),
+    ("prerequisites_json", '{"前置":"条件"}'),
+    ("acceptance_json", "true"),
+    ("acceptance_json", "1"),
+    ("acceptance_json", '"验收"'),
+    ("acceptance_json", '{"验收":"条件"}'),
+    ("risk_codes_json", "true"),
+    ("risk_codes_json", "1"),
+    ("risk_codes_json", '"process_variance"'),
+    ("risk_codes_json", '{"process_variance":"风险"}'),
+))
+def test_wrong_json_containers_are_private_404_not_iterated_as_values(client, db, column, raw_json):
+    scenario = db.execute(
+        "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
+    ).fetchone()
+    if column == "risk_codes_json":
+        db.execute("UPDATE scenarios SET risk_codes_json=? WHERE id=?", (raw_json, scenario["id"]))
+    else:
+        db.execute(
+            f"UPDATE services SET {column}=? WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)",
+            (raw_json, scenario["id"]),
+        )
+    db.commit()
+    publish_catalog(db)
+    client.application.config["PROPAGATE_EXCEPTIONS"] = False
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+
+
+@pytest.mark.parametrize(("missing", "expected_total"), (("inputs", 11), ("services", 9)))
+def test_public_scenario_list_and_filtered_list_omit_detail_incomplete_cards(client, db, missing, expected_total):
+    if missing == "inputs":
+        row = db.execute(
+            "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+            "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' "
+            "AND ci.status='draft'"
+        ).fetchone()
+        db.execute("DELETE FROM scenario_public_inputs WHERE content_item_id=?", (row["id"],))
+    else:
+        db.execute(
+            "UPDATE services SET status='archived' WHERE id IN ("
+            "SELECT ss.service_id FROM scenario_services ss JOIN scenarios s ON s.id=ss.scenario_id "
+            "WHERE s.code='mfg_knowledge_assistant')"
+        )
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    for path in ("/scenarios", "/scenarios?industry=manufacturing"):
+        document = page(client.get(path))
+        assert "mfg_knowledge_assistant" not in {
+            card["data-scenario-code"] for card in document.select("[data-scenario-code]")
+        }
+    projection = catalog.public_scenarios(catalog.ScenarioFilters(), catalog.PageRequest(1, 20), NOW_DATETIME)
+    assert projection.total == expected_total
+    assert "mfg_knowledge_assistant" not in {card.code for card in projection.items}
+    assert "retail_ai_service" in {card.code for card in projection.items}
+
+
+@pytest.mark.parametrize("missing", ("overview", "pains", "departments", "company_sizes", "scenarios", "services"))
+def test_industry_list_and_detail_require_real_published_sections(client, db, missing):
+    industry = db.execute("SELECT id FROM industries WHERE code='manufacturing'").fetchone()
+    if missing == "overview":
+        db.execute(
+            "UPDATE content_blocks SET body_html='<p> </p>' WHERE content_item_id=("
+            "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+            "WHERE g.industry_id=? AND ci.status='draft')",
+            (industry["id"],),
+        )
+    elif missing == "pains":
+        db.execute("UPDATE pain_points SET status='archived' WHERE industry_id=?", (industry["id"],))
+    elif missing == "departments":
+        db.execute("UPDATE departments SET status='archived' WHERE industry_id=?", (industry["id"],))
+    elif missing == "company_sizes":
+        db.execute("UPDATE company_sizes SET status='archived'")
+    elif missing == "scenarios":
+        db.execute(
+            "DELETE FROM scenario_public_inputs WHERE content_item_id IN ("
+            "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+            "JOIN scenario_branches sb ON sb.scenario_id=g.scenario_id "
+            "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+            "WHERE ci.status='draft' AND ib.industry_id=?)",
+            (industry["id"],),
+        )
+    else:
+        db.execute(
+            "UPDATE services SET status='archived' WHERE id IN ("
+            "SELECT DISTINCT ss.service_id FROM scenario_services ss JOIN scenario_branches sb ON sb.scenario_id=ss.scenario_id "
+            "JOIN industry_branches ib ON ib.id=sb.industry_branch_id WHERE ib.industry_id=?)",
+            (industry["id"],),
+        )
+    publish_catalog(db)
+
+    document = page(client.get("/industries"))
+    assert "manufacturing" not in {card["data-industry-code"] for card in document.select("[data-industry-code]")}
+    assert client.get("/industries/manufacturing").status_code == 404

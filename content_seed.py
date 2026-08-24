@@ -22,7 +22,7 @@ CORE_KINDS = {
 }
 
 
-class ContentSeedError(RuntimeError):
+class ContentSeedError(ValueError):
     """Raised before writes when the checked-in catalog and frozen core diverge."""
 
 
@@ -36,7 +36,9 @@ def load_content_seed():
 def load_scenario_input_seed():
     payload = json.loads(SCENARIO_INPUT_SEED_PATH.read_text(encoding="utf-8"))
     if (
-        payload.get("seed_version") != SCENARIO_INPUT_SEED_VERSION
+        type(payload) is not dict
+        or set(payload) != {"seed_version", "source", "scenarios"}
+        or payload.get("seed_version") != SCENARIO_INPUT_SEED_VERSION
         or payload.get("source") != SEED_SOURCE
     ):
         raise ContentSeedError("scenario input seed marker mismatch")
@@ -45,20 +47,38 @@ def load_scenario_input_seed():
 
 def _validated_scenario_public_inputs():
     payload = load_scenario_input_seed()
+    if type(payload) is not dict or set(payload) != {"seed_version", "source", "scenarios"}:
+        raise ContentSeedError("scenario input seed container is invalid")
     entries = payload.get("scenarios")
     manifest_codes = {entry["code"] for entry in load_core_catalog_manifest()["scenarios"]}
     if type(entries) is not list or any(type(entry) is not dict for entry in entries):
         raise ContentSeedError("scenario input seed entries are invalid")
-    by_code = {entry.get("code"): entry.get("inputs") for entry in entries}
+    if any(set(entry) != {"code", "inputs"} or type(entry.get("code")) is not str for entry in entries):
+        raise ContentSeedError("scenario input seed entries are invalid")
+    by_code = {entry["code"]: entry["inputs"] for entry in entries}
     if len(by_code) != len(entries) or set(by_code) != manifest_codes:
         raise ContentSeedError("scenario input seed codes differ from frozen catalog")
-    for inputs in by_code.values():
+    validated = {}
+    for code, inputs in by_code.items():
         if (
             type(inputs) is not list or not inputs
-            or any(type(value) is not str or not value.strip() for value in inputs)
+            or any(type(value) is not dict or set(value) != {"input_text", "sort_order"} for value in inputs)
         ):
             raise ContentSeedError("scenario input seed values are invalid")
-    return by_code
+        values = []
+        for value in inputs:
+            input_text = value["input_text"]
+            sort_order = value["sort_order"]
+            if (
+                type(input_text) is not str or not input_text.strip() or len(input_text.strip()) > 300
+                or type(sort_order) is not int or sort_order < 1
+            ):
+                raise ContentSeedError("scenario input seed values are invalid")
+            values.append((input_text.strip(), sort_order))
+        if len({sort_order for _, sort_order in values}) != len(values):
+            raise ContentSeedError("scenario input seed sort order is invalid")
+        validated[code] = tuple(sorted(values, key=lambda value: value[1]))
+    return validated
 
 
 def seed_scenario_public_inputs(db):
@@ -72,13 +92,23 @@ def seed_scenario_public_inputs(db):
         ).fetchone()
         if row is None:
             continue
-        prepared.append((row["id"], tuple(value.strip() for value in inputs)))
-    for content_item_id, inputs in prepared:
-        db.executemany(
-            "INSERT OR IGNORE INTO scenario_public_inputs "
-            "(content_item_id,input_text,sort_order) VALUES (?,?,?)",
-            [(content_item_id, value, index) for index, value in enumerate(inputs)],
-        )
+        if db.execute(
+            "SELECT 1 FROM scenario_public_inputs WHERE content_item_id=? LIMIT 1", (row["id"],)
+        ).fetchone() is None:
+            prepared.append((row["id"], inputs))
+    db.execute("SAVEPOINT scenario_public_input_seed")
+    try:
+        for content_item_id, inputs in prepared:
+            db.executemany(
+                "INSERT INTO scenario_public_inputs "
+                "(content_item_id,input_text,sort_order) VALUES (?,?,?)",
+                [(content_item_id, input_text, sort_order) for input_text, sort_order in inputs],
+            )
+    except Exception:
+        db.execute("ROLLBACK TO scenario_public_input_seed")
+        db.execute("RELEASE scenario_public_input_seed")
+        raise
+    db.execute("RELEASE scenario_public_input_seed")
 
 
 def _core_rows(db, table):
