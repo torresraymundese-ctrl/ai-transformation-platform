@@ -364,7 +364,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "006_content_catalog"
+        )][-1] == "007_scenario_public_inputs"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
@@ -395,6 +395,9 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         "content_blocks": {
             "id", "content_item_id", "block_type", "title", "body_html",
             "settings_json", "media_asset_id", "sort_order",
+        },
+        "scenario_public_inputs": {
+            "id", "scenario_id", "input_text", "status", "sort_order",
         },
         "industry_content": {"id", "content_item_id", "industry_id"},
         "scenario_content": {"id", "content_item_id", "scenario_id"},

@@ -260,7 +260,10 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
         joins.append("JOIN scenario_branches filter_branch ON filter_branch.scenario_id=s.id "
                      "JOIN industry_branches filter_industry_branch ON filter_industry_branch.id=filter_branch.industry_branch_id "
                      "JOIN industries filter_industry ON filter_industry.id=filter_industry_branch.industry_id")
-        conditions.append("filter_industry.code=? AND filter_industry.status='published'")
+        conditions.append(
+            "filter_industry.code=? AND filter_industry.status='published' "
+            "AND filter_industry_branch.status='published'"
+        )
         parameters.append(filters.industry)
     if filters.department:
         joins.append("JOIN scenario_departments filter_department_link ON filter_department_link.scenario_id=s.id "
@@ -337,7 +340,17 @@ def _public_block(row):
     }
     if block_type not in expected or set(settings) != expected[block_type]:
         return None
-    if block_type == "heading" and settings["level"] not in (2, 3, 4):
+    if (
+        (row["title"] is not None and type(row["title"]) is not str)
+        or (row["body_html"] is not None and type(row["body_html"]) is not str)
+        or (row["media_asset_id"] is not None and (
+            type(row["media_asset_id"]) is not int or row["media_asset_id"] <= 0
+        ))
+    ):
+        return None
+    if block_type == "heading" and (
+        type(settings["level"]) is not int or settings["level"] not in (2, 3, 4)
+    ):
         return None
     if block_type == "image_text" and (
         settings["alignment"] not in {"left", "right"}
@@ -353,10 +366,13 @@ def _public_block(row):
         and all(type(item) is str and item for item in settings["items"])
     ):
         return None
-    if block_type in {"download", "cta"} and not settings["label"]:
+    if block_type in {"download", "cta"} and not (
+        type(settings["label"]) is str and settings["label"]
+    ):
         return None
     if block_type == "cta" and (
-        settings["style"] not in {"primary", "secondary", "text"}
+        type(settings["style"]) is not str
+        or settings["style"] not in {"primary", "secondary", "text"}
         or not _safe_cta(settings["url"])
     ):
         return None
@@ -413,18 +429,10 @@ def _scenario_authority(db, scenario_id):
 
 
 def _scenario_inputs(db, scenario_id):
-    departments = _names(
-        db, "SELECT d.name FROM scenario_departments link JOIN departments d "
-        "ON d.id=link.department_id WHERE link.scenario_id=? AND d.status='published' "
-        "ORDER BY d.industry_id,d.sort_order,d.id", (scenario_id,)
-    )
-    pains = _names(
-        db, "SELECT p.name FROM scenario_pains link JOIN pain_points p "
-        "ON p.id=link.pain_point_id WHERE link.scenario_id=? AND p.status='published' "
-        "ORDER BY p.industry_id,p.sort_order,p.id", (scenario_id,)
-    )
-    return tuple(f"部门：{name}" for name in departments) + tuple(
-        f"业务问题：{name}" for name in pains
+    return _names(
+        db, "SELECT input_text FROM scenario_public_inputs "
+        "WHERE scenario_id=? AND status='published' AND trim(input_text)<>'' "
+        "ORDER BY sort_order,id", (scenario_id,)
     )
 
 

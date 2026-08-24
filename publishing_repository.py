@@ -2,11 +2,14 @@
 
 from dataclasses import replace
 import json
+from numbers import Real
 import sqlite3
 
+from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import format_shanghai
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_validation import ContentValidationError, validate_content_draft
+from media_validation import ATTACHMENT_MIMES, IMAGE_MIMES
 
 
 EXTENSION_TABLES = {
@@ -390,10 +393,20 @@ def validate_for_publication(db, content_id, now):
     ).fetchone() is None:
         raise ContentValidationError("media_not_ready")
     for block in draft.blocks:
-        if block.media_asset_id is not None and db.execute(
-            "SELECT 1 FROM media_assets WHERE id=? AND status='ready'", (block.media_asset_id,)
-        ).fetchone() is None:
+        if block.media_asset_id is None:
+            continue
+        media = db.execute(
+            "SELECT detected_mime FROM media_assets WHERE id=? AND status='ready'",
+            (block.media_asset_id,),
+        ).fetchone()
+        if media is None:
             raise ContentValidationError("media_not_ready")
+        allowed = (
+            IMAGE_MIMES if block.block_type == "image_text"
+            else ATTACHMENT_MIMES if block.block_type == "download" else None
+        )
+        if allowed is not None and media["detected_mime"] not in allowed:
+            raise ContentValidationError("block_media_mime_invalid")
     if (
         draft.entry_type == "resource"
         and draft.extension.get("attachment_media_id") is not None
@@ -428,7 +441,109 @@ def validate_for_publication(db, content_id, now):
     if draft.entry_type == "case":
         if not draft.extension.get("is_verified") or not draft.extension.get("review_confirmed") or not draft.metrics:
             raise ContentValidationError("case_verification_incomplete")
+    if draft.entry_type == "scenario":
+        _validate_scenario_publication(db, content_id, draft)
     return draft
+
+
+def _nonblank_strings(value):
+    return (
+        type(value) is list and value
+        and all(type(item) is str and item.strip() for item in value)
+    )
+
+
+def _valid_range(minimum, maximum):
+    return (
+        type(minimum) is not bool and type(maximum) is not bool
+        and isinstance(minimum, Real) and isinstance(maximum, Real)
+        and minimum > 0 and minimum <= maximum
+    )
+
+
+def _scenario_source_rows(db, scenario_id):
+    return db.execute(
+        "SELECT s.*,svc.id AS service_id,svc.public_name AS service_name,svc.min_budget,svc.max_budget,"
+        "svc.min_weeks AS service_min_weeks,svc.max_weeks AS service_max_weeks,"
+        "svc.implementation_steps_json,svc.prerequisites_json,svc.acceptance_json,svc.status AS service_status "
+        "FROM scenarios s LEFT JOIN scenario_services link ON link.scenario_id=s.id "
+        "LEFT JOIN services svc ON svc.id=link.service_id WHERE s.id=?",
+        (scenario_id,),
+    ).fetchall()
+
+
+def _validate_scenario_publication(db, content_id, draft):
+    scenario_id = draft.extension["scenario_id"]
+    rows = _scenario_source_rows(db, scenario_id)
+    if not rows or rows[0]["status"] != "published":
+        raise ContentValidationError("scenario_public_incomplete")
+    scenario = rows[0]
+    try:
+        risk_codes = json.loads(scenario["risk_codes_json"])
+    except (TypeError, json.JSONDecodeError):
+        risk_codes = None
+    if not _nonblank_strings(risk_codes) or any(
+        code not in RISK_LABELS or code not in RISK_EXPLANATIONS for code in risk_codes
+    ):
+        raise ContentValidationError("scenario_public_incomplete")
+    if not _valid_range(scenario["min_weeks"], scenario["max_weeks"]):
+        raise ContentValidationError("scenario_public_incomplete")
+    relation_checks = (
+        ("SELECT 1 FROM scenario_branches WHERE scenario_id=?",
+         "SELECT 1 FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+         "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+         "AND (ib.status<>'published' OR i.status<>'published')"),
+        ("SELECT 1 FROM scenario_departments WHERE scenario_id=?",
+         "SELECT 1 FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
+         "WHERE link.scenario_id=? AND d.status<>'published'"),
+        ("SELECT 1 FROM scenario_pains WHERE scenario_id=?",
+         "SELECT 1 FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
+         "WHERE link.scenario_id=? AND p.status<>'published'"),
+        ("SELECT 1 FROM scenario_public_inputs WHERE scenario_id=? AND status='published' "
+         "AND trim(input_text)<>''",
+         "SELECT 1 FROM scenario_public_inputs WHERE scenario_id=? "
+         "AND (status<>'published' OR trim(input_text)='')"),
+        ("SELECT 1 FROM content_maturity_levels WHERE content_item_id=?",
+         "SELECT 1 FROM content_maturity_levels WHERE content_item_id=? "
+         "AND (maturity_code NOT IN ('explore','pilot','scale','collaborate'))"),
+    )
+    if any(
+        db.execute(valid, (scenario_id if index < 4 else content_id,)).fetchone() is None
+        or db.execute(invalid, (scenario_id if index < 4 else content_id,)).fetchone() is not None
+        for index, (valid, invalid) in enumerate(relation_checks)
+    ):
+        raise ContentValidationError("scenario_public_incomplete")
+    if not draft.blocks or not any(
+        type(block.body_html) is str and block.body_html.strip() for block in draft.blocks
+    ):
+        raise ContentValidationError("scenario_public_incomplete")
+    for service in rows:
+        if (
+            service["service_id"] is None or service["service_status"] != "published"
+            or type(service["service_name"]) is not str or not service["service_name"].strip()
+            or not _valid_range(service["min_budget"], service["max_budget"])
+            or not _valid_range(service["service_min_weeks"], service["service_max_weeks"])
+        ):
+            raise ContentValidationError("scenario_public_incomplete")
+        try:
+            source_lists = tuple(
+                json.loads(service[column])
+                for column in ("implementation_steps_json", "prerequisites_json", "acceptance_json")
+            )
+        except (TypeError, json.JSONDecodeError):
+            raise ContentValidationError("scenario_public_incomplete") from None
+        if not all(_nonblank_strings(values) for values in source_lists):
+            raise ContentValidationError("scenario_public_incomplete")
+        if db.execute(
+            "SELECT 1 FROM service_deliverables WHERE service_id=? AND status='published' "
+            "AND trim(title)<>''", (service["service_id"],)
+        ).fetchone() is None:
+            raise ContentValidationError("scenario_public_incomplete")
+        if db.execute(
+            "SELECT 1 FROM service_deliverables WHERE service_id=? "
+            "AND (status<>'published' OR trim(title)='')", (service["service_id"],)
+        ).fetchone() is not None:
+            raise ContentValidationError("scenario_public_incomplete")
 
 
 def source_check_expiry(db, content_id):

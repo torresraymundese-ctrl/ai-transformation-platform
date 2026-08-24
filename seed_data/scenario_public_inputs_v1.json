@@ -1,0 +1,19 @@
+{
+  "seed_version": "scenario_public_inputs_v1",
+  "source": "reviewed-neutral-stage5a",
+  "scenarios": [
+    {"code": "mfg_knowledge_assistant", "inputs": ["设备与工艺知识文档的受控副本", "近三个月高频现场问题清单"]},
+    {"code": "mfg_quality_inspection", "inputs": ["已标注的质检样本及缺陷分类规则", "现场设备图像采集条件说明"]},
+    {"code": "mfg_operations_reporting", "inputs": ["已确认的生产经营数据字段清单", "当前报表模板和使用频率"]},
+    {"code": "retail_ai_service", "inputs": ["已审核的商品与服务知识资料", "近期客户咨询主题汇总"]},
+    {"code": "retail_marketing_content", "inputs": ["已审批的活动素材及品牌规范", "活动目标与已有渠道数据"]},
+    {"code": "retail_inventory_insight", "inputs": ["库存、销售和补货记录字段说明", "商品主数据与门店范围"]},
+    {"code": "pro_document_knowledge", "inputs": ["受控专业文档及其版本信息", "用户问题与检索范围说明"]},
+    {"code": "pro_delivery_drafting", "inputs": ["项目交付文档模板", "已确认的项目里程碑信息"]},
+    {"code": "pro_contract_review", "inputs": ["待审合同文本及适用规则", "审查范围与输出格式要求"]},
+    {"code": "creative_content_workflow", "inputs": ["已审批的内容素材和风格规范", "发布渠道与内容计划"]},
+    {"code": "software_support_knowledge", "inputs": ["产品知识库受控副本", "近期支持工单主题"]},
+    {"code": "project_delivery_automation", "inputs": ["当前项目流程和字段清单", "已有任务与状态数据"]},
+    {"code": "data_process_foundation", "inputs": ["现有数据源目录", "数据责任人与更新频率"]}
+  ]
+}

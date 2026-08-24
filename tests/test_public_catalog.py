@@ -1,15 +1,20 @@
 """Public, read-only catalog routes use only published catalog aggregates."""
 
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 import hashlib
+import json
 
 import pytest
 from bs4 import BeautifulSoup
 
 import app as app_module
+import catalog_content_repository as catalog
 from content_clock import SHANGHAI
 from content_contracts import ContentBlock, ContentDraft
-from publishing_service import publish_content, save_content_draft
+from content_validation import ContentValidationError
+import publishing_repository
+from publishing_service import copy_revision, publish_content, publish_due_content, save_content_draft, schedule_content
 from publishing_service import archive_content
 
 
@@ -218,7 +223,8 @@ def _publish_all_governed_blocks(db):
     row = db.execute(
         "SELECT ci.id,ci.lock_version,ci.content_group_id,g.scenario_id,ci.slug "
         "FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
-        "WHERE ci.entry_type='scenario' AND ci.status='draft' ORDER BY ci.id LIMIT 1"
+        "WHERE ci.entry_type='scenario' AND ci.status='draft' "
+        "AND g.scenario_id=(SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant')"
     ).fetchone()
     image_id = _ready_media(db, "review-image.png", "image/png")
     download_id = _ready_media(db, "review-download.pdf", "application/pdf")
@@ -258,14 +264,72 @@ def test_formally_published_governed_block_types_render_through_safe_public_http
     assert document.select_one('[data-content-block="cta"] a[href="/assessment"].btn-primary') is not None
 
 
-def test_scenario_required_sections_are_nonempty_and_inputs_are_distinct_from_prerequisites(published_catalog):
+@pytest.mark.parametrize(("block_type", "mime"), (("image_text", "application/pdf"), ("download", "image/png")))
+def test_formal_publish_rejects_block_media_with_wrong_mime(db, block_type, mime):
+    row = db.execute(
+        "SELECT ci.id,ci.lock_version FROM content_items ci WHERE ci.entry_type='scenario' "
+        "AND ci.status='draft' AND ci.content_group_id=(SELECT id FROM content_groups "
+        "WHERE scenario_id=(SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'))"
+    ).fetchone()
+    media_id = _ready_media(db, f"wrong-{block_type}", mime)
+    draft = publishing_repository.load_content_draft(db, row["id"])
+    block = ContentBlock(
+        block_type, title="媒体类型校验", body_html="<p>媒体类型校验正文</p>",
+        settings={"alignment": "left", "alt_text": "示意图"} if block_type == "image_text" else {"label": "下载文件"},
+        media_asset_id=media_id,
+    )
+    lock_version = save_content_draft(
+        row["id"], row["lock_version"], replace(draft, blocks=(block,)),
+        actor="test-admin", now=NOW_DATETIME,
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(row["id"], lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "block_media_mime_invalid"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (row["id"],)).fetchone()[0] == "draft"
+    assert db.execute("SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'", (row["id"],)).fetchone()[0] == 0
+
+
+def test_formally_published_block_media_urls_stream_real_matching_files(client, db, media_root):
+    slug, image_id, download_id = _publish_all_governed_blocks(db)
+    (media_root / "review-image.png").write_bytes(b"\x89PNG\r\n\x1a\npublic-image")
+    (media_root / "review-download.pdf").write_bytes(b"%PDF-1.4\npublic-download\n%%EOF\n")
+
+    response = client.get(f"/scenarios/{slug}")
+    document = page(response)
+    image_url = document.select_one(f'img[src="/media/{image_id}/image"]')["src"]
+    download_url = document.select_one(f'a[href="/media/{download_id}/download"]')["href"]
+
+    assert client.get(image_url).status_code == 200
+    assert client.get(download_url).status_code == 200
+
+
+@pytest.mark.parametrize(("block_type", "settings", "media_asset_id"), (
+    ("heading", {"level": 2.0}, None),
+    ("download", {"label": {"not": "text"}}, None),
+    ("cta", {"label": ["not text"], "url": "/assessment", "style": "primary"}, None),
+    ("image_text", {"alignment": "left", "alt_text": "图"}, -1),
+))
+def test_public_block_projection_rejects_nonexact_settings_and_media_types(block_type, settings, media_asset_id):
+    row = {
+        "block_type": block_type, "title": "标题", "body_html": "<p>正文</p>",
+        "settings_json": json.dumps(settings), "media_asset_id": media_asset_id,
+    }
+
+    assert catalog._public_block(row) is None
+
+
+def test_scenario_required_sections_use_explicit_reviewed_inputs(published_catalog):
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
     inputs = {node.get_text(strip=True) for node in document.select('[data-content-section="inputs"] li')}
     prerequisites = {node.get_text(strip=True) for node in document.select('[data-content-section="prerequisites"] li')}
     metrics = document.select('[data-content-section="metrics"] li')
     risks = document.select('[data-content-section="risks"] li')
 
-    assert inputs and inputs != prerequisites
+    assert inputs == {"设备与工艺知识文档的受控副本", "近三个月高频现场问题清单"}
+    assert inputs.isdisjoint(prerequisites)
+    assert all(not value.startswith(("部门：", "业务问题：")) for value in inputs)
     assert metrics and risks
     assert all("_" not in node.get_text() for node in risks)
 
@@ -279,6 +343,81 @@ def test_scenario_with_missing_required_structured_data_is_not_publicly_availabl
     db.commit()
 
     assert published_catalog.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+
+
+def _saved_scenario_revision(db):
+    publish_catalog(db)
+    current = db.execute(
+        "SELECT ci.id,ci.lock_version,ci.content_group_id,g.scenario_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id WHERE ci.entry_type='scenario' "
+        "AND ci.status='published' AND g.scenario_id=(SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant')"
+    ).fetchone()
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW_DATETIME)
+    draft = publishing_repository.load_content_draft(db, revision_id)
+    lock_version = save_content_draft(revision_id, 1, draft, actor="test-admin", now=NOW_DATETIME)
+    return current, revision_id, lock_version
+
+
+def _break_scenario_public_source(db, scenario_id, revision_id, source):
+    if source == "industry":
+        db.execute("UPDATE industries SET status='archived' WHERE id=(SELECT i.id FROM industries i JOIN industry_branches ib ON ib.industry_id=i.id JOIN scenario_branches sb ON sb.industry_branch_id=ib.id WHERE sb.scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "branch":
+        db.execute("UPDATE industry_branches SET status='archived' WHERE id=(SELECT industry_branch_id FROM scenario_branches WHERE scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "department":
+        db.execute("UPDATE departments SET status='archived' WHERE id=(SELECT department_id FROM scenario_departments WHERE scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "pain":
+        db.execute("UPDATE pain_points SET status='archived' WHERE id=(SELECT pain_point_id FROM scenario_pains WHERE scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "maturity":
+        db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (revision_id,))
+    elif source == "input":
+        db.execute("UPDATE scenario_public_inputs SET status='archived' WHERE scenario_id=?", (scenario_id,))
+    elif source == "service":
+        db.execute("UPDATE services SET min_weeks=0 WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "prerequisite":
+        db.execute("UPDATE services SET prerequisites_json='[\"\"]' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "output":
+        db.execute("UPDATE service_deliverables SET title=' ' WHERE id=(SELECT sd.id FROM service_deliverables sd JOIN scenario_services ss ON ss.service_id=sd.service_id WHERE ss.scenario_id=? LIMIT 1)", (scenario_id,))
+    elif source == "risk":
+        db.execute("UPDATE scenarios SET risk_codes_json='[\"unknown\"]' WHERE id=?", (scenario_id,))
+    elif source == "narrative":
+        db.execute("UPDATE content_blocks SET body_html='' WHERE content_item_id=?", (revision_id,))
+    else:
+        raise AssertionError(source)
+    db.commit()
+
+
+@pytest.mark.parametrize("source", (
+    "industry", "branch", "department", "pain", "maturity", "input", "service",
+    "prerequisite", "output", "risk", "narrative",
+))
+def test_incomplete_scenario_revision_is_rejected_before_replacing_public_revision(db, source):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _break_scenario_public_source(db, current["scenario_id"], revision_id, source)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (revision_id,)).fetchone()[0] == "draft"
+    assert db.execute("SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'", (revision_id,)).fetchone()[0] == 0
+
+
+def test_due_scenario_with_later_missing_input_fails_without_archiving_current_revision(db):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    scheduled = schedule_content(
+        revision_id, lock_version, NOW_DATETIME + timedelta(hours=1), actor="test-admin", now=NOW_DATETIME
+    )
+    _break_scenario_public_source(db, current["scenario_id"], revision_id, "input")
+
+    result = publish_due_content(actor="test-admin", now=NOW_DATETIME + timedelta(hours=1))
+
+    assert result.published_ids == ()
+    assert result.failures == ((revision_id, "validation_failed"),)
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+    draft = db.execute("SELECT status,publish_at FROM content_items WHERE id=?", (revision_id,)).fetchone()
+    assert tuple(draft) == ("draft", None)
+    assert db.execute("SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'", (revision_id,)).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("target", ("industry", "department", "pain"))
@@ -302,6 +441,28 @@ def test_archived_related_core_rows_are_omitted_from_public_cards_and_details(pu
     detail = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
     assert marker not in card.get_text()
     assert marker not in detail.get_text()
+    cards = catalog.public_scenarios(catalog.ScenarioFilters(), catalog.PageRequest(1, 20), NOW_DATETIME)
+    matched = next(item for item in cards.items if item.code == "mfg_knowledge_assistant")
+    if target == "industry":
+        assert marker not in matched.industries
+    elif target == "department":
+        assert marker not in matched.departments
+    else:
+        assert marker not in detail.select_one('[data-content-section="pains"]').get_text()
+
+
+def test_archived_industry_branch_cannot_match_public_industry_filter(published_catalog, db):
+    db.execute(
+        "UPDATE industry_branches SET status='archived' WHERE id IN ("
+        "SELECT ib.id FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+        "JOIN scenarios s ON s.id=sb.scenario_id WHERE s.code='mfg_knowledge_assistant')"
+    )
+    db.commit()
+
+    document = page(published_catalog.get("/scenarios?industry=manufacturing"))
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"] for card in document.select("[data-scenario-code]")
+    }
 
 
 @pytest.mark.parametrize("path", ("/industries", "/scenarios"))

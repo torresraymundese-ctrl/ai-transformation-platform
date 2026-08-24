@@ -210,6 +210,14 @@ def _ready_media(db, storage_name="ready-media.pdf", mime="application/pdf"):
     return media_id
 
 
+def _complete_scenario_draft(draft):
+    """Give generic publishing tests the minimum public scenario narrative."""
+    return replace(
+        draft,
+        blocks=(ContentBlock("rich_text", body_html="<p>完整公开场景说明。</p>"),),
+    )
+
+
 def _refresh_source(db, content_id, *, expected_lock_version=1, now=NOW):
     from source_url_checker import FetchResult
 
@@ -272,7 +280,7 @@ def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
             "SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 2"
         )
     ]
-    first = ContentDraft(
+    first = _complete_scenario_draft(ContentDraft(
         entry_type="scenario",
         slug="identity-one",
         title="稳定场景身份",
@@ -281,7 +289,7 @@ def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
         seo_description="验证内容组和场景核心身份之间的稳定约束。",
         extension={"scenario_id": scenario_ids[0]},
         maturity_codes=("explore",),
-    )
+    ))
     first_id = create_content_draft(first, actor="admin", now=NOW)
     publish_content(first_id, 1, actor="admin", now=NOW)
     group_id = _row(db, first_id)["content_group_id"]
@@ -590,7 +598,7 @@ def test_due_failure_is_isolated_and_records_only_safe_reason(db):
     scenario_id = db.execute(
         "SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 1"
     ).fetchone()[0]
-    owner = ContentDraft(
+    owner = _complete_scenario_draft(ContentDraft(
         entry_type="scenario",
         slug="due-owner",
         title="定时场景内容",
@@ -600,7 +608,7 @@ def test_due_failure_is_isolated_and_records_only_safe_reason(db):
         extension={"scenario_id": scenario_id},
         relations=(ContentRelation("scenario_resource", target_group, 0),),
         maturity_codes=("pilot",),
-    )
+    ))
     invalid = create_content_draft(owner, actor="admin", now=NOW)
     valid = create_content_draft(_announcement("due-valid"), actor="admin", now=NOW)
     due = NOW + timedelta(hours=1)
@@ -1047,6 +1055,8 @@ def test_all_six_relation_types_survive_revision_copy(db):
             relations=(ContentRelation(relation_type, target_group),),
             maturity_codes=("explore",) if owner_type == "scenario" else (),
         )
+        if owner_type == "scenario":
+            draft = _complete_scenario_draft(draft)
         original = create_content_draft(draft, actor="admin", now=NOW)
         publish_content(original, 1, actor="admin", now=NOW)
         copied_id = copy_revision(original, actor="admin", now=NOW)

@@ -200,3 +200,19 @@ exit: 0
 - Required sections now fail closed at the public availability boundary; this relies on existing structured service/relationship data rather than invented claims.
 
 Known limitations: the prior full suite remains UNKNOWN and the historical dependency installation remains a confirmed environment-scope violation.  The Fix1 public partition has a captured complete success summary but an unavailable process exit marker; no additional partition rerun was made.  Controller-side fresh offline verification is required for an independently captured target exit.
+
+## Fix1b — publication integrity and explicit input correction
+
+Status remains **DONE_WITH_CONCERNS** solely because the original full-suite outcome is UNKNOWN and its historical dependency network violation remains confirmed. No full suite, network access, or installation was run in Fix1b.
+
+Fix1b first REDs (all under the project venv with `PYTHONPATH` set to the existing `local-deps` overlay, pypdf 6.10.0, `-p no:cacheprovider`, and fresh `pytest-task6-fix1b-*` basetemps): explicit-input plus archived-branch HTTP tests failed `2 failed in 1.50s`; publication validation failed `12 failed in 7.01s` after fixture correction because every corrupted semantic source published; MIME compatibility failed `2 failed, 1 passed in 2.12s`; exact public-block schema failed `4 failed in 0.30s`.
+
+Fixes: a versioned neutral `scenario_public_inputs_v1.json` source and `007_scenario_public_inputs` migration provide explicit customer-supplied input records distinct from industries/departments/pains/prerequisites. Publication now validates scenario state, all related published core records/branches, maturity, inputs, approved reviewed risks, nonblank narrative, nonblank structured service prerequisites/steps/acceptance/deliverables, and positive numeric ranges before replacing a revision; the due path shares it. Media blocks now require ready MIME compatible with their public endpoint. Public block projections reject nonexact scalar/settings/media-id types. Industry filtering requires published branch status.
+
+Target GREEN evidence: input/branch `2 passed in 1.42s`; publication/scheduled-due `12 passed in 7.71s`; media mismatch plus real matching media HTTP endpoints `3 passed in 1.95s`; projection types `4 passed in 0.08s`; final focused public+migration command `54 passed in 26.95s` using `pytest-task6-fix1b-focused-after-migration-001`.
+
+The first post-freeze public partition initially reported `202 passed, 1 failed in 107.63s`, exit 1, because the migration inventory test was not updated for `007`; it was corrected before the final focused GREEN. Fresh retained offline public and related partitions were then started with `pytest-task6-fix1b-public-analytics-cache-smoke-002` and `pytest-task6-fix1b-related-001`; their final summaries and exits are recorded by the controller verification if this report is committed before their wrappers finish.
+
+Correction: the retained final public partition result is `203 passed in 104.80s (0:01:44)`, `PYTEST_EXIT=0`. The first related partition finished `4 failed, 191 passed in 66.16s`, `PYTEST_EXIT=1`; the failures were three generic scenario publishing fixtures that lacked the now-required nonblank narrative plus a `006` migration expectation. The fixtures now use shared complete-scenario narrative data and migration/schema assertions include `007`; the exact targeted GREEN was `4 passed in 2.10s` with `pytest-task6-fix1b-green-related-targeted-001`.
+
+`pytest-task6-fix1b-related-002` was started after that correction but the host retained only progress beyond 36%; its terminal summary and exit are irretrievable. It is explicitly UNKNOWN and was not rerun. Controller-side fresh offline related-partition verification is required; no PASS claim is made for `related-002`.

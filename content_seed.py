@@ -11,7 +11,9 @@ import publishing_repository
 
 
 CATALOG_SEED_PATH = Path(__file__).resolve().parent / "seed_data" / "content_catalog_v1.json"
+SCENARIO_INPUT_SEED_PATH = Path(__file__).resolve().parent / "seed_data" / "scenario_public_inputs_v1.json"
 SEED_VERSION = "content_catalog_v1"
+SCENARIO_INPUT_SEED_VERSION = "scenario_public_inputs_v1"
 SEED_SOURCE = "reviewed-neutral-stage5a"
 CORE_KINDS = {
     "industry": ("industries", "industry_id"),
@@ -29,6 +31,43 @@ def load_content_seed():
     if payload.get("seed_version") != SEED_VERSION or payload.get("source") != SEED_SOURCE:
         raise ContentSeedError("content seed marker mismatch")
     return payload
+
+
+def load_scenario_input_seed():
+    payload = json.loads(SCENARIO_INPUT_SEED_PATH.read_text(encoding="utf-8"))
+    if (
+        payload.get("seed_version") != SCENARIO_INPUT_SEED_VERSION
+        or payload.get("source") != SEED_SOURCE
+    ):
+        raise ContentSeedError("scenario input seed marker mismatch")
+    return payload
+
+
+def seed_scenario_public_inputs(db):
+    payload = load_scenario_input_seed()
+    entries = payload.get("scenarios")
+    manifest_codes = {entry["code"] for entry in load_core_catalog_manifest()["scenarios"]}
+    if type(entries) is not list or any(type(entry) is not dict for entry in entries):
+        raise ContentSeedError("scenario input seed entries are invalid")
+    by_code = {entry.get("code"): entry.get("inputs") for entry in entries}
+    if len(by_code) != len(entries) or set(by_code) != manifest_codes:
+        raise ContentSeedError("scenario input seed codes differ from frozen catalog")
+    for code, inputs in by_code.items():
+        if (
+            type(inputs) is not list or not inputs
+            or any(type(value) is not str or not value.strip() for value in inputs)
+        ):
+            raise ContentSeedError("scenario input seed values are invalid")
+        row = db.execute(
+            "SELECT id FROM scenarios WHERE code=? AND status='published'", (code,)
+        ).fetchone()
+        if row is None:
+            raise ContentSeedError("scenario input seed target is unavailable")
+        db.executemany(
+            "INSERT OR IGNORE INTO scenario_public_inputs "
+            "(scenario_id,input_text,status,sort_order) VALUES (?,?,'published',?)",
+            [(row["id"], value.strip(), index) for index, value in enumerate(inputs)],
+        )
 
 
 def _core_rows(db, table):
@@ -108,6 +147,7 @@ def seed_content_defaults(db, now):
     ).fetchone() is None:
         return
     instant = as_shanghai(now)
+    seed_scenario_public_inputs(db)
     payload = load_content_seed()
     prepared = _validated_entries(db, payload)
     for kind, identity_column, core_row, entry in prepared:
