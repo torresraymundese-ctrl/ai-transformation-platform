@@ -5,8 +5,10 @@ from datetime import datetime, timedelta
 import hashlib
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
+import unicodedata
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 import zlib
 
@@ -37,10 +39,30 @@ def _normalized_host(host):
         return ""
 
 
+def _valid_host_shape(host):
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if not host or len(host) > 253 or host.startswith(".") or host.endswith("."):
+        return False
+    labels = host.split(".")
+    return all(
+        1 <= len(label) <= 63
+        and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+        for label in labels
+    )
+
+
 def _normalize_url(url):
     if not isinstance(url, str) or not url.strip():
         return None, "invalid_url"
-    if "\\" in url or any(ord(character) < 32 or ord(character) == 127 for character in url):
+    if (
+        "\\" in url
+        or any(unicodedata.category(character).startswith("C") for character in url)
+        or re.search(r"%(?![0-9A-Fa-f]{2})", url)
+    ):
         return None, "invalid_url"
     try:
         parsed = urlsplit(url.strip())
@@ -50,7 +72,7 @@ def _normalize_url(url):
         return None, "invalid_url"
     if parsed.username is not None or parsed.password is not None:
         return None, "userinfo_not_allowed"
-    if not parsed.scheme or not host:
+    if not parsed.scheme or not _valid_host_shape(host):
         return None, "invalid_url"
     scheme = parsed.scheme.lower()
     default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
@@ -280,6 +302,8 @@ def _read_bounded_body(response, content_encoding, compressed_limit, decompresse
             output.extend(decompressor.flush(decompressed_limit - len(output) + 1))
             if not decompressor.eof:
                 return b"", "content_encoding_invalid"
+            if decompressor.unused_data:
+                return b"", "content_encoding_invalid"
         if len(output) > decompressed_limit:
             return b"", "response_too_large"
     except zlib.error:
@@ -317,9 +341,15 @@ def check_source_url(url, transport: PinnedHttpTransport, now: datetime):
         fetched = FetchResult(False, "network_error", normalized, None, None, b"")
     final_url = fetched.final_url or normalized
     final_digest = hashlib.sha256(final_url.encode("utf-8")).hexdigest()
+    ok = fetched.ok and final_url == normalized
+    code = (
+        "redirect_requires_update"
+        if fetched.ok and final_url != normalized
+        else fetched.code
+    )
     return SourceCheckResult(
-        fetched.ok,
-        fetched.code,
+        ok,
+        code,
         final_url,
         digest,
         final_digest,

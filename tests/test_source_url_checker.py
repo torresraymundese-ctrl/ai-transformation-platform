@@ -2,11 +2,12 @@ from datetime import datetime
 import gzip
 import hashlib
 import socket
+import zlib
 
 import pytest
 
 from content_clock import SHANGHAI
-from source_url_checker import PinnedHttpTransport, check_source_url
+from source_url_checker import PinnedHttpTransport, _PinnedConnection, check_source_url
 
 
 NOW = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
@@ -196,6 +197,38 @@ def test_transport_enforces_exact_gzip_decompressed_boundary(size, ok):
     assert result.code == ("https_ok" if ok else "response_too_large")
 
 
+@pytest.mark.parametrize(
+    ("encoding", "payload"),
+    [
+        ("gzip", gzip.compress(b"a" * 700_000) + gzip.compress(b"b" * 700_000)),
+        ("gzip", gzip.compress(b"first") + gzip.compress(b"second")),
+        ("gzip", gzip.compress(b"valid") + b"trailing-garbage"),
+        ("deflate", zlib.compress(b"valid") + b"trailing-garbage"),
+    ],
+)
+def test_transport_rejects_concatenated_or_trailing_compressed_data(encoding, payload):
+    transport, _, _ = _transport(
+        [
+            FakeResponse(
+                body=payload,
+                headers={"Content-Type": "text/html", "Content-Encoding": encoding},
+            )
+        ]
+    )
+
+    result = transport.fetch(
+        "https://example.com/resource",
+        allowed_hosts=frozenset({"example.com"}),
+        allowed_schemes=frozenset({"https"}),
+        max_compressed_bytes=1_048_576,
+        max_decompressed_bytes=1_048_576,
+        allowed_content_types=frozenset({"text/html"}),
+    )
+
+    assert result.ok is False
+    assert result.code == "content_encoding_invalid"
+
+
 def test_transport_verifies_the_actual_peer_matches_the_pinned_public_ip():
     transport, _, _ = _transport(
         [FakeResponse(peer_ip="93.184.216.35")], answers=("93.184.216.34",)
@@ -248,6 +281,31 @@ def test_source_check_wrapper_uses_exact_submitted_idna_host_and_seven_day_expir
     assert connection_calls[0][1:4] == ("example.com", "93.184.216.34", 443)
 
 
+def test_same_host_redirect_requires_operator_to_save_and_recheck_final_url():
+    redirected_transport, resolver_calls, _ = _transport(
+        [
+            FakeResponse(status=302, headers={"Location": "/canonical-report"}),
+            FakeResponse(body=b"canonical"),
+        ]
+    )
+
+    redirected = check_source_url(
+        "https://example.com/old-report", redirected_transport, NOW
+    )
+
+    assert redirected.ok is False
+    assert redirected.code == "redirect_requires_update"
+    assert redirected.normalized_url == "https://example.com/canonical-report"
+    assert redirected.source_check_url_sha256 != redirected.source_url_sha256
+    assert resolver_calls == [("example.com", 443), ("example.com", 443)]
+
+    final_transport, _, _ = _transport([FakeResponse(body=b"canonical")])
+    final = check_source_url(redirected.normalized_url, final_transport, NOW)
+    assert final.ok is True
+    assert final.code == "https_ok"
+    assert final.source_check_url_sha256 == final.source_url_sha256
+
+
 def test_transport_preserves_brackets_while_pinning_a_public_ipv6_literal():
     address = "2606:4700:4700::1111"
     transport, resolver_calls, connection_calls = _transport(
@@ -267,3 +325,78 @@ def test_transport_preserves_brackets_while_pinning_a_public_ipv6_literal():
     assert result.final_url == f"https://[{address}]/resource"
     assert resolver_calls == [(address, 443)]
     assert connection_calls[0][2] == address
+
+
+def test_bottom_tls_socket_uses_pinned_ip_sni_and_separate_timeouts(monkeypatch):
+    calls = {"read_timeouts": []}
+
+    class RawSocket:
+        def settimeout(self, timeout):
+            calls["read_timeouts"].append(timeout)
+
+    raw = RawSocket()
+
+    def create_connection(address, timeout):
+        calls["socket"] = (address, timeout)
+        return raw
+
+    class Context:
+        def wrap_socket(self, value, *, server_hostname):
+            calls["tls"] = (value, server_hostname)
+            return value
+
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    monkeypatch.setattr("ssl.create_default_context", lambda: Context())
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9999")
+    connection = _PinnedConnection(
+        "https", "example.com", "93.184.216.34", 443, 2.5, 7.5
+    )
+
+    connection._connection.connect()
+
+    assert calls["socket"] == (("93.184.216.34", 443), 2.5)
+    assert calls["read_timeouts"] == [7.5]
+    assert calls["tls"] == (raw, "example.com")
+
+
+def test_transport_passes_original_host_and_both_timeouts_to_direct_connection():
+    response = FakeResponse(body=b"ok")
+    connection = FakeConnection(response)
+    factory_calls = []
+
+    def factory(scheme, host, ip, port, connect_timeout, read_timeout):
+        factory_calls.append(
+            (scheme, host, ip, port, connect_timeout, read_timeout)
+        )
+        return connection
+
+    transport = PinnedHttpTransport(
+        resolver=lambda host, port: ("93.184.216.34",),
+        connection_factory=factory,
+        connect_timeout=2.5,
+        read_timeout=7.5,
+    )
+
+    result = transport.fetch(
+        "https://example.com/report?version=1",
+        allowed_hosts=frozenset({"example.com"}),
+        allowed_schemes=frozenset({"https"}),
+        max_compressed_bytes=1024,
+        max_decompressed_bytes=1024,
+        allowed_content_types=frozenset({"text/html"}),
+    )
+
+    assert result.ok is True
+    assert factory_calls == [
+        ("https", "example.com", "93.184.216.34", 443, 2.5, 7.5)
+    ]
+    assert connection.request_args == (
+        "GET",
+        "/report?version=1",
+        {
+            "Host": "example.com",
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "close",
+            "User-Agent": "AIPlatformSourceCheck/1.0",
+        },
+    )

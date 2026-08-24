@@ -42,6 +42,12 @@ RELATION_TABLES = {
     "industry_case": ("industry_cases", "industry_content_item_id", "case_content_group_id"),
     "industry_resource": ("industry_resources", "industry_content_item_id", "resource_content_group_id"),
 }
+SOURCE_CHECK_COLUMNS = (
+    "source_check_code",
+    "source_checked_at",
+    "source_check_expires_at",
+    "source_check_url_sha256",
+)
 
 
 class ContentNotFoundError(LookupError):
@@ -82,6 +88,13 @@ def _group_for_draft(db, draft, timestamp):
             raise ContentNotFoundError()
         if row["entry_type"] != draft.entry_type:
             raise ContentValidationError("content_group_type_mismatch")
+        identity_column = {
+            "industry": "industry_id",
+            "scenario": "scenario_id",
+            "service": "service_id",
+        }.get(draft.entry_type)
+        if identity_column and row[identity_column] != draft.extension[identity_column]:
+            raise ContentValidationError("content_group_identity_mismatch")
         return row
 
     identity_column = {
@@ -113,20 +126,32 @@ def _group_for_draft(db, draft, timestamp):
     return db.execute("SELECT * FROM content_groups WHERE id=?", (cursor.lastrowid,)).fetchone()
 
 
-def _clear_changed_source_check(db, content_id, entry_type, extension):
+def _source_tuple(extension):
+    return tuple(extension.get(column) for column in SOURCE_CHECK_COLUMNS)
+
+
+def _server_owned_source_extension(db, content_id, entry_type, extension):
     if entry_type not in {"case", "resource"}:
         return extension
     table = EXTENSION_TABLES[entry_type][0]
     current = db.execute(
-        f"SELECT source_url_sha256 FROM {table} WHERE content_item_id=?", (content_id,)
+        f"SELECT source_url_sha256,{','.join(SOURCE_CHECK_COLUMNS)} "
+        f"FROM {table} WHERE content_item_id=?",
+        (content_id,),
     ).fetchone()
     if current is not None and current["source_url_sha256"] != extension.get("source_url_sha256"):
         extension = dict(extension)
-        for key in (
-            "source_check_code", "source_checked_at", "source_check_expires_at",
-            "source_check_url_sha256",
-        ):
+        for key in SOURCE_CHECK_COLUMNS:
             extension[key] = None
+        return extension
+    if current is not None:
+        current_tuple = tuple(current[column] for column in SOURCE_CHECK_COLUMNS)
+        supplied_tuple = _source_tuple(extension)
+        if any(value is not None for value in supplied_tuple) and supplied_tuple != current_tuple:
+            raise ContentValidationError("source_check_server_owned")
+        extension = dict(extension)
+        for key, value in zip(SOURCE_CHECK_COLUMNS, current_tuple):
+            extension[key] = value
     return extension
 
 
@@ -184,6 +209,12 @@ def _replace_children(db, content_id, draft, *, delete_existing):
 
 def _insert_content_draft(db, draft, *, actor, now, event_code):
     validated = validate_content_draft(draft)
+    if validated.entry_type in {"case", "resource"} and any(
+        value is not None for value in _source_tuple(validated.extension)
+    ):
+        raise ContentValidationError("source_check_server_owned")
+    if validated.publish_at is not None:
+        raise ContentValidationError("publish_at_managed_by_schedule")
     timestamp = format_shanghai(now)
     group = _group_for_draft(db, validated, timestamp)
     existing_draft = db.execute(
@@ -219,7 +250,9 @@ def _insert_content_draft(db, draft, *, actor, now, event_code):
 
 def insert_content_draft(db: sqlite3.Connection, draft: ContentDraft, *, actor: str, now) -> int:
     """Insert a complete aggregate without committing the caller's transaction."""
-    return _insert_content_draft(db, draft, actor=actor, now=now, event_code="content_created")
+    return _insert_content_draft(
+        db, draft, actor=actor, now=now, event_code="content_created"
+    )
 
 
 def update_content_draft(
@@ -245,7 +278,21 @@ def update_content_draft(
     validated = validate_content_draft(normalized)
     if validated.content_group_id != row["content_group_id"] or validated.entry_type != row["entry_type"]:
         raise ContentValidationError("content_identity_immutable")
-    extension = _clear_changed_source_check(db, content_id, row["entry_type"], dict(validated.extension))
+    if validated.publish_at != row["publish_at"]:
+        raise ContentValidationError("publish_at_managed_by_schedule")
+    group = db.execute(
+        "SELECT * FROM content_groups WHERE id=?", (row["content_group_id"],)
+    ).fetchone()
+    identity_column = {
+        "industry": "industry_id",
+        "scenario": "scenario_id",
+        "service": "service_id",
+    }.get(row["entry_type"])
+    if identity_column and group[identity_column] != validated.extension[identity_column]:
+        raise ContentValidationError("content_group_identity_mismatch")
+    extension = _server_owned_source_extension(
+        db, content_id, row["entry_type"], dict(validated.extension)
+    )
     validated = replace(validated, extension=extension)
     timestamp = format_shanghai(now)
     cursor = db.execute(
@@ -347,6 +394,16 @@ def validate_for_publication(db, content_id, now):
             "SELECT 1 FROM media_assets WHERE id=? AND status='ready'", (block.media_asset_id,)
         ).fetchone() is None:
             raise ContentValidationError("media_not_ready")
+    if (
+        draft.entry_type == "resource"
+        and draft.extension.get("attachment_media_id") is not None
+        and db.execute(
+            "SELECT 1 FROM media_assets WHERE id=? AND status='ready'",
+            (draft.extension["attachment_media_id"],),
+        ).fetchone()
+        is None
+    ):
+        raise ContentValidationError("media_not_ready")
     for relation in draft.relations:
         target_type = "case" if relation.relation_type.endswith("_case") else "resource"
         if db.execute(

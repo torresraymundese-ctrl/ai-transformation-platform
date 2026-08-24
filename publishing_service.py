@@ -78,6 +78,11 @@ def copy_revision(content_id: int, *, actor: str, now=None) -> int:
         if item["status"] not in {"published", "archived"}:
             raise ContentStateError("copy_source_not_immutable")
         draft = repository.load_content_draft(db, content_id)
+        if draft.entry_type in {"case", "resource"}:
+            extension = dict(draft.extension)
+            for column in repository.SOURCE_CHECK_COLUMNS:
+                extension[column] = None
+            draft = replace(draft, extension=extension)
         draft = replace(draft, publish_at=None)
         return repository._insert_content_draft(
             db,

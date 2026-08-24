@@ -1,18 +1,40 @@
 """Immutable contracts shared by content validation and publishing."""
 
 from dataclasses import dataclass, field
+import math
 from types import MappingProxyType
 from typing import Any, Mapping
 
 
-def _freeze(value):
+class ContentContractError(ValueError):
+    """Raised when a contract would retain unsafe or mutable input."""
+
+
+def _freeze_json(value):
     if isinstance(value, Mapping):
-        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+        frozen = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ContentContractError("JSON object keys must be strings")
+            frozen[key] = _freeze_json(item)
+        return MappingProxyType(frozen)
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    if isinstance(value, set):
-        return frozenset(_freeze(item) for item in value)
-    return value
+        return tuple(_freeze_json(item) for item in value)
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    raise ContentContractError("content contract values must be finite JSON data")
+
+
+def _contract_sequence(value, expected_type, field_name):
+    if not isinstance(value, (list, tuple)) or any(
+        not isinstance(item, expected_type) for item in value
+    ):
+        raise ContentContractError(
+            f"{field_name} must contain only {expected_type.__name__} values"
+        )
+    return tuple(value)
 
 
 @dataclass(frozen=True)
@@ -25,7 +47,11 @@ class ContentBlock:
     sort_order: int = 0
 
     def __post_init__(self):
-        object.__setattr__(self, "settings", _freeze(self.settings))
+        if isinstance(self.settings, Mapping):
+            object.__setattr__(self, "settings", _freeze_json(self.settings))
+        else:
+            # Keep the invalid shape immutable so server validation can return one code.
+            object.__setattr__(self, "settings", None)
 
 
 @dataclass(frozen=True)
@@ -64,11 +90,25 @@ class ContentDraft:
     metrics: tuple[CaseMetric, ...] = ()
 
     def __post_init__(self):
-        object.__setattr__(self, "extension", _freeze(self.extension))
-        object.__setattr__(self, "blocks", tuple(_freeze(self.blocks)))
-        object.__setattr__(self, "relations", tuple(_freeze(self.relations)))
+        if not isinstance(self.extension, Mapping):
+            raise ContentContractError("extension must be a JSON mapping")
+        object.__setattr__(self, "extension", _freeze_json(self.extension))
+        object.__setattr__(
+            self, "blocks", _contract_sequence(self.blocks, ContentBlock, "blocks")
+        )
+        object.__setattr__(
+            self,
+            "relations",
+            _contract_sequence(self.relations, ContentRelation, "relations"),
+        )
+        if not isinstance(self.maturity_codes, (list, tuple)) or any(
+            not isinstance(code, str) for code in self.maturity_codes
+        ):
+            raise ContentContractError("maturity_codes must contain only strings")
         object.__setattr__(self, "maturity_codes", tuple(self.maturity_codes))
-        object.__setattr__(self, "metrics", tuple(_freeze(self.metrics)))
+        object.__setattr__(
+            self, "metrics", _contract_sequence(self.metrics, CaseMetric, "metrics")
+        )
 
 
 @dataclass(frozen=True)

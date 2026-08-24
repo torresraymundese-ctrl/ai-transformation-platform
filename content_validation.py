@@ -3,9 +3,12 @@
 from dataclasses import replace
 import json
 import re
+from collections.abc import Mapping
+import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
-from content_contracts import ContentBlock, ContentDraft
+from content_clock import parse_shanghai
+from content_contracts import CaseMetric, ContentBlock, ContentDraft
 from security import sanitize_html
 from source_url_checker import normalize_source_url
 
@@ -22,6 +25,7 @@ RELATION_OWNERS = {
     "service_case": "service",
     "service_resource": "service",
 }
+MAX_CASE_METRICS = 20
 SETTINGS_KEYS = {
     "heading": frozenset({"level"}),
     "rich_text": frozenset(),
@@ -48,12 +52,18 @@ def _require_text(value, maximum, code):
 def _valid_timestamp(value):
     if value is None:
         return True
-    return bool(
+    if not (
         isinstance(value, str)
         and re.fullmatch(
             r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value
         )
-    )
+    ):
+        return False
+    try:
+        parse_shanghai(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _normalize_https_url(value):
@@ -66,16 +76,18 @@ def _normalize_https_url(value):
 def _safe_cta(value):
     if not isinstance(value, str) or not value:
         return False
-    if any(ord(character) < 32 for character in value):
+    if (
+        "\\" in value
+        or any(unicodedata.category(character).startswith("C") for character in value)
+        or re.search(r"%(?![0-9A-Fa-f]{2})", value)
+    ):
         return False
-    if value.startswith("/") and not value.startswith("//") and "\\" not in value:
+    if value.startswith("/") and not value.startswith("//"):
         return True
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError:
+    normalized, error = normalize_source_url(value)
+    if error or not normalized:
         return False
-    return parsed.scheme == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and port in (None, 443)
+    return urlsplit(normalized).scheme == "https"
 
 
 def _container_depth(value, depth=0):
@@ -98,6 +110,8 @@ def _validate_block(block, index):
     body = str(sanitize_html(block.body_html or "")) if block.body_html is not None else None
     if body is not None and len(body.encode("utf-8")) > 20_000:
         raise ContentValidationError("block_body_too_large")
+    if not isinstance(block.settings, Mapping):
+        raise ContentValidationError("block_settings_invalid")
     settings = dict(block.settings)
     if _container_depth(settings) > 2:
         raise ContentValidationError("block_settings_too_deep")
@@ -176,6 +190,15 @@ def _validate_extension(draft):
         ]
         if any(value is not None for value in check) and not all(value is not None for value in check):
             raise ContentValidationError("source_check_invalid")
+        if not all(
+            _valid_timestamp(value)
+            for value in (
+                extension["source_checked_at"],
+                extension["source_check_expires_at"],
+                extension["original_published_at"],
+            )
+        ):
+            raise ContentValidationError("extension_invalid")
     elif entry_type == "case":
         allowed = {
             "verification_code", "is_anonymized", "basis_type", "private_basis_reference",
@@ -192,7 +215,58 @@ def _validate_extension(draft):
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
         elif extension["basis_type"] != "private_authorization" or not extension["private_basis_reference"]:
             raise ContentValidationError("extension_invalid")
+        if not all(
+            _valid_timestamp(value)
+            for value in (
+                extension["source_checked_at"],
+                extension["source_check_expires_at"],
+                extension["verified_at"],
+            )
+        ):
+            raise ContentValidationError("extension_invalid")
     return extension
+
+
+def _metric_text(value, maximum, code):
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise ContentValidationError(code)
+    return value.strip()
+
+
+def _validate_metrics(draft):
+    if draft.entry_type != "case":
+        if draft.metrics:
+            raise ContentValidationError("metrics_not_allowed")
+        return ()
+    if len(draft.metrics) > MAX_CASE_METRICS:
+        raise ContentValidationError("too_many_metrics")
+    validated = []
+    for index, metric in enumerate(draft.metrics):
+        if not isinstance(metric, CaseMetric):
+            raise ContentValidationError("metric_invalid")
+        if type(metric.sort_order) is not int or metric.sort_order < 0:
+            raise ContentValidationError("metric_order_invalid")
+        validated.append(
+            replace(
+                metric,
+                name=_metric_text(metric.name, 120, "metric_name_invalid"),
+                before_value=_metric_text(
+                    metric.before_value, 120, "metric_before_invalid"
+                ),
+                after_value=_metric_text(
+                    metric.after_value, 120, "metric_after_invalid"
+                ),
+                unit=_metric_text(metric.unit, 40, "metric_unit_invalid"),
+                statistical_period=_metric_text(
+                    metric.statistical_period, 120, "metric_period_invalid"
+                ),
+                evidence_explanation=_metric_text(
+                    metric.evidence_explanation, 1000, "metric_evidence_invalid"
+                ),
+                sort_order=index,
+            )
+        )
+    return tuple(validated)
 
 
 def validate_content_draft(draft: ContentDraft) -> ContentDraft:
@@ -204,6 +278,8 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
     summary = _require_text(draft.summary, 300, "summary_invalid")
     seo_title = _require_text(draft.seo_title, 60, "seo_title_invalid")
     seo_description = _require_text(draft.seo_description, 160, "seo_description_invalid")
+    if draft.publish_at is not None and not _valid_timestamp(draft.publish_at):
+        raise ContentValidationError("publish_at_invalid")
     if len(draft.blocks) > 40:
         raise ContentValidationError("too_many_blocks")
     if len(draft.relations) > 50:
@@ -227,6 +303,7 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
     elif draft.maturity_codes:
         raise ContentValidationError("maturity_invalid")
     extension = _validate_extension(draft)
+    metrics = _validate_metrics(draft)
     return replace(
         draft,
         title=title,
@@ -236,4 +313,5 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
         extension=extension,
         blocks=blocks,
         relations=tuple(relations),
+        metrics=metrics,
     )
