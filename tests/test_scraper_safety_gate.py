@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from pathlib import Path
 
 import pytest
 import requests
@@ -6,6 +7,7 @@ from bs4 import BeautifulSoup
 
 
 TOKEN = "test-csrf-token"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def legacy_article_rows(db):
@@ -97,3 +99,13 @@ def test_direct_legacy_scraper_fails_closed_without_calling_source_adapter(monke
 
     assert str(error.value) == "ingestion_queue_not_ready"
     source_adapter.assert_not_called()
+
+
+def test_deployment_and_script_entrypoints_do_not_invoke_legacy_publication_helpers():
+    """Deployment and direct scripts must not bypass the reviewed ingestion queue."""
+    legacy_helpers = ("add_curated_articles", "save_article")
+    entrypoints = (ROOT / "deploy.sh", ROOT / "scraper.py", ROOT / "manage.py")
+
+    for entrypoint in entrypoints:
+        source = entrypoint.read_text(encoding="utf-8")
+        assert not any(helper in source for helper in legacy_helpers), entrypoint

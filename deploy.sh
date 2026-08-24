@@ -37,8 +37,7 @@ pip3 install --break-system-packages -r requirements.txt 2>/dev/null || pip3 ins
 echo "===== 3. 初始化数据库 ====="
 python3 -c "from models import init_db; init_db()"
 
-echo "===== 4. 抓取初始内容 ====="
-python3 -c "from scraper import add_curated_articles; print(f'Articles added: {add_curated_articles()}')"
+echo "===== 4. 内容接入队列尚未就绪；跳过旧内容发布 ====="
 
 echo "===== 5. 配置 Nginx ====="
 cp open.sucaiyigou.cn.conf /etc/nginx/sites-available/open.sucaiyigou.cn 2>/dev/null || \
