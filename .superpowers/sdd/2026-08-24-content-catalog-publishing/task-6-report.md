@@ -1366,10 +1366,12 @@ A-labels are rejected. It makes no DNS lookup or global-address decision and
 still never derives public origins from Host/X-Forwarded-Host. Valid Unicode
 IDN, punycode, IPv4, IPv6, and ports 1/443/8443/65535 remain covered.
 
-Optional block titles remain stored raw. Public rendering now suppresses only
-titles whose Python `strip()` is empty, uniformly across the existing optional
-title slots; meaningful body HTML retains its existing sanitization path. The
-real admin POST test proves a whitespace heading has no empty heading element
+At that point optional block titles remained stored raw. Fix1k subsequently
+normalizes whitespace-only optional titles to `None` at the save boundary;
+public rendering still suppresses absent titles uniformly across the existing
+optional title slots, while meaningful body HTML retains its existing
+sanitization path. The real admin POST test proves a whitespace heading has no
+empty heading element
 while its safe body remains visible.
 
 After code freeze, the required responsibility set ran once with a fresh,
@@ -1633,3 +1635,95 @@ runs. The historical full suite remains **UNKNOWN** and was not rerun; the
 historical PyPI-network violation remains **CONFIRMED**; the frozen
 `data_process_foundation` product-data limitation remains unchanged. No
 network, installation, production server, Nginx, or real database was used.
+
+## Fix1k — finite delivery ranges and exact public text
+
+Fix1k began from clean baseline `a42fdbd554bfeeeb1f77b03cd4cb7ac45e251bc3`.
+It was limited to finite/exact scenario and service delivery ranges, plus
+exact text semantics for public items and blocks. No Task 7 work, full suite,
+network access, dependency installation, production server, Nginx, or real
+database was used.
+
+### Environment
+
+Each pytest command used the assigned Python `3.12.13` interpreter,
+process-scoped `PYTHONPATH=.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps`,
+`-p no:cacheprovider`, and a unique `pytest-task6-fix1k-*` basetemp. The
+offline overlay supplied `pypdf 6.10.0`; no install or network request was
+made.
+
+### TDD evidence
+
+The first focused RED selection (`pytest-task6-fix1k-red-boundaries-001`)
+exercised formal immediate publication, public list/detail projection, due
+publishing, top-level NUL text, block text, and range predicates:
+
+```text
+43 failed, 2 passed in 23.98s
+tool exit_code=1
+```
+
+The two already-passing negative-infinity cases were not setup errors: the old
+positive comparison happened to reject them. The 43 failures established the
+missing positive-infinity, fractional-week, exact-text, and public
+fail-closed behavior. A narrow reviewer follow-up RED
+(`pytest-task6-fix1k-red-title-due-002`) explicitly covered block-title NUL
+and due core-week validation:
+
+```text
+2 failed in 1.41s
+PYTEST_RED_NARROW_EXIT=1
+```
+
+Minimal GREEN introduced shared `content_validation` gates: budget endpoints
+must be exact built-in `int`/`float`, finite, positive, and ordered; weeks
+must be exact built-in positive ordered `int`s. Publication and public reads
+use their distinct gates, including validation before `_scenario_authority`
+construction. Exact text now protects top-level public fields and renderer
+plain settings; whitespace optional block titles normalize to `None`, while
+NUL/overlength titles reject as `block_title_invalid`. Focused GREEN
+(`pytest-task6-fix1k-green-boundaries-003`) returned:
+
+```text
+46 passed in 26.12s
+PYTEST_GREEN_EXIT=0
+```
+
+After direct exact-type/subclass predicate coverage was added, the frozen
+responsibility command was run exactly once:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\local-deps').Path
+..\\..\\.venv\\Scripts\\python.exe -m pytest -q -p no:cacheprovider --basetemp '.superpowers\\sdd\\2026-08-24-content-catalog-publishing\\pytest-task6-fix1k-responsibility-final-004' tests\\test_public_catalog.py tests\\test_catalog_content_admin.py tests\\test_content_validation.py tests\\test_content_publishing.py tests\\test_content_seed.py tests\\test_content_migrations.py tests\\test_app_factory_and_migrations.py tests\\test_media_service.py tests\\test_media_http.py tests\\test_v2_migrations.py
+```
+
+```text
+580 passed in 288.61s (0:04:48)
+PYTEST_RESPONSIBILITY_EXIT=0
+```
+
+### Static, scope, and file inventory
+
+`py_compile` of changed Python files exited 0; `git diff --check` exited 0;
+and direct-SQL guards for `blueprints/public_catalog.py` and
+`blueprints/admin/catalog.py` passed. Self-review confirmed the former broad
+`numbers.Real`/`_valid_range` helpers are absent, core weeks are checked before
+authority construction, list/detail fail closed together, and no body HTML,
+CTA URL, share/resource MIME, assessment seed, or Task 7 contract changed.
+
+Fix1k changed:
+
+- `catalog_content_repository.py`
+- `content_validation.py`
+- `publishing_repository.py`
+- `tests/test_catalog_content_admin.py`
+- `tests/test_content_publishing.py`
+- `tests/test_content_validation.py`
+- `tests/test_public_catalog.py`
+- this report
+
+The Fix1i note above is superseded for current behavior: whitespace-only
+optional titles now normalize to `None` rather than remaining raw. Historical
+limits remain unchanged: the original full-suite result is **UNKNOWN** and was
+not rerun; the PyPI-network violation is **CONFIRMED**; and the frozen
+`data_process_foundation` product-data limitation remains unchanged.

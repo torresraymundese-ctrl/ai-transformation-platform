@@ -11,7 +11,12 @@ from content_contracts import (
     ContentDraft,
     ContentRelation,
 )
-from content_validation import ContentValidationError, validate_content_draft
+from content_validation import (
+    ContentValidationError,
+    is_valid_public_budget_range,
+    is_valid_public_week_range,
+    validate_content_draft,
+)
 
 
 def _draft(**changes):
@@ -615,3 +620,101 @@ def test_case_metric_fields_have_literal_schema_limits(changes, code):
     with pytest.raises(ContentValidationError) as error:
         validate_content_draft(_case_draft(metrics=(_metric(**changes),)))
     assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("field", "code"),
+    (
+        ("title", "title_invalid"),
+        ("summary", "summary_invalid"),
+        ("seo_title", "seo_title_invalid"),
+        ("seo_description", "seo_description_invalid"),
+    ),
+)
+def test_top_level_public_text_rejects_nul_with_its_stable_code(field, code):
+    """Catch a persisted NUL that strip-only top-level validation used to accept."""
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(_draft(**{field: f"有效\x00{field}"}))
+
+    assert error.value.code == code
+
+
+class _FloatSubclass(float):
+    pass
+
+
+class _IntSubclass(int):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum"),
+    (
+        (True, 2),
+        (_IntSubclass(1), 2),
+        (_FloatSubclass(1.0), 2.0),
+        (float("nan"), 2.0),
+        (float("inf"), float("inf")),
+    ),
+)
+def test_public_budget_range_requires_finite_exact_int_or_float_endpoints(minimum, maximum):
+    assert not is_valid_public_budget_range(minimum, maximum)
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum"),
+    (
+        (True, 2),
+        (_IntSubclass(1), 2),
+        (1.5, 2.5),
+        (1, 2.0),
+    ),
+)
+def test_public_week_range_requires_exact_positive_integer_endpoints(minimum, maximum):
+    assert not is_valid_public_week_range(minimum, maximum)
+
+
+def test_whitespace_only_optional_block_title_normalizes_to_none():
+    """Keep optional title blanks out of persistence without rejecting a valid body."""
+    validated = validate_content_draft(
+        _draft(
+            blocks=(
+                ContentBlock(
+                    "heading", title=" \t ", body_html="<p>可见正文</p>",
+                    settings={"level": 2},
+                ),
+            ),
+        )
+    )
+
+    assert validated.blocks[0].title is None
+
+
+def test_optional_block_title_rejects_nul_with_stable_title_error():
+    """Reject a control character rather than normalizing it into an optional title."""
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(
+            _draft(blocks=(ContentBlock("heading", title="标题\x00", settings={"level": 2}),))
+        )
+
+    assert error.value.code == "block_title_invalid"
+
+
+@pytest.mark.parametrize(
+    "block",
+    (
+        ContentBlock("image_text", settings={"alignment": "left", "alt_text": "图\x00示"}),
+        ContentBlock("metric", settings={"value": "10\x00", "unit": "项"}),
+        ContentBlock("metric", settings={"value": "10", "unit": "项\x00"}),
+        ContentBlock("steps", settings={"items": ("步骤\x00一",)}),
+        ContentBlock("download", settings={"label": "下载\x00"}),
+        ContentBlock("cta", settings={"label": "开始\x00", "url": "/assessment", "style": "primary"}),
+    ),
+    ids=("image-alt", "metric-value", "metric-unit", "step-item", "download-label", "cta-label"),
+)
+def test_block_plain_text_settings_reject_nul_with_stable_settings_error(block):
+    """Prevent a control character in a renderer-consumed setting from persisting."""
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(_draft(blocks=(block,)))
+
+    assert error.value.code == "block_settings_invalid"

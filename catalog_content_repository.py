@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from html import unescape
-from numbers import Real
 import re
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -12,7 +11,14 @@ from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import as_shanghai, format_shanghai
 from content_json import ContentJsonError, decode_database_json
 from content_contracts import ContentDraft
-from content_validation import ContentValidationError, _safe_cta, is_exact_nonblank_text, public_input_texts
+from content_validation import (
+    ContentValidationError,
+    _safe_cta,
+    is_exact_nonblank_text,
+    is_valid_public_budget_range,
+    is_valid_public_week_range,
+    public_input_texts,
+)
 from media_validation import IMAGE_MIMES
 from pagination import Page, PageRequest
 import publishing_repository
@@ -345,7 +351,7 @@ def _public_block(row):
     if block_type not in expected or set(settings) != expected[block_type]:
         return None
     if (
-        (row["title"] is not None and type(row["title"]) is not str)
+        (row["title"] is not None and not is_exact_nonblank_text(row["title"], maximum=120))
         or (row["body_html"] is not None and type(row["body_html"]) is not str)
         or (row["media_asset_id"] is not None and (
             type(row["media_asset_id"]) is not int or row["media_asset_id"] <= 0
@@ -359,20 +365,20 @@ def _public_block(row):
     if block_type == "image_text" and (
         type(settings["alignment"]) is not str
         or settings["alignment"] not in {"left", "right"}
-        or type(settings["alt_text"]) is not str
+        or not is_exact_nonblank_text(settings["alt_text"])
     ):
         return None
     if block_type == "metric" and not all(
-        type(settings[key]) is str and settings[key] for key in ("value", "unit")
+        is_exact_nonblank_text(settings[key]) for key in ("value", "unit")
     ):
         return None
     if block_type == "steps" and not (
         type(settings["items"]) is list and settings["items"]
-        and all(type(item) is str and item for item in settings["items"])
+        and all(is_exact_nonblank_text(item) for item in settings["items"])
     ):
         return None
     if block_type in {"download", "cta"} and not (
-        type(settings["label"]) is str and settings["label"]
+        is_exact_nonblank_text(settings["label"])
     ):
         return None
     if block_type == "cta" and (
@@ -429,6 +435,18 @@ def _nonblank_values(values):
     return bool(values) and all(is_exact_nonblank_text(value) for value in values)
 
 
+def _valid_public_item_text(item):
+    return all(
+        is_exact_nonblank_text(item[field], maximum=maximum)
+        for field, maximum in (
+            ("title", 120),
+            ("summary", 300),
+            ("seo_title", 60),
+            ("seo_description", 160),
+        )
+    )
+
+
 def _exact_nonblank_json_list(value):
     try:
         decoded = decode_database_json(value)
@@ -437,14 +455,6 @@ def _exact_nonblank_json_list(value):
     if type(decoded) is not list or not _nonblank_values(decoded):
         return None
     return tuple(decoded)
-
-
-def _valid_range(minimum, maximum):
-    return (
-        type(minimum) is not bool and type(maximum) is not bool
-        and isinstance(minimum, Real) and isinstance(maximum, Real)
-        and minimum > 0 and minimum <= maximum
-    )
 
 
 def _meaningful_blocks(blocks):
@@ -461,8 +471,8 @@ def _valid_services(services):
     for service in services:
         if (
             not is_exact_nonblank_text(service["public_name"])
-            or not _valid_range(service["min_budget"], service["max_budget"])
-            or not _valid_range(service["min_weeks"], service["max_weeks"])
+            or not is_valid_public_budget_range(service["min_budget"], service["max_budget"])
+            or not is_valid_public_week_range(service["min_weeks"], service["max_weeks"])
             or not _nonblank_values(service["steps"])
             or not _nonblank_values(service["prerequisites"])
             or not _nonblank_values(service["acceptance"])
@@ -477,7 +487,9 @@ def _scenario_authority(db, scenario_id):
     if row is None:
         return None
     risk_codes = _exact_nonblank_json_list(row["risk_codes_json"])
-    if risk_codes is None:
+    if risk_codes is None or not is_valid_public_week_range(
+        row["min_weeks"], row["max_weeks"]
+    ):
         return None
     return ScenarioAuthority(
         scenario_id=row["id"], code=row["code"], category_code=row["category_code"],
@@ -510,6 +522,8 @@ def _public_risks(authority):
 
 def _scenario_projection(db, item, redirect, authority: ScenarioAuthority | None = None):
     """Return a public scenario only when every required public section is real."""
+    if not _valid_public_item_text(item):
+        return None
     if "scenario_id" in item.keys():
         scenario_id = item["scenario_id"]
     else:
@@ -570,7 +584,9 @@ def _scenario_projection(db, item, redirect, authority: ScenarioAuthority | None
         _nonblank_values(tuple(metric["value"] for metric in metrics)), risks,
         all(_nonblank_values((risk["label"], risk["description"])) for risk in risks),
         maturity_codes, all(code in MATURITY_LABELS for code in maturity_codes), timeline, budget,
-        all(_valid_range(*value) for value in timeline), all(_valid_range(*value) for value in budget),
+        is_valid_public_week_range(authority.min_weeks, authority.max_weeks),
+        all(is_valid_public_week_range(*value) for value in timeline),
+        all(is_valid_public_budget_range(*value) for value in budget),
     )):
         return None
     return MappingProxyType({
@@ -597,7 +613,11 @@ def _industry_projection(db, item, redirect, now):
         "SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id "
         "WHERE g.id=? AND i.status='published'", (item["content_group_id"],)
     ).fetchone()
-    if row is None or not is_exact_nonblank_text(row["name"]):
+    if (
+        row is None
+        or not _valid_public_item_text(item)
+        or not is_exact_nonblank_text(row["name"])
+    ):
         return None
     blocks = _blocks(db, item["id"])
     pains = _names(

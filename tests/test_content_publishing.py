@@ -1191,3 +1191,27 @@ def test_manage_publish_due_content_does_not_accept_an_operator_clock_override()
         )
 
     assert error.value.code == 2
+
+
+def test_save_rejects_nul_top_level_text_without_draft_or_audit_residue(db):
+    """Catch a formal save that would persist a later-unrenderable content title."""
+    content_id = create_content_draft(_announcement("nul-title-save"), actor="admin", now=NOW)
+    before = _row(db, content_id)
+    invalid = replace(
+        publishing_repository.load_content_draft(db, content_id),
+        title="有效\x00标题",
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        save_content_draft(
+            content_id, before["lock_version"], invalid, actor="admin", now=NOW,
+        )
+
+    assert error.value.code == "title_invalid"
+    assert tuple(_row(db, content_id)[key] for key in ("title", "lock_version")) == (
+        before["title"], before["lock_version"],
+    )
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_updated'", (content_id,)
+    ).fetchone()[0] == 0

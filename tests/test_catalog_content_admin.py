@@ -410,7 +410,7 @@ def test_admin_publish_whitespace_heading_title_keeps_body_without_an_empty_head
     assert db.execute(
         "SELECT title FROM content_blocks WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1",
         (item["id"],),
-    ).fetchone()[0] == "   "
+    ).fetchone()[0] is None
     public = admin_client.get(f"/scenarios/{item['slug']}")
     document = BeautifulSoup(public.data, "html.parser")
     assert public.status_code == 200

@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import json
+import math
 import re
 from collections.abc import Mapping
 import unicodedata
@@ -53,6 +54,28 @@ def is_exact_nonblank_text(value, *, maximum=None):
     )
 
 
+def is_valid_public_budget_range(minimum, maximum):
+    """Require finite exact numeric budget endpoints without accepting bool/subclasses."""
+    return (
+        type(minimum) in {int, float}
+        and type(maximum) in {int, float}
+        and (type(minimum) is int or math.isfinite(minimum))
+        and (type(maximum) is int or math.isfinite(maximum))
+        and minimum > 0
+        and minimum <= maximum
+    )
+
+
+def is_valid_public_week_range(minimum, maximum):
+    """Require exact positive integer week endpoints for public delivery timelines."""
+    return (
+        type(minimum) is int
+        and type(maximum) is int
+        and minimum > 0
+        and minimum <= maximum
+    )
+
+
 def public_input_texts(rows):
     """Return stable public inputs, or None when any persisted row is malformed."""
     values = []
@@ -76,7 +99,7 @@ def public_input_texts(rows):
 
 
 def _require_text(value, maximum, code):
-    if type(value) is not str or not value.strip() or len(value) > maximum:
+    if not is_exact_nonblank_text(value, maximum=maximum):
         raise ContentValidationError(code)
     return value.strip()
 
@@ -161,10 +184,11 @@ def _validate_block(block, index):
         or block.block_type not in BLOCK_TYPES
     ):
         raise ContentValidationError("block_type_invalid")
-    if block.title is not None and (
-        type(block.title) is not str or len(block.title) > 120
-    ):
-        raise ContentValidationError("block_title_invalid")
+    title = block.title
+    if title is not None:
+        if type(title) is not str or "\x00" in title or len(title) > 120:
+            raise ContentValidationError("block_title_invalid")
+        title = title if title.strip() else None
     if block.body_html is not None and type(block.body_html) is not str:
         raise ContentValidationError("block_body_invalid")
     body = str(sanitize_html(block.body_html or "")) if block.body_html is not None else None
@@ -187,26 +211,25 @@ def _validate_block(block, index):
         if (
             type(settings["alignment"]) is not str
             or settings["alignment"] not in {"left", "right"}
-            or type(settings["alt_text"]) is not str
+            or not is_exact_nonblank_text(settings["alt_text"])
         ):
             raise ContentValidationError("block_settings_invalid")
     if block.block_type == "metric" and not all(
-        type(settings[key]) is str and settings[key] for key in ("value", "unit")
+        is_exact_nonblank_text(settings[key]) for key in ("value", "unit")
     ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "steps" and not (
-        isinstance(settings["items"], tuple)
+        type(settings["items"]) is tuple
         and settings["items"]
-        and all(type(item) is str and item for item in settings["items"])
+        and all(is_exact_nonblank_text(item) for item in settings["items"])
     ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "download" and not (
-        type(settings["label"]) is str and settings["label"]
+        is_exact_nonblank_text(settings["label"])
     ):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "cta" and not (
-        type(settings["label"]) is str
-        and settings["label"]
+        is_exact_nonblank_text(settings["label"])
         and type(settings["style"]) is str
         and settings["style"] in {"primary", "secondary", "text"}
         and _safe_cta(settings["url"])
@@ -218,7 +241,7 @@ def _validate_block(block, index):
         raise ContentValidationError("block_media_invalid")
     if type(block.sort_order) is not int or block.sort_order < 0:
         raise ContentValidationError("block_order_invalid")
-    return replace(block, body_html=body, sort_order=index)
+    return replace(block, title=title, body_html=body, sort_order=index)
 
 
 def _validate_extension(draft):

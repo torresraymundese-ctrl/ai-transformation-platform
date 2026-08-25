@@ -3,7 +3,6 @@
 from dataclasses import replace
 from html import unescape
 import json
-from numbers import Real
 import re
 import sqlite3
 
@@ -14,6 +13,8 @@ from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRel
 from content_validation import (
     ContentValidationError,
     is_exact_nonblank_text,
+    is_valid_public_budget_range,
+    is_valid_public_week_range,
     public_input_texts,
     validate_content_draft,
 )
@@ -475,14 +476,6 @@ def _nonblank_strings(value):
     )
 
 
-def _valid_range(minimum, maximum):
-    return (
-        type(minimum) is not bool and type(maximum) is not bool
-        and isinstance(minimum, Real) and isinstance(maximum, Real)
-        and minimum > 0 and minimum <= maximum
-    )
-
-
 def _meaningful_html(value):
     return type(value) is str and bool(
         unescape(re.sub(r"<[^>]*>", "", value)).strip()
@@ -557,7 +550,7 @@ def _validate_scenario_publication(db, content_id, draft):
         code not in RISK_LABELS or code not in RISK_EXPLANATIONS for code in risk_codes
     ):
         raise ContentValidationError("scenario_public_incomplete")
-    if not _valid_range(scenario["min_weeks"], scenario["max_weeks"]):
+    if not is_valid_public_week_range(scenario["min_weeks"], scenario["max_weeks"]):
         raise ContentValidationError("scenario_public_incomplete")
     industry_rows = db.execute(
         "SELECT i.name,i.status AS industry_status,ib.status AS branch_status "
@@ -615,8 +608,8 @@ def _validate_scenario_publication(db, content_id, draft):
         if (
             service["service_id"] is None or service["service_status"] != "published"
             or not is_exact_nonblank_text(service["service_name"])
-            or not _valid_range(service["min_budget"], service["max_budget"])
-            or not _valid_range(service["service_min_weeks"], service["service_max_weeks"])
+            or not is_valid_public_budget_range(service["min_budget"], service["max_budget"])
+            or not is_valid_public_week_range(service["service_min_weeks"], service["service_max_weeks"])
         ):
             raise ContentValidationError("scenario_public_incomplete")
         source_lists = tuple(

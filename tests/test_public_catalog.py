@@ -1738,3 +1738,197 @@ def test_industry_list_and_detail_require_real_published_sections(client, db, mi
     document = page(client.get("/industries"))
     assert "manufacturing" not in {card["data-industry-code"] for card in document.select("[data-industry-code]")}
     assert client.get("/industries/manufacturing").status_code == 404
+
+
+def _corrupt_scenario_range(db, scenario_id, source, minimum, maximum):
+    columns = {
+        "core_weeks": ("scenarios", "min_weeks", "max_weeks"),
+        "service_weeks": ("services", "min_weeks", "max_weeks"),
+        "service_budget": ("services", "min_budget", "max_budget"),
+    }[source]
+    table, minimum_column, maximum_column = columns
+    if table == "scenarios":
+        db.execute(
+            f"UPDATE {table} SET {minimum_column}=?,{maximum_column}=? WHERE id=?",
+            (minimum, maximum, scenario_id),
+        )
+    else:
+        db.execute(
+            f"UPDATE {table} SET {minimum_column}=?,{maximum_column}=? WHERE id IN ("
+            "SELECT service_id FROM scenario_services WHERE scenario_id=?)",
+            (minimum, maximum, scenario_id),
+        )
+    db.commit()
+
+
+@pytest.mark.parametrize(
+    ("source", "minimum", "maximum"),
+    (
+        ("service_budget", float("inf"), float("inf")),
+        ("service_budget", float("-inf"), float("-inf")),
+        ("core_weeks", 1.5, 2.5),
+        ("service_weeks", 1.5, 2.5),
+    ),
+    ids=("positive-infinity-budget", "negative-infinity-budget", "fractional-core-weeks", "fractional-service-weeks"),
+)
+def test_formal_publish_rejects_nonfinite_budget_and_nonintegral_weeks_without_replacing_current(
+    db, source, minimum, maximum
+):
+    """Keep a saved candidate draft when core range values cannot form public ranges."""
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _corrupt_scenario_range(
+        db, current["scenario_id"], source, minimum, maximum,
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+
+
+@pytest.mark.parametrize(
+    ("source", "minimum", "maximum"),
+    (
+        ("service_budget", float("inf"), float("inf")),
+        ("service_budget", float("-inf"), float("-inf")),
+        ("core_weeks", 1.5, 2.5),
+        ("service_weeks", 1.5, 2.5),
+    ),
+    ids=("positive-infinity-budget", "negative-infinity-budget", "fractional-core-weeks", "fractional-service-weeks"),
+)
+def test_public_scenario_fails_closed_for_legacy_nonfinite_budget_and_nonintegral_weeks(
+    client, db, source, minimum, maximum
+):
+    """Never keep a legacy range on a public card when its detail is unsafe."""
+    scenario_id = db.execute(
+        "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
+    ).fetchone()[0]
+    _corrupt_scenario_range(db, scenario_id, source, minimum, maximum)
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"]
+        for card in page(client.get("/scenarios")).select("[data-scenario-code]")
+    }
+
+
+def test_due_nonintegral_core_weeks_failure_is_isolated_from_a_healthy_scenario(client, db):
+    """Ensure one due candidate with fractional core weeks cannot stop its healthy peer."""
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    due = NOW_DATETIME + timedelta(hours=1)
+    schedule_content(revision_id, lock_version, due, actor="test-admin", now=NOW_DATETIME)
+    _corrupt_scenario_range(
+        db, current["scenario_id"], "core_weeks", 1.5, 2.5,
+    )
+    healthy = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='retail_ai_service' "
+        "AND ci.status='published'"
+    ).fetchone()
+    healthy_revision = copy_revision(healthy["id"], actor="test-admin", now=NOW_DATETIME)
+    schedule_content(healthy_revision, 1, due, actor="test-admin", now=NOW_DATETIME)
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert healthy_revision in result.published_ids
+    assert (revision_id, "validation_failed") in result.failures
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=4)
+    assert db.execute(
+        "SELECT publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'", (revision_id,)
+    ).fetchone()[0] == 1
+
+
+def test_formal_publish_rejects_corrupted_draft_top_level_nul_without_archiving_current(client, db):
+    """Catch publication of an unreadable top-level title injected after save."""
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    db.execute(
+        "UPDATE content_items SET title=? WHERE id=?", ("有效\x00标题", revision_id)
+    )
+    db.commit()
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "title_invalid"
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=lock_version)
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("entry_type", "slug", "detail_path", "list_path", "selector", "code"),
+    (
+        ("scenario", "mfg-knowledge-assistant", "/scenarios/mfg-knowledge-assistant", "/scenarios", "[data-scenario-code]", "mfg_knowledge_assistant"),
+        ("industry", "manufacturing", "/industries/manufacturing", "/industries", "[data-industry-code]", "manufacturing"),
+    ),
+)
+@pytest.mark.parametrize("field", ("title", "summary", "seo_title", "seo_description"))
+def test_public_catalog_fails_closed_for_legacy_top_level_nul(
+    client, db, entry_type, slug, detail_path, list_path, selector, code, field
+):
+    """Keep both public lists and details private for a malformed persisted item field."""
+    revision = db.execute(
+        "SELECT id FROM content_items WHERE entry_type=? AND status='draft' AND slug=?",
+        (entry_type, slug),
+    ).fetchone()
+    db.execute(
+        f"UPDATE content_items SET {field}=? WHERE id=?", (f"有效\x00{field}", revision["id"])
+    )
+    db.commit()
+    publish_catalog(db)
+
+    assert client.get(detail_path).status_code == 404
+    assert code not in {
+        card.get(f"data-{entry_type}-code")
+        for card in page(client.get(list_path)).select(selector)
+    }
+
+
+def _write_legacy_invalid_plain_block(db, revision_id, source, value):
+    if source == "title":
+        db.execute(
+            "UPDATE content_blocks SET title=? WHERE id=(SELECT id FROM content_blocks "
+            "WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+            (value, revision_id),
+        )
+    else:
+        block_type, settings = {
+            "image_alt": ("image_text", {"alignment": "left", "alt_text": value}),
+            "metric_value": ("metric", {"value": value, "unit": "项"}),
+            "metric_unit": ("metric", {"value": "10", "unit": value}),
+            "step_item": ("steps", {"items": [value]}),
+            "download_label": ("download", {"label": value}),
+            "cta_label": ("cta", {"label": value, "url": "/assessment", "style": "primary"}),
+        }[source]
+        db.execute(
+            "INSERT INTO content_blocks(content_item_id,block_type,title,body_html,settings_json,media_asset_id,sort_order) "
+            "VALUES (?,?,?,'<p>合法正文</p>',?,NULL,99)",
+            (revision_id, block_type, "合法块标题", json.dumps(settings, ensure_ascii=False)),
+        )
+    db.commit()
+
+
+@pytest.mark.parametrize(
+    "source", ("title", "image_alt", "metric_value", "metric_unit", "step_item", "download_label", "cta_label"),
+)
+@pytest.mark.parametrize("value", ("有效\x00文本", " "), ids=("nul", "blank"))
+def test_public_scenario_fails_closed_for_legacy_invalid_block_plain_text(client, db, source, value):
+    """Reject each persisted title/renderer setting that save-time exact text protects."""
+    revision = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='mfg_knowledge_assistant' "
+        "AND ci.status='draft'"
+    ).fetchone()
+    _write_legacy_invalid_plain_block(db, revision["id"], source, value)
+    publish_catalog(db)
+
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"]
+        for card in page(client.get("/scenarios")).select("[data-scenario-code]")
+    }
