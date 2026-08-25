@@ -2249,3 +2249,55 @@ generation, production server, Nginx, or real database was used. The
 historical full-suite outcome remains **UNKNOWN** and was not rerun. The
 historical PyPI-network violation remains **CONFIRMED**. The frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1n controller verification
+
+The controller independently verified frozen Fix1n implementation commit
+`abdb6581acb3bf9820ca5576bacfb317b9c3d82d`. Every effective run used the
+assigned Python `3.12.13` interpreter, the exact worktree `local-deps` overlay
+in the same PowerShell process, `pypdf 6.10.0` verified inside Python, no
+pytest cache provider, and a unique basetemp. `PYTHONIOENCODING` and
+`PYTHONUTF8` were unset.
+
+```powershell
+$env:PYTHONPATH='D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.worktrees\core-assessment-report\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps'
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1n-focused-001'
+```
+
+Result: `586 passed in 264.11s (0:04:24)`, pytest/controller `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH='D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.worktrees\core-assessment-report\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps'
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1n-public-001'
+```
+
+Result: `410 passed in 214.53s`, pytest/controller `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH='D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.worktrees\core-assessment-report\.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps'
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1n-related-corrected-002'
+```
+
+Result: `336 passed in 145.93s (0:02:25)`, pytest/controller `exit_code=0`.
+
+For transparency, the focused and related controllers initially decoded a
+Chinese absolute path printed by Python as mojibake and then performed an
+unnecessary PowerShell-side prefix comparison. Their overlay versions were
+already `pypdf 6.10.0`, but the display comparison falsely failed; those
+harness probes exited 99 and 96 respectively before pytest started. They had
+no product-test outcome. The effective commands verified the resolved module
+inside Python and returned only an ASCII boolean before starting pytest. The
+focused basetemp was reusable because its first attempt never started pytest;
+the related correction used a new basetemp. No package was installed and no
+network was used.
+
+Controller `py_compile` over `publishing_repository.py` and
+`tests/test_public_catalog.py`, `git diff --check` for both
+`bca5330..abdb658` and `1c359a7..abdb658`, and the no-direct-SQL guards for
+both catalog Blueprints all passed. Each effective controller confirmed the
+same frozen HEAD and clean all-files status before and after its read-only run.
+No full suite, production server, Nginx, real database, network access, or
+dependency installation was used. The historical full-suite outcome remains
+**UNKNOWN** and was not rerun; the historical PyPI-network violation remains
+**CONFIRMED**; and the frozen `data_process_foundation` product-data limitation
+remains unchanged.
