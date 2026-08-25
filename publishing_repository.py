@@ -531,25 +531,30 @@ def _validate_industry_publication(db, content_id, draft, now):
         raise ContentValidationError("industry_public_incomplete")
     timestamp = format_shanghai(now)
     candidates = db.execute(
-        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "SELECT DISTINCT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
         "JOIN scenario_branches sb ON sb.scenario_id=g.scenario_id "
         "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
         "WHERE ci.entry_type='scenario' AND ci.status='published' "
         "AND (ci.publish_at IS NULL OR ci.publish_at<=?) AND ib.industry_id=? "
+        "AND ib.status='published' "
         "ORDER BY ci.id",
         (timestamp, industry_id),
     ).fetchall()
     for candidate in candidates:
         try:
             candidate_draft = _load_validated_publication_draft(db, candidate["id"])
-            _validate_scenario_publication(db, candidate["id"], candidate_draft)
+            _validate_scenario_publication(
+                db, candidate["id"], candidate_draft, published_only_core=True
+            )
         except ContentValidationError:
             continue
         return
     raise ContentValidationError("industry_public_incomplete")
 
 
-def _validate_scenario_publication(db, content_id, draft):
+def _validate_scenario_publication(
+    db, content_id, draft, *, published_only_core=False
+):
     scenario_id = draft.extension["scenario_id"]
     rows = _scenario_source_rows(db, scenario_id)
     if not rows or rows[0]["status"] != "published":
@@ -562,20 +567,33 @@ def _validate_scenario_publication(db, content_id, draft):
         raise ContentValidationError("scenario_public_incomplete")
     if not is_valid_public_week_range(scenario["min_weeks"], scenario["max_weeks"]):
         raise ContentValidationError("scenario_public_incomplete")
+    industry_status_sql = (
+        " AND ib.status='published' AND i.status='published'"
+        if published_only_core else ""
+    )
+    department_status_sql = (
+        " AND d.status='published'" if published_only_core else ""
+    )
+    pain_status_sql = (
+        " AND p.status='published'" if published_only_core else ""
+    )
     industry_rows = db.execute(
         "SELECT i.name,i.status AS industry_status,ib.status AS branch_status "
         "FROM scenario_branches sb JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
-        "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? ORDER BY ib.id",
+        "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=?"
+        f"{industry_status_sql} ORDER BY ib.id",
         (scenario_id,),
     ).fetchall()
     department_rows = db.execute(
         "SELECT d.name,d.status FROM scenario_departments link "
-        "JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? ORDER BY d.id",
+        "JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=?"
+        f"{department_status_sql} ORDER BY d.id",
         (scenario_id,),
     ).fetchall()
     pain_rows = db.execute(
         "SELECT p.name,p.status FROM scenario_pains link "
-        "JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=? ORDER BY p.id",
+        "JOIN pain_points p ON p.id=link.pain_point_id WHERE link.scenario_id=?"
+        f"{pain_status_sql} ORDER BY p.id",
         (scenario_id,),
     ).fetchall()
     input_rows = db.execute(

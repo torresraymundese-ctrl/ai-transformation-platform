@@ -2307,3 +2307,144 @@ dependency installation was used. The historical full-suite outcome remains
 **UNKNOWN** and was not rerun; the historical PyPI-network violation remains
 **CONFIRMED**; and the frozen `data_process_foundation` product-data limitation
 remains unchanged.
+
+## Fix1o — align nested scenario core health with the public projection
+
+**Status: DONE_WITH_CONCERNS, awaiting fresh external scoped review.** Fix1o
+started from clean baseline
+`7dfbcdffc91f0bf64ab00ce4b13bee196a992931` on
+`codex/ai-platform-2.0-core`. It addresses only the fresh-review P2: an
+industry replacement treated every archived core industry branch, department,
+or pain relation on an otherwise-public scenario as a fatal dependency, even
+though the public projection intentionally omits archived rows and remains
+complete when at least one published, exact-nonblank target remains in every
+required core family. Task 7, the ledger, external task card, and unrelated
+publication rules stayed frozen.
+
+Three fresh SDD agents were dispatched for implementation, design review, and
+test review. They established the minimal boundary and test obligations before
+the collaboration service reached its session usage limit; the controller then
+completed and verified their shared-worktree changes locally. No review
+finding was waived because of that service limit.
+
+### Root cause and authoritative RED
+
+The direct scenario publication gate correctly requires every persisted core
+association to point at a currently published target. Fix1n reused that strict
+gate inside the industry candidate loop. That was too strong for a previously
+published scenario whose public read model filters archived core rows: one
+archived non-unique department blocked all later industry replacements even
+while two valid published departments, a valid industry, and a valid pain
+remained and both public pages returned HTTP 200.
+
+Before any production edit, the authoritative lifecycle RED used disposable
+SQLite, formal services, the assigned absolute interpreter, the checked-in
+process-scoped dependency overlay, no pytest cache provider, and a unique
+basetemp:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest 'tests\test_public_catalog.py::test_industry_nested_scenario_ignores_archived_core_department_with_published_remainders' 'tests\test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_core_department' -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1o-red-archived-core-001'
+```
+
+```text
+1 failed, 1 passed in 1.79s
+pytest/tool exit_code=1
+```
+
+The intended nested-industry assertion failed because final
+`publish_content` raised `industry_public_incomplete`; the direct scenario
+strictness regression already passed. All earlier assertions had proved that
+the archived department was non-unique, the remaining departments were
+published and exact-nonblank, every other manufacturing scenario candidate
+had been formally archived, the target was the unique candidate, and both
+scenario and industry pages returned HTTP 200. At this RED checkpoint the
+archived row still had a valid name. The test was later strengthened to give
+that archived row a whitespace-only legacy name; that refinement is not
+attributed to the RED.
+
+### Minimal implementation and candidate-query RED
+
+`_validate_scenario_publication` now has an explicit keyword-only
+`published_only_core` mode. Its default remains `False`, so direct scenario
+publication executes the unchanged strict all-row status/name checks. Only the
+industry nested-candidate path passes `True`; in that mode, its industry,
+department, and pain queries first select published associations/targets and
+then apply the existing nonempty and exact-nonblank checks. All service,
+structured input, range, maturity, content-block, and direct-publication gates
+remain unchanged.
+
+The first partial GREEN exposed a second boundary in the candidate query: a
+scenario with an archived manufacturing branch and a separate published retail
+branch could still be selected as a manufacturing candidate. The first draft
+of that regression stopped inside a test helper before exercising the product
+behavior; it has no product pass/fail classification and is excluded from
+evidence. After correcting the fixture, the authoritative sequential RED was:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest 'tests\test_public_catalog.py::test_industry_candidate_requires_a_published_branch_in_that_industry' -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1o-red-cross-industry-branch-final-003b'
+```
+
+```text
+1 failed in 1.09s
+pytest/tool exit_code=1
+failure: DID NOT RAISE ContentValidationError
+```
+
+Before that intended failure, the regression proved the published-branch
+manufacturing candidate query was empty, the scenario stayed public through
+its retail branch, the manufacturing filter omitted it, and the manufacturing
+industry detail returned 404. The partial implementation nevertheless
+published the manufacturing industry replacement through the archived branch.
+The final query therefore requires `ib.status='published'` and uses
+`SELECT DISTINCT` to avoid duplicate candidate evaluation.
+
+### Final narrow GREEN and frozen responsibility verification
+
+After the whitespace-name refinement and candidate-query fix, the final narrow
+GREEN covered all three Fix1o behaviors plus the relevant Fix1m/Fix1n
+continuity cases:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest 'tests\test_public_catalog.py::test_industry_nested_scenario_ignores_archived_core_department_with_published_remainders' 'tests\test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_core_department' 'tests\test_public_catalog.py::test_industry_candidate_requires_a_published_branch_in_that_industry' 'tests\test_public_catalog.py::test_industry_publish_keeps_public_scenario_healthy_after_relation_target_archive' 'tests\test_public_catalog.py::test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles' 'tests\test_public_catalog.py::test_industry_publish_continues_from_blank_candidates_to_a_healthy_scenario' -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1o-green-final-004'
+```
+
+```text
+pypdf 6.10.0 loaded from the checked-in overlay
+6 passed in 4.15s
+pytest/tool exit_code=0
+```
+
+Production code and tests were frozen after that GREEN. The ten-file Task 6
+responsibility set was then run exactly once against the frozen files:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1o-responsibility-final-005'
+```
+
+```text
+pypdf 6.10.0 loaded from the checked-in overlay
+589 passed in 241.22s (0:04:01)
+pytest/tool exit_code=0
+```
+
+`py_compile` over `publishing_repository.py` and
+`tests/test_public_catalog.py` exited 0. Working-tree, Fix1o-baseline, and
+original Task 6 scoped `git diff --check` commands all exited 0. Direct-SQL
+guards over `blueprints/public_catalog.py` and
+`blueprints/admin_content.py` returned zero matches and guard exit 0.
+
+Fix1o changes only:
+
+- `publishing_repository.py`
+- `tests/test_public_catalog.py`
+- this report
+
+No full suite, real network, dependency installation, production server,
+Nginx, real database, ledger/task-card update, or Task 7 work was performed.
+The historical full-suite outcome remains **UNKNOWN/NOT PROVEN** and was not
+rerun. The historical PyPI-network violation remains **CONFIRMED**. The frozen
+`data_process_foundation` product-data limitation remains unchanged.

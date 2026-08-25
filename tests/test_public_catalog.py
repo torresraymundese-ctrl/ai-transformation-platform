@@ -15,7 +15,7 @@ import catalog_content_repository as catalog
 from content_clock import SHANGHAI
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_json import ContentJsonError, decode_database_json
-from content_validation import ContentValidationError
+from content_validation import ContentValidationError, is_exact_nonblank_text
 import media_service
 import publishing_repository
 from publishing_service import copy_revision, create_content_draft, publish_content, publish_due_content, save_content_draft, schedule_content
@@ -604,12 +604,11 @@ def _published_scenario_candidates(db, industry_id):
         "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
         "WHERE ci.entry_type='scenario' AND ci.status='published' "
         "AND (ci.publish_at IS NULL OR ci.publish_at<=?) AND ib.industry_id=? "
+        "AND ib.status='published' "
         "ORDER BY ci.id",
         (NOW, industry_id),
     ).fetchall()
-    candidates = tuple((row["id"], row["code"]) for row in rows)
-    assert candidates
-    return candidates
+    return tuple((row["id"], row["code"]) for row in rows)
 
 
 def _replace_first_block_titles(db, content_ids, title):
@@ -670,6 +669,228 @@ def _publication_state_snapshot(db, content_ids):
         )
     )
     return items, audits
+
+
+def _archive_equipment_department_for_knowledge_scenario(db):
+    scenario = db.execute(
+        "SELECT ci.id,ci.lock_version,ci.slug,g.scenario_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND s.code='mfg_knowledge_assistant'"
+    ).fetchone()
+    assert scenario is not None
+    before = db.execute(
+        "SELECT d.id,d.code,d.name,d.status FROM scenario_departments link "
+        "JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? "
+        "ORDER BY d.sort_order,d.id",
+        (scenario["scenario_id"],),
+    ).fetchall()
+    assert len(before) >= 3
+    assert {row["code"] for row in before} == {
+        "equipment", "production", "finance_hr",
+    }
+    assert all(
+        row["status"] == "published" and is_exact_nonblank_text(row["name"])
+        for row in before
+    )
+    equipment = next(row for row in before if row["code"] == "equipment")
+    cursor = db.execute(
+        "UPDATE departments SET name='   ',status='archived' "
+        "WHERE id=? AND status='published'",
+        (equipment["id"],),
+    )
+    assert cursor.rowcount == 1
+    db.commit()
+
+    remaining = db.execute(
+        "SELECT d.code,d.name,d.status FROM scenario_departments link "
+        "JOIN departments d ON d.id=link.department_id WHERE link.scenario_id=? "
+        "AND d.status='published' ORDER BY d.sort_order,d.id",
+        (scenario["scenario_id"],),
+    ).fetchall()
+    assert {row["code"] for row in remaining} == {"production", "finance_hr"}
+    assert remaining and all(
+        row["status"] == "published" and is_exact_nonblank_text(row["name"])
+        for row in remaining
+    )
+    assert db.execute(
+        "SELECT status FROM departments WHERE id=?", (equipment["id"],)
+    ).fetchone()[0] == "archived"
+    return scenario
+
+
+def test_industry_nested_scenario_ignores_archived_core_department_with_published_remainders(
+    client, db
+):
+    current, industry_revision = _saved_industry_revision(db)
+    scenario = _archive_equipment_department_for_knowledge_scenario(db)
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    assert sum(candidate_id == scenario["id"] for candidate_id, _ in candidates) == 1
+    other_candidates = tuple(
+        candidate_id for candidate_id, _ in candidates if candidate_id != scenario["id"]
+    )
+    assert other_candidates
+    for candidate_id in other_candidates:
+        lock_version = db.execute(
+            "SELECT lock_version FROM content_items WHERE id=?", (candidate_id,)
+        ).fetchone()[0]
+        archive_content(
+            candidate_id,
+            lock_version,
+            actor="test-admin",
+            now=NOW_DATETIME + timedelta(minutes=1),
+        )
+    assert _published_scenario_candidates(db, current["industry_id"]) == (
+        (scenario["id"], "mfg_knowledge_assistant"),
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+    scenario_before = _publication_state_snapshot(db, (scenario["id"],))
+
+    result = publish_content(
+        industry_revision,
+        1,
+        actor="test-admin",
+        now=NOW_DATETIME + timedelta(minutes=2),
+    )
+
+    assert (result.published_id, result.archived_id) == (
+        industry_revision,
+        current["id"],
+    )
+    old = db.execute(
+        "SELECT status,lock_version,archived_at FROM content_items WHERE id=?",
+        (current["id"],),
+    ).fetchone()
+    new = db.execute(
+        "SELECT status,lock_version,published_at FROM content_items WHERE id=?",
+        (industry_revision,),
+    ).fetchone()
+    assert (old["status"], old["lock_version"]) == ("archived", 2)
+    assert old["archived_at"] == "2026-08-24 10:02:00"
+    assert (new["status"], new["lock_version"]) == ("published", 2)
+    assert new["published_at"] == "2026-08-24 10:02:00"
+    published_audits = db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published' ORDER BY id",
+        (industry_revision,),
+    ).fetchall()
+    assert len(published_audits) == 1
+    assert json.loads(published_audits[0]["details_json"]) == {
+        "archived_id": current["id"],
+    }
+    assert _publication_state_snapshot(db, (scenario["id"],)) == scenario_before
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+
+
+def test_direct_scenario_publish_remains_strict_with_archived_core_department(
+    client, db
+):
+    publish_catalog(db)
+    scenario = _archive_equipment_department_for_knowledge_scenario(db)
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+    revision_id = copy_revision(
+        scenario["id"], actor="test-admin", now=NOW_DATETIME
+    )
+    before = _publication_state_snapshot(db, (scenario["id"], revision_id))
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    assert _publication_state_snapshot(db, (scenario["id"], revision_id)) == before
+    assert tuple(db.execute(
+        "SELECT status,lock_version FROM content_items WHERE id=?", (scenario["id"],)
+    ).fetchone()) == ("published", scenario["lock_version"])
+    assert tuple(db.execute(
+        "SELECT status,lock_version FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()) == ("draft", 1)
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 0
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+
+
+def test_industry_candidate_requires_a_published_branch_in_that_industry(client, db):
+    current, industry_revision = _saved_industry_revision(db)
+    scenario = db.execute(
+        "SELECT ci.id,ci.slug,g.scenario_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND s.code='mfg_knowledge_assistant'"
+    ).fetchone()
+    assert scenario is not None
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    other_candidates = tuple(
+        candidate_id for candidate_id, _ in candidates if candidate_id != scenario["id"]
+    )
+    assert other_candidates
+    for candidate_id in other_candidates:
+        lock_version = db.execute(
+            "SELECT lock_version FROM content_items WHERE id=?", (candidate_id,)
+        ).fetchone()[0]
+        archive_content(
+            candidate_id,
+            lock_version,
+            actor="test-admin",
+            now=NOW_DATETIME + timedelta(minutes=1),
+        )
+    retail_branch = db.execute(
+        "SELECT ib.id FROM industry_branches ib JOIN industries i ON i.id=ib.industry_id "
+        "WHERE i.code='retail' AND i.status='published' AND ib.status='published' "
+        "ORDER BY ib.sort_order,ib.id LIMIT 1"
+    ).fetchone()
+    assert retail_branch is not None
+    db.execute(
+        "INSERT INTO scenario_branches(scenario_id,industry_branch_id) VALUES (?,?)",
+        (scenario["scenario_id"], retail_branch["id"]),
+    )
+    archived = db.execute(
+        "UPDATE industry_branches SET status='archived' "
+        "WHERE industry_id=? AND status='published'",
+        (current["industry_id"],),
+    )
+    assert archived.rowcount >= 1
+    db.commit()
+
+    assert _published_scenario_candidates(db, current["industry_id"]) == ()
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    filtered = page(client.get("/scenarios?industry=manufacturing"))
+    assert "mfg_knowledge_assistant" not in {
+        card["data-scenario-code"] for card in filtered.select("[data-scenario-code]")
+    }
+    assert client.get("/industries/manufacturing").status_code == 404
+    industry_before = _publication_state_snapshot(
+        db, (current["id"], industry_revision)
+    )
+    scenario_before = _publication_state_snapshot(db, (scenario["id"],))
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(
+            industry_revision,
+            1,
+            actor="test-admin",
+            now=NOW_DATETIME + timedelta(minutes=2),
+        )
+
+    assert error.value.code == "industry_public_incomplete"
+    assert _publication_state_snapshot(
+        db, (current["id"], industry_revision)
+    ) == industry_before
+    assert _publication_state_snapshot(db, (scenario["id"],)) == scenario_before
+    _assert_unpublished_revision(
+        db, current["id"], industry_revision, lock_version=1
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 404
 
 
 def test_industry_publish_keeps_public_scenario_healthy_after_relation_target_archive(
