@@ -2058,3 +2058,63 @@ dependency installation, full/production server, Nginx, real database, or
 external package generation occurred; all database activity used disposable
 SQLite. The frozen `data_process_foundation` product-data limitation remains
 unchanged.
+
+## Fix1m controller verification
+
+The controller independently verified frozen Fix1m implementation commit
+`b1022856f20b5dbce45fd7d7b6a7a44064339f1b`. Every effective run used the
+assigned Python `3.12.13` interpreter, set `PYTHONPATH` in the same PowerShell
+process to the checked-in
+`.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps` overlay,
+imported `idna 3.19` from the assigned venv and `pypdf 6.10.0` from that
+overlay, disabled the pytest cache provider, and used a unique basetemp.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1m-focused-001'
+```
+
+Result: `585 passed in 271.78s (0:04:31)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1m-public-partition-corrected-002'
+```
+
+Result: `409 passed in 205.83s (0:03:25)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1m-related-partition-final-003'
+```
+
+Result: `336 passed in 125.45s (0:02:05)`, pytest `exit_code=0`.
+
+The public and related controllers initially set `PYTHONPATH` to a nonexistent
+worktree-root `local-deps` directory. Python silently fell back to the assigned
+venv's separate `pypdf 6.16.2`; those otherwise-passing `409` and `336` test
+runs are therefore recorded as invalid environment evidence, not effective
+controller results. The public controller's first corrected attempt also used
+that wrong path and exited 1 during `Resolve-Path`/the version probe before
+pytest started, so its unused corrected basetemp was safely reused for the
+effective command above.
+
+The related controller's first real-overlay correction imported `pypdf 6.10.0`
+but added an unauthorized `PYTHONIOENCODING=utf-8`. One subprocess-based media
+test then failed because UTF-8 child output was decoded as GBK by its Windows
+parent (`1 failed, 335 passed, 3 warnings`, exit 1). This was a controller
+harness environment failure, not a product failure. The final effective run
+explicitly left `PYTHONIOENCODING`, `PYTHONUTF8`, and locale variables unset and
+returned the clean `336` result above. No package was installed and no network
+was used during any attempt.
+
+Controller `py_compile` over `publishing_repository.py` and
+`tests/test_public_catalog.py`, `git diff --check` for both
+`88b2870..b102285` and `1c359a7..b102285`, and the no-direct-SQL guards for
+both catalog Blueprints all passed. Every effective controller confirmed the
+same frozen HEAD and clean all-files status before and after its read-only run.
+No full suite, production server, Nginx, real database, network access, or
+dependency installation was used. The historical full-suite outcome remains
+**UNKNOWN** and was not rerun; the historical PyPI-network violation remains
+**CONFIRMED**; and the frozen `data_process_foundation` product-data limitation
+remains unchanged.
