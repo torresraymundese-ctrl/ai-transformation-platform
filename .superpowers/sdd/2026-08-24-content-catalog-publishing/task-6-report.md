@@ -2448,3 +2448,41 @@ Nginx, real database, ledger/task-card update, or Task 7 work was performed.
 The historical full-suite outcome remains **UNKNOWN/NOT PROVEN** and was not
 rerun. The historical PyPI-network violation remains **CONFIRMED**. The frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1o controller verification
+
+The controller independently verified frozen Fix1o implementation commit
+`639b7813a7c40827754d56a81ce3625250102774`. Before starting, all three unique
+basetemps were absent and tracked status was clean. The three read-only
+partitions ran concurrently with independent disposable SQLite databases.
+Every command used the assigned Python `3.12.13` interpreter, the exact
+worktree `local-deps` overlay in the same PowerShell process, `pypdf 6.10.0`
+verified inside Python, no pytest cache provider, and an unused basetemp.
+`PYTHONIOENCODING` and `PYTHONUTF8` were unset.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1o-focused-001'
+```
+
+Result: `589 passed in 283.28s (0:04:43)`, pytest/controller `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1o-public-001'
+```
+
+Result: `413 passed in 235.84s (0:03:55)`, pytest/controller `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1o-related-001'
+```
+
+Result: `336 passed in 148.15s (0:02:28)`, pytest/controller `exit_code=0`.
+
+The controller did not run the full suite. It did not use a real network,
+install a package, access production/Nginx/a real database, update the
+ledger/task card, or start Task 7. The historical full-suite outcome therefore
+remains **UNKNOWN/NOT PROVEN**, and the historical PyPI-network violation
+remains **CONFIRMED**.
