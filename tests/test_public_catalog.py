@@ -671,6 +671,26 @@ def _publication_state_snapshot(db, content_ids):
     return items, audits
 
 
+def _scenario_service_state_snapshot(db, scenario_id):
+    return tuple(
+        tuple(row) for row in db.execute(
+            "SELECT link.scenario_id,link.service_id,svc.code,svc.status "
+            "FROM scenario_services link JOIN services svc ON svc.id=link.service_id "
+            "WHERE link.scenario_id=? ORDER BY link.service_id",
+            (scenario_id,),
+        )
+    )
+
+
+def _assert_public_service_section(client, slug):
+    section = page(client.get(f"/scenarios/{slug}")).select_one(
+        '[data-content-section="services"]'
+    )
+    assert section is not None
+    assert section.get_text(" ", strip=True) == "服务 AI 就绪基础工作坊"
+    assert "企业知识助手试点" not in section.get_text(" ", strip=True)
+
+
 def _archive_equipment_department_for_knowledge_scenario(db):
     scenario = db.execute(
         "SELECT ci.id,ci.lock_version,ci.slug,g.scenario_id FROM content_items ci "
@@ -717,6 +737,177 @@ def _archive_equipment_department_for_knowledge_scenario(db):
         "SELECT status FROM departments WHERE id=?", (equipment["id"],)
     ).fetchone()[0] == "archived"
     return scenario
+
+
+def _archive_knowledge_service_with_published_replacement(db):
+    scenario = db.execute(
+        "SELECT ci.id,ci.lock_version,ci.slug,g.scenario_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND s.code='mfg_knowledge_assistant'"
+    ).fetchone()
+    assert scenario is not None
+    original = db.execute(
+        "SELECT svc.id,svc.code,svc.status FROM scenario_services link "
+        "JOIN services svc ON svc.id=link.service_id WHERE link.scenario_id=? "
+        "AND svc.code='knowledge_assistant_pilot'",
+        (scenario["scenario_id"],),
+    ).fetchone()
+    replacement = db.execute(
+        "SELECT id,code,status,public_name,min_budget,max_budget,min_weeks,max_weeks,"
+        "implementation_steps_json,prerequisites_json,acceptance_json FROM services "
+        "WHERE code='foundation_workshop'"
+    ).fetchone()
+    assert original is not None
+    assert original["status"] == "published"
+    assert replacement is not None
+    assert replacement["status"] == "published"
+    assert is_exact_nonblank_text(replacement["public_name"])
+    assert db.execute(
+        "SELECT COUNT(*) FROM service_deliverables "
+        "WHERE service_id=? AND status='published'",
+        (replacement["id"],),
+    ).fetchone()[0] >= 1
+
+    db.execute(
+        "INSERT INTO scenario_services(scenario_id,service_id) VALUES (?,?)",
+        (scenario["scenario_id"], replacement["id"]),
+    )
+    archived = db.execute(
+        "UPDATE services SET status='archived' "
+        "WHERE id=? AND status='published'",
+        (original["id"],),
+    )
+    assert archived.rowcount == 1
+    db.commit()
+
+    services = db.execute(
+        "SELECT svc.code,svc.status FROM scenario_services link "
+        "JOIN services svc ON svc.id=link.service_id WHERE link.scenario_id=? "
+        "ORDER BY svc.id",
+        (scenario["scenario_id"],),
+    ).fetchall()
+    assert {(row["code"], row["status"]) for row in services} == {
+        ("knowledge_assistant_pilot", "archived"),
+        ("foundation_workshop", "published"),
+    }
+    public_services = catalog._services_for_scenario(db, scenario["scenario_id"])
+    assert tuple(service["code"] for service in public_services) == (
+        "foundation_workshop",
+    )
+    assert catalog._valid_services(public_services) is True
+    return scenario
+
+
+def test_industry_nested_scenario_ignores_archived_service_with_published_replacement(
+    client, db
+):
+    current, industry_revision = _saved_industry_revision(db)
+    scenario = _archive_knowledge_service_with_published_replacement(db)
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    _assert_public_service_section(client, scenario["slug"])
+    assert client.get("/industries/manufacturing").status_code == 200
+
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    other_candidates = tuple(
+        candidate_id for candidate_id, _ in candidates if candidate_id != scenario["id"]
+    )
+    assert other_candidates
+    for candidate_id in other_candidates:
+        lock_version = db.execute(
+            "SELECT lock_version FROM content_items WHERE id=?", (candidate_id,)
+        ).fetchone()[0]
+        archive_content(
+            candidate_id,
+            lock_version,
+            actor="test-admin",
+            now=NOW_DATETIME + timedelta(minutes=1),
+        )
+    assert _published_scenario_candidates(db, current["industry_id"]) == (
+        (scenario["id"], "mfg_knowledge_assistant"),
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+    industry_before = _publication_state_snapshot(
+        db, (current["id"], industry_revision)
+    )
+    scenario_before = _publication_state_snapshot(db, (scenario["id"],))
+    services_before = _scenario_service_state_snapshot(db, scenario["scenario_id"])
+
+    result = publish_content(
+        industry_revision,
+        1,
+        actor="test-admin",
+        now=NOW_DATETIME + timedelta(minutes=2),
+    )
+
+    assert (result.published_id, result.archived_id) == (
+        industry_revision,
+        current["id"],
+    )
+    assert _publication_state_snapshot(db, (scenario["id"],)) == scenario_before
+    assert _scenario_service_state_snapshot(
+        db, scenario["scenario_id"]
+    ) == services_before
+    old = db.execute(
+        "SELECT status,lock_version,archived_at FROM content_items WHERE id=?",
+        (current["id"],),
+    ).fetchone()
+    new = db.execute(
+        "SELECT status,lock_version,published_at FROM content_items WHERE id=?",
+        (industry_revision,),
+    ).fetchone()
+    assert (old["status"], old["lock_version"], old["archived_at"]) == (
+        "archived", 2, "2026-08-24 10:02:00",
+    )
+    assert (new["status"], new["lock_version"], new["published_at"]) == (
+        "published", 2, "2026-08-24 10:02:00",
+    )
+    assert industry_before != _publication_state_snapshot(
+        db, (current["id"], industry_revision)
+    )
+    published_audits = db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published' ORDER BY id",
+        (industry_revision,),
+    ).fetchall()
+    assert len(published_audits) == 1
+    assert json.loads(published_audits[0]["details_json"]) == {
+        "archived_id": current["id"],
+    }
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    _assert_public_service_section(client, scenario["slug"])
+    assert client.get("/industries/manufacturing").status_code == 200
+
+
+def test_direct_scenario_publish_remains_strict_with_archived_service_and_published_replacement(
+    client, db
+):
+    publish_catalog(db)
+    scenario = _archive_knowledge_service_with_published_replacement(db)
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    _assert_public_service_section(client, scenario["slug"])
+    assert client.get("/industries/manufacturing").status_code == 200
+    revision_id = copy_revision(
+        scenario["id"], actor="test-admin", now=NOW_DATETIME
+    )
+    before = _publication_state_snapshot(db, (scenario["id"], revision_id))
+    services_before = _scenario_service_state_snapshot(db, scenario["scenario_id"])
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "scenario_public_incomplete"
+    assert _publication_state_snapshot(db, (scenario["id"], revision_id)) == before
+    assert _scenario_service_state_snapshot(
+        db, scenario["scenario_id"]
+    ) == services_before
+    _assert_unpublished_revision(
+        db, scenario["id"], revision_id, lock_version=1
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    _assert_public_service_section(client, scenario["slug"])
+    assert client.get("/industries/manufacturing").status_code == 200
 
 
 def test_industry_nested_scenario_ignores_archived_core_department_with_published_remainders(

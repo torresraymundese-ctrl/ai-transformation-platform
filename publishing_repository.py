@@ -492,13 +492,17 @@ def _meaningful_html(value):
     )
 
 
-def _scenario_source_rows(db, scenario_id):
+def _scenario_source_rows(db, scenario_id, *, published_only_services=False):
+    service_status_sql = (
+        " AND svc.status='published'" if published_only_services else ""
+    )
     return db.execute(
         "SELECT s.*,svc.id AS service_id,svc.public_name AS service_name,svc.min_budget,svc.max_budget,"
         "svc.min_weeks AS service_min_weeks,svc.max_weeks AS service_max_weeks,"
         "svc.implementation_steps_json,svc.prerequisites_json,svc.acceptance_json,svc.status AS service_status "
         "FROM scenarios s LEFT JOIN scenario_services link ON link.scenario_id=s.id "
-        "LEFT JOIN services svc ON svc.id=link.service_id WHERE s.id=?",
+        "LEFT JOIN services svc ON svc.id=link.service_id WHERE s.id=?"
+        f"{service_status_sql}",
         (scenario_id,),
     ).fetchall()
 
@@ -556,7 +560,9 @@ def _validate_scenario_publication(
     db, content_id, draft, *, published_only_core=False
 ):
     scenario_id = draft.extension["scenario_id"]
-    rows = _scenario_source_rows(db, scenario_id)
+    rows = _scenario_source_rows(
+        db, scenario_id, published_only_services=published_only_core
+    )
     if not rows or rows[0]["status"] != "published":
         raise ContentValidationError("scenario_public_incomplete")
     scenario = rows[0]

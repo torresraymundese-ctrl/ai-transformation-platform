@@ -2486,3 +2486,148 @@ install a package, access production/Nginx/a real database, update the
 ledger/task card, or start Task 7. The historical full-suite outcome therefore
 remains **UNKNOWN/NOT PROVEN**, and the historical PyPI-network violation
 remains **CONFIRMED**.
+
+## Fix1p — scope nested scenario services to the public projection
+
+**Status: DONE_WITH_CONCERNS, awaiting fresh external scoped review.** Fix1p
+started from clean baseline
+`9dee7c6598bbc66a0283b55ee4a9fcb7c8f4e57e` on
+`codex/ai-platform-2.0-core`. It addresses only the new external-review P2:
+after a scenario service had a complete published replacement and its old
+service target was archived, both public pages remained complete but an
+industry replacement still rejected the scenario candidate. Task 7, the
+ledger, external task card, full suite, and unrelated behavior stayed frozen.
+
+One SDD implementation agent owned all production/test writes. Two fresh
+read-only agents independently reviewed the production boundary and lifecycle
+tests. The production review finished CLEAN. The test review required evidence
+strengthening, then finished CLEAN after the implementation agent changed only
+tests and proved the production diff hash was unchanged.
+
+### Root cause and authoritative lifecycle RED
+
+`_scenario_source_rows` used LEFT JOINs to return every persisted service
+relationship. The direct scenario publication gate correctly needs that
+strict all-persisted view, but the industry nested-candidate path must match the
+public projection, which selects only published services and requires at least
+one complete result. Consequently, an archived old service incorrectly
+invalidated a nested candidate even when a complete published replacement was
+the only service visible publicly.
+
+The real lifecycle fixture linked the existing complete, published
+`foundation_workshop` service to `mfg_knowledge_assistant`, archived the old
+`knowledge_assistant_pilot` target with an exact status transition, proved the
+scenario and industry pages stayed HTTP 200, and formally archived all other
+manufacturing scenario revisions so that this scenario was the exact sole
+candidate. A direct-scenario control used the same service state and required
+strict atomic rejection.
+
+Before any production edit, both tests ran with the assigned interpreter,
+checked-in offline overlay, pypdf 6.10.0, no pytest cache provider, and an
+unused basetemp. The direct test had its original pre-review-refinement name at
+this RED checkpoint:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1p-red-001' 'tests/test_public_catalog.py::test_industry_nested_scenario_ignores_archived_service_with_published_replacement' 'tests/test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_service_relation'
+```
+
+```text
+1 failed, 1 passed in 1.81s
+pytest/tool exit_code=1
+```
+
+The sole intended failure was the final industry `publish_content` call raising
+`industry_public_incomplete`; every public-health, sole-candidate, and formal
+archival assertion before it passed. The direct strict/atomic scenario control
+already passed. There was no fixture, setup, collection, import, or environment
+failure before the product RED.
+
+### Minimal GREEN and independent refinement
+
+`_scenario_source_rows` now accepts an explicit keyword-only
+`published_only_services` mode. The industry nested path derives that mode
+from its already-explicit published-only dependency path, adding
+`svc.status='published'` to the query `WHERE` clause. Placing the condition in
+`WHERE`, rather than the LEFT JOIN `ON`, removes archived links instead of
+leaving NULL service placeholder rows. With no published service the result is
+empty and fails closed. Every selected published service still passes the
+existing exact-name, finite-budget, exact-integer-week, three structured JSON
+list, and published-deliverable checks. Direct scenario publication does not
+enable the mode and still reads/rejects every persisted archived service.
+
+Initial minimal GREEN:
+
+```powershell
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1p-green-002' 'tests/test_public_catalog.py::test_industry_nested_scenario_ignores_archived_service_with_published_replacement' 'tests/test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_service_relation'
+```
+
+Result: `2 passed in 1.38s`, pytest/tool `exit_code=0`.
+
+The first eight-test continuity run, adding the Fix1m/Fix1n/Fix1o nested-gate
+regressions, used
+`pytest-task6-fix1p-regression-green-003` and returned `8 passed in 5.42s`,
+exit 0.
+
+The independent production reviewer found no P1/P2. The independent test
+reviewer then required three evidence-only refinements: validate the
+replacement through the real public service aggregate, assert the exact public
+service-section text, and snapshot service links/target statuses across both
+the successful industry transaction and failed direct transaction. The direct
+test was also renamed to describe the archived target plus published
+replacement precisely. These refinements are not attributed to the earlier
+RED. The production diff hash before and after them remained exactly
+`d7709bcbbe67f5e7b226b489b6756855c4ddede0`.
+
+The final refined eight-test run used the renamed direct test and a fresh
+basetemp:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1p-green-refined-004' 'tests/test_public_catalog.py::test_industry_nested_scenario_ignores_archived_service_with_published_replacement' 'tests/test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_service_and_published_replacement' 'tests/test_public_catalog.py::test_industry_nested_scenario_ignores_archived_core_department_with_published_remainders' 'tests/test_public_catalog.py::test_direct_scenario_publish_remains_strict_with_archived_core_department' 'tests/test_public_catalog.py::test_industry_candidate_requires_a_published_branch_in_that_industry' 'tests/test_public_catalog.py::test_industry_publish_keeps_public_scenario_healthy_after_relation_target_archive' 'tests/test_public_catalog.py::test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles' 'tests/test_public_catalog.py::test_industry_publish_continues_from_blank_candidates_to_a_healthy_scenario'
+```
+
+```text
+8 passed in 5.71s
+pytest/tool exit_code=0
+```
+
+The test reviewer then returned CLEAN: the public aggregate was exactly
+`foundation_workshop` and passed `_valid_services`; the service section showed
+`AI 就绪基础工作坊` and excluded the archived old package; service link/status,
+content, lock, timestamp, and audit snapshots proved transaction atomicity.
+
+### Frozen responsibility and static verification
+
+After both independent reviews were CLEAN, production and tests were frozen.
+The ten-file Task 6 responsibility set was run exactly once against the frozen
+files:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& 'D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe' -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1p-responsibility-final-005'
+```
+
+```text
+Python 3.12.13; pypdf 6.10.0 from the checked-in overlay
+591 passed in 249.12s (0:04:09)
+pytest/tool exit_code=0
+```
+
+`py_compile` over `publishing_repository.py` and
+`tests/test_public_catalog.py` exited 0. Working-tree, Fix1p-baseline, and
+original Task 6 scoped `git diff --check` commands all exited 0. Direct-SQL
+guards over `blueprints/public_catalog.py` and
+`blueprints/admin_content.py` returned zero matches and guard exit 0.
+
+Fix1p changes only:
+
+- `publishing_repository.py`
+- `tests/test_public_catalog.py`
+- this report
+
+No full suite, real network, dependency installation, production server,
+Nginx, real database, ledger/task-card update, or Task 7 work was performed.
+The historical full-suite outcome remains **UNKNOWN/NOT PROVEN** and was not
+rerun. The historical PyPI-network violation remains **CONFIRMED**. The frozen
+`data_process_foundation` product-data limitation remains unchanged.
