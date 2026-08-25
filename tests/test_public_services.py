@@ -12,12 +12,13 @@ import pytest
 
 import catalog_content_repository as catalog
 from content_clock import SHANGHAI
-from content_contracts import ContentBlock, ContentDraft
+from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_validation import ContentValidationError, validate_content_draft
 from pagination import PageRequest
 from publishing_service import (
     archive_content,
     copy_revision,
+    create_content_draft,
     publish_content,
     publish_due_content,
     schedule_content,
@@ -171,6 +172,83 @@ def _service_item(db, code, status):
         "WHERE ci.entry_type='service' AND s.code=? AND ci.status=?",
         (code, status),
     ).fetchone()
+
+
+def _related_case(slug, *, public_source=False):
+    source_url = "https://example.com/verified-case" if public_source else None
+    source_hash = hashlib.sha256(source_url.encode()).hexdigest() if source_url else None
+    return ContentDraft(
+        entry_type="case",
+        slug=slug,
+        title=f"已验证案例 {slug}",
+        summary="用于服务关联完整性验证的真实案例。",
+        seo_title=f"已验证案例 {slug}",
+        seo_description="验证服务页只能关联当前仍符合公开规则的案例。",
+        extension={
+            "verification_code": "public_verified" if public_source else "authorized_anonymous",
+            "is_anonymized": 0 if public_source else 1,
+            "basis_type": "public_source" if public_source else "internal_delivery_record",
+            "private_basis_reference": None if public_source else "service-case-record-001",
+            "source_url": source_url,
+            "source_url_sha256": source_hash,
+            "source_check_code": None,
+            "source_checked_at": None,
+            "source_check_expires_at": None,
+            "source_check_url_sha256": None,
+            "is_verified": 1,
+            "review_confirmed": 1,
+            "verified_at": "2026-08-24 09:00:00",
+        },
+        blocks=(ContentBlock("rich_text", body_html="<p>已脱敏的实施过程。</p>"),),
+        metrics=(
+            CaseMetric(
+                "处理时间", "8", "2", "小时", "连续 30 天", "经脱敏交付记录核验。"
+            ),
+        ),
+    )
+
+
+def _publish_related_case(db, slug, *, public_source=False):
+    content_id = create_content_draft(
+        _related_case(slug, public_source=public_source), actor="test-admin", now=NOW
+    )
+    if public_source:
+        source_hash = hashlib.sha256(b"https://example.com/verified-case").hexdigest()
+        db.execute(
+            "UPDATE case_content SET source_check_code='https_ok',source_checked_at=?,"
+            "source_check_expires_at='2099-01-01 00:00:00',source_check_url_sha256=? "
+            "WHERE content_item_id=?",
+            (NOW_TEXT, source_hash, content_id),
+        )
+        db.commit()
+    publish_content(content_id, 1, actor="test-admin", now=NOW)
+    return db.execute(
+        "SELECT * FROM content_items WHERE id=?", (content_id,)
+    ).fetchone()
+
+
+def _attach_service_case(db, service_content_id, case_group_id):
+    db.execute(
+        "INSERT INTO service_cases "
+        "(service_content_item_id,case_content_group_id,sort_order) VALUES (?,?,0)",
+        (service_content_id, case_group_id),
+    )
+    db.commit()
+
+
+def _force_legacy_case_basis(db, content_id):
+    trigger_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_case_content_update'"
+    ).fetchone()[0]
+    db.execute("DROP TRIGGER protect_case_content_update")
+    db.execute(
+        "UPDATE case_content SET basis_type='private_authorization' "
+        "WHERE content_item_id=?",
+        (content_id,),
+    )
+    db.execute(trigger_sql)
+    db.commit()
 
 
 def _publish_service(db, code):
@@ -391,6 +469,121 @@ def test_public_service_reads_one_sqlite_snapshot_during_concurrent_replacement(
         assert later_projection is not None
         later_pair = (later_projection["title"], later_projection["budget"])
     assert later_pair == (replacement_title, new_budget)
+
+
+def test_service_projection_hides_a_persisted_legacy_case_relation(db):
+    _publish_scenario_content(db)
+    target = _publish_related_case(db, "service-legacy-target")
+    service = _service_item(db, "foundation_workshop", "draft")
+    _attach_service_case(db, service["id"], target["content_group_id"])
+    publish_content(service["id"], service["lock_version"], actor="test-admin", now=NOW)
+    _force_legacy_case_basis(db, target["id"])
+
+    projection = catalog.public_service("foundation-workshop", NOW)
+
+    assert projection is not None
+    assert projection["cases"] == ()
+
+
+@pytest.mark.parametrize(
+    ("offset", "visible"),
+    (
+        (timedelta(days=7) - timedelta(seconds=1), True),
+        (timedelta(days=7), True),
+        (timedelta(days=7) + timedelta(seconds=1), False),
+    ),
+)
+def test_service_related_public_source_uses_the_exact_seven_day_boundary(
+    db, offset, visible
+):
+    _publish_scenario_content(db)
+    target = _publish_related_case(
+        db, "service-source-freshness-target", public_source=True
+    )
+    service = _service_item(db, "foundation_workshop", "draft")
+    _attach_service_case(db, service["id"], target["content_group_id"])
+    publish_content(service["id"], service["lock_version"], actor="test-admin", now=NOW)
+
+    projection = catalog.public_service("foundation-workshop", NOW + offset)
+
+    assert projection is not None
+    assert tuple(case["slug"] for case in projection["cases"]) == (
+        (target["slug"],) if visible else ()
+    )
+
+
+@pytest.mark.parametrize("invalid_target", ("stale_source", "legacy_basis"))
+def test_service_immediate_relation_publish_rechecks_case_completeness_atomically(
+    db, invalid_target
+):
+    _publish_scenario_content(db)
+    target = _publish_related_case(
+        db,
+        f"service-immediate-{invalid_target.replace('_', '-')}-target",
+        public_source=invalid_target == "stale_source",
+    )
+    if invalid_target == "legacy_basis":
+        _force_legacy_case_basis(db, target["id"])
+    old = _publish_service(db, "foundation_workshop")
+    replacement_id = copy_revision(old["id"], actor="test-admin", now=NOW)
+    _attach_service_case(db, replacement_id, target["content_group_id"])
+    publish_at = (
+        NOW + timedelta(days=7, seconds=1)
+        if invalid_target == "stale_source"
+        else NOW
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(
+            replacement_id,
+            1,
+            actor="test-admin",
+            now=publish_at,
+        )
+
+    assert error.value.code == "relation_target_not_published"
+    assert _service_item(db, "foundation_workshop", "published")["id"] == old["id"]
+    assert _service_item(db, "foundation_workshop", "draft")["id"] == replacement_id
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (replacement_id,),
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_target", ("stale_source", "legacy_basis"))
+def test_service_due_relation_publish_rechecks_case_completeness_and_isolates(
+    db, invalid_target
+):
+    _publish_scenario_content(db)
+    target = _publish_related_case(
+        db,
+        f"service-due-{invalid_target.replace('_', '-')}-target",
+        public_source=invalid_target == "stale_source",
+    )
+    old = _publish_service(db, "foundation_workshop")
+    replacement_id = copy_revision(old["id"], actor="test-admin", now=NOW)
+    _attach_service_case(db, replacement_id, target["content_group_id"])
+    due = (
+        NOW + timedelta(days=7, seconds=1)
+        if invalid_target == "stale_source"
+        else NOW + timedelta(hours=1)
+    )
+    schedule_content(replacement_id, 1, due, actor="test-admin", now=NOW)
+    if invalid_target == "legacy_basis":
+        _force_legacy_case_basis(db, target["id"])
+
+    result = publish_due_content(now=due)
+
+    assert result.published_ids == ()
+    assert result.failures == ((replacement_id, "validation_failed"),)
+    assert _service_item(db, "foundation_workshop", "published")["id"] == old["id"]
+    assert _service_item(db, "foundation_workshop", "draft")["id"] == replacement_id
+    assert db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'",
+        (replacement_id,),
+    ).fetchone()[0] == '{"reason_code":"validation_failed"}'
 
 
 def test_six_services_project_exact_codes_but_render_only_ordered_chinese_facets(

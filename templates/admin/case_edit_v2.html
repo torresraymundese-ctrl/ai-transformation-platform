@@ -8,6 +8,19 @@
 {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
 {% if view.public_revision %}<section class="card" style="padding:16px;margin-bottom:16px"><h3>当前公开修订 #{{ view.public_revision.revision_number }}</h3><p>{{ view.public_revision.title }}</p></section>{% endif %}
 
+{% if form.id and form.status != 'draft' %}
+<section class="card" style="padding:20px">
+  <h3>不可变修订</h3>
+  <p>{{ form.title }}</p>
+  <p>{{ form.summary }}</p>
+  <form method="POST" action="{{ url_for('admin.admin_case_copy_v2', content_id=form.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="content_id" value="{{ form.id }}">
+    <input type="hidden" name="expected_lock_version" value="{{ form.lock_version }}">
+    <button class="btn btn-primary">创建修订</button>
+  </form>
+</section>
+{% else %}
 <form method="POST" class="card" style="padding:20px" data-content-editor>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if form.id %}<input type="hidden" name="content_id" value="{{ form.id }}"><input type="hidden" name="lock_version" value="{{ form.lock_version }}">{% endif %}
@@ -50,6 +63,9 @@
   <div style="display:flex;gap:8px"><button class="btn btn-outline" name="action" value="save">保存草稿</button><button class="btn btn-outline" name="action" value="review">发布前检查</button><button class="btn btn-primary" name="action" value="publish">发布</button></div>
 </form>
 {% if form.id and form.basis_type == 'public_source' and form.source_url_sha256 %}<form method="POST" action="{{ url_for('admin.admin_case_source_check_v2', content_id=form.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_lock_version" value="{{ form.lock_version }}"><input type="hidden" name="expected_url_sha256" value="{{ form.source_url_sha256 }}"><button class="btn btn-outline">刷新公开来源检查</button></form>{% endif %}
+{% endif %}
 {% if view.public_revision %}<form method="POST" action="{{ url_for('admin.admin_case_edit_v2', content_id=view.public_revision.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="content_id" value="{{ view.public_revision.id }}"><input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}"><button class="btn btn-outline" name="action" value="archive">归档当前公开修订</button></form>{% endif %}
+{% if not form.id or form.status == 'draft' %}
 <script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>
+{% endif %}
 {% endblock %}

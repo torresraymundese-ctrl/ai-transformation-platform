@@ -254,7 +254,12 @@ def insert_media(db, suffix, *, status="pending", storage_suffix=None):
     return media_id
 
 
-def _insert_case_extension(db, item_id, basis_type):
+_UNSET_CASE_REFERENCE = object()
+
+
+def _insert_case_extension(
+    db, item_id, basis_type, *, private_reference=_UNSET_CASE_REFERENCE
+):
     source_url = "https://example.com/case" if basis_type == "public_source" else None
     source_hash = hashlib.sha256(source_url.encode()).hexdigest() if source_url else None
     db.execute(
@@ -267,7 +272,11 @@ def _insert_case_extension(db, item_id, basis_type):
             "public_verified" if basis_type == "public_source" else "authorized_anonymous",
             0 if basis_type == "public_source" else 1,
             basis_type,
-            None if basis_type == "public_source" else f"evidence-{basis_type}",
+            (
+                None if basis_type == "public_source" else f"evidence-{basis_type}"
+            )
+            if private_reference is _UNSET_CASE_REFERENCE
+            else private_reference,
             source_url,
             source_hash,
             1,
@@ -312,6 +321,27 @@ def test_009_case_basis_types_apply_on_an_empty_database(tmp_path, monkeypatch):
         )
         with pytest.raises(sqlite3.IntegrityError):
             _insert_case_extension(db, invalid_item, "invented_basis")
+
+        for index, private_reference in enumerate(
+            (
+                " \t\n",
+                "\t\r\n",
+                "\u2002\u2003\u3000",
+                "\u2002record",
+                "record\u3000",
+                "record\x00private",
+            )
+        ):
+            slug = f"invalid-private-reference-{index}"
+            group_id = insert_group(db, entry_type="case", slug=slug)
+            item_id = insert_item(db, group_id, entry_type="case", slug=slug)
+            with pytest.raises(sqlite3.IntegrityError):
+                _insert_case_extension(
+                    db,
+                    item_id,
+                    "client_authorization",
+                    private_reference=private_reference,
+                )
     finally:
         db.close()
 
@@ -335,7 +365,13 @@ def test_009_preserves_legacy_case_rows_and_case_integrity_guards(
         legacy_item = insert_item(
             db, legacy_group, entry_type="case", slug="legacy-private"
         )
-        _insert_case_extension(db, legacy_item, "private_authorization")
+        legacy_reference = " legacy\x00\u2003reference "
+        _insert_case_extension(
+            db,
+            legacy_item,
+            "private_authorization",
+            private_reference=legacy_reference,
+        )
         legacy_before = tuple(db.execute(
             "SELECT * FROM case_content WHERE content_item_id=?", (legacy_item,)
         ).fetchone())
@@ -368,6 +404,10 @@ def test_009_preserves_legacy_case_rows_and_case_integrity_guards(
         assert tuple(db.execute(
             "SELECT * FROM case_content WHERE content_item_id=?", (legacy_item,)
         ).fetchone()) == legacy_before
+        assert db.execute(
+            "SELECT private_basis_reference FROM case_content WHERE content_item_id=?",
+            (legacy_item,),
+        ).fetchone()[0] == legacy_reference
         assert tuple(db.execute("PRAGMA table_info(case_content)")) == columns_before
         assert tuple(db.execute("PRAGMA foreign_key_list(case_content)")) == foreign_keys_before
         assert {

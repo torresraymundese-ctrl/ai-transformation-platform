@@ -43,9 +43,21 @@ CREATE TABLE case_content_v2 (
     CHECK(
         (basis_type = 'public_source' AND source_url IS NOT NULL
             AND source_url_sha256 IS NOT NULL) OR
-        (basis_type IN (
-            'client_authorization', 'internal_delivery_record', 'private_authorization'
-        ) AND private_basis_reference IS NOT NULL)
+        (basis_type IN ('client_authorization', 'internal_delivery_record')
+            AND private_basis_reference IS NOT NULL
+            AND private_basis_reference = trim(
+                private_basis_reference,
+                char(9) || char(10) || char(11) || char(12) || char(13) ||
+                char(28) || char(29) || char(30) || char(31) || char(32) ||
+                char(133) || char(160) || char(5760) || char(8192) ||
+                char(8193) || char(8194) || char(8195) || char(8196) ||
+                char(8197) || char(8198) || char(8199) || char(8200) ||
+                char(8201) || char(8202) || char(8232) || char(8233) ||
+                char(8239) || char(8287) || char(12288)
+            )
+            AND length(private_basis_reference) BETWEEN 1 AND 300
+            AND instr(private_basis_reference, char(0)) = 0) OR
+        (basis_type = 'private_authorization' AND private_basis_reference IS NOT NULL)
     ),
     CHECK(
         (source_check_code IS NULL AND source_checked_at IS NULL

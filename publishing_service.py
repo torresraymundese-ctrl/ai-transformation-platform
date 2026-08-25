@@ -68,13 +68,30 @@ def save_content_draft(
     )
 
 
-def copy_revision(content_id: int, *, actor: str, now=None) -> int:
+def copy_revision(
+    content_id: int,
+    *,
+    actor: str,
+    now=None,
+    expected_lock_version: int | None = None,
+    expected_entry_type: str | None = None,
+) -> int:
     instant = _instant(now)
 
     def operation(db):
         item = db.execute("SELECT * FROM content_items WHERE id=?", (content_id,)).fetchone()
         if item is None:
             raise ContentNotFoundError()
+        if expected_entry_type is not None and item["entry_type"] != expected_entry_type:
+            raise ContentNotFoundError()
+        if (
+            expected_lock_version is not None
+            and (
+                type(expected_lock_version) is not int
+                or item["lock_version"] != expected_lock_version
+            )
+        ):
+            raise ContentConflictError("stale_lock_version")
         if item["status"] not in {"published", "archived"}:
             raise ContentStateError("copy_source_not_immutable")
         draft = repository.load_content_draft(db, content_id)

@@ -6,11 +6,19 @@ import io
 from bs4 import BeautifulSoup
 from PIL import Image
 from pypdf import PdfWriter
+import pytest
 
 import models
+import case_repository
 import publishing_repository
 from content_clock import SHANGHAI
-from publishing_service import save_content_draft, schedule_content
+from pagination import PageRequest
+from publishing_service import (
+    copy_revision,
+    publish_content,
+    save_content_draft,
+    schedule_content,
+)
 from source_url_checker import FetchResult
 
 
@@ -435,6 +443,55 @@ def test_source_check_concurrent_url_edit_returns_409_and_preserves_the_edit(
     ).fetchone()[0] == 0
 
 
+def test_failed_source_check_keeps_response_and_audits_generic(admin_client, db):
+    source_url = "https://example.com/public-case?token=must-not-leak"
+    draft = _create_case(
+        admin_client,
+        db,
+        slug="failed-source-check-case",
+        verification_code="public_verified",
+        basis_type="public_source",
+        private_basis_reference="",
+        source_url=source_url,
+    )
+
+    class FailedTransport:
+        def fetch(self, url, **kwargs):
+            return FetchResult(False, "network_error", url, None, None, b"")
+
+    admin_client.application.config["CASE_SOURCE_TRANSPORT"] = FailedTransport()
+    response = admin_client.post(
+        f"/admin/cases/{draft['id']}/source-check",
+        data={
+            "csrf_token": CSRF,
+            "expected_lock_version": str(draft["lock_version"]),
+            "expected_url_sha256": hashlib.sha256(source_url.encode()).hexdigest(),
+        },
+    )
+
+    assert response.status_code == 302
+    assert "must-not-leak" not in response.get_data(as_text=True)
+    audit_text = " ".join(
+        str(value)
+        for row in db.execute(
+            "SELECT actor,action,status_code,ip_hash FROM admin_audit_logs"
+        )
+        for value in row
+    )
+    event_text = " ".join(
+        str(value)
+        for row in db.execute(
+            "SELECT event_code,details_json FROM content_audit_events "
+            "WHERE content_item_id=?",
+            (draft["id"],),
+        )
+        for value in row
+    )
+    assert "must-not-leak" not in audit_text
+    assert "must-not-leak" not in event_text
+    assert "network_error" in event_text
+
+
 def test_case_edit_uses_optimistic_lock_and_preserves_submitted_values_on_conflict(
     admin_client, db
 ):
@@ -453,6 +510,365 @@ def test_case_edit_uses_optimistic_lock_and_preserves_submitted_values_on_confli
     assert db.execute(
         "SELECT title FROM content_items WHERE id=?", (draft["id"],)
     ).fetchone()[0] == "并发编辑标题"
+
+
+def _publish_case_for_revision_test(admin_client, db, slug):
+    draft = _create_case(admin_client, db, slug=slug)
+    response = admin_client.post(
+        f"/admin/cases/{draft['id']}",
+        data=_edit_form(db, draft["id"], action="publish"),
+    )
+    assert response.status_code == 302
+    return db.execute(
+        "SELECT * FROM content_items WHERE id=?", (draft["id"],)
+    ).fetchone()
+
+
+def test_immutable_case_get_is_read_only_and_only_offers_post_copy(admin_client, db):
+    published = _publish_case_for_revision_test(
+        admin_client, db, "read-only-published-case"
+    )
+    before = {
+        "items": db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0],
+        "content_audit": db.execute(
+            "SELECT COUNT(*) FROM content_audit_events"
+        ).fetchone()[0],
+        "request_audit": db.execute(
+            "SELECT COUNT(*) FROM admin_audit_logs"
+        ).fetchone()[0],
+    }
+
+    response = admin_client.get(f"/admin/cases/{published['id']}")
+
+    assert response.status_code == 200
+    document = BeautifulSoup(response.data, "html.parser")
+    copy_form = document.select_one(
+        f'form[method="POST"][action="/admin/cases/{published["id"]}/copy"]'
+    )
+    assert copy_form is not None
+    assert copy_form.select_one('button[value="save"]') is None
+    assert "创建修订" in copy_form.get_text()
+    assert document.select_one('form[data-content-editor]') is None
+    assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == before["items"]
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events"
+    ).fetchone()[0] == before["content_audit"]
+    assert db.execute(
+        "SELECT COUNT(*) FROM admin_audit_logs"
+    ).fetchone()[0] == before["request_audit"]
+
+
+def test_archived_case_get_is_read_only_and_only_offers_post_copy(admin_client, db):
+    published = _publish_case_for_revision_test(
+        admin_client, db, "read-only-archived-case"
+    )
+    admin_client.post(
+        f"/admin/cases/{published['id']}",
+        data={
+            "csrf_token": CSRF,
+            "action": "archive",
+            "content_id": str(published["id"]),
+            "lock_version": str(published["lock_version"]),
+        },
+    )
+    archived = db.execute(
+        "SELECT * FROM content_items WHERE id=?", (published["id"],)
+    ).fetchone()
+    before_items = db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0]
+    before_audit = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events"
+    ).fetchone()[0]
+
+    response = admin_client.get(f"/admin/cases/{archived['id']}")
+
+    assert response.status_code == 200
+    document = BeautifulSoup(response.data, "html.parser")
+    assert document.select_one(
+        f'form[method="POST"][action="/admin/cases/{archived["id"]}/copy"]'
+    ) is not None
+    assert document.select_one('form[data-content-editor]') is None
+    assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == before_items
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events"
+    ).fetchone()[0] == before_audit
+
+
+def test_case_copy_post_requires_auth_csrf_identity_and_exact_source_lock(
+    client, admin_client, db
+):
+    published = _publish_case_for_revision_test(
+        admin_client, db, "explicit-copy-action-case"
+    )
+    path = f"/admin/cases/{published['id']}/copy"
+    valid_form = {
+        "csrf_token": CSRF,
+        "content_id": str(published["id"]),
+        "expected_lock_version": str(published["lock_version"]),
+    }
+    before_items = db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0]
+
+    anonymous = client.application.test_client().post(path, data=valid_form)
+    missing_csrf = admin_client.post(
+        path, data={key: value for key, value in valid_form.items() if key != "csrf_token"}
+    )
+    wrong_identity = admin_client.post(
+        path, data={**valid_form, "content_id": str(published["id"] + 1)}
+    )
+    stale = admin_client.post(
+        path, data={**valid_form, "expected_lock_version": "999"}
+    )
+
+    assert anonymous.status_code == 302
+    assert missing_csrf.status_code == 403
+    assert wrong_identity.status_code == 400
+    assert stale.status_code == 409
+    assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == before_items
+
+    copied = admin_client.post(path, data=valid_form)
+    assert copied.status_code == 302
+    copied_id = int(copied.headers["Location"].rstrip("/").rsplit("/", 1)[-1])
+    assert copied_id != published["id"]
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (copied_id,)
+    ).fetchone()[0] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_revision_copied'",
+        (copied_id,),
+    ).fetchone()[0] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM admin_audit_logs WHERE action='admin_case_copy_v2' "
+        "AND actor='test-admin' AND status_code=302"
+    ).fetchone()[0] == 1
+
+    repeated = admin_client.post(path, data=valid_form)
+    assert repeated.status_code == 409
+    assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == before_items + 1
+
+
+def test_case_get_redirects_to_an_existing_draft_without_writing(admin_client, db):
+    published = _publish_case_for_revision_test(
+        admin_client, db, "existing-case-draft"
+    )
+    draft_id = copy_revision(published["id"], actor="test-admin", now=NOW)
+    before_audit = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events"
+    ).fetchone()[0]
+
+    response = admin_client.get(f"/admin/cases/{published['id']}")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/admin/cases/{draft_id}")
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events"
+    ).fetchone()[0] == before_audit
+
+
+@pytest.mark.parametrize("private_reference", (" \t\n", "\u2002\u2003\u3000", "record\x00id"))
+def test_case_http_rejects_invalid_private_basis_reference(
+    admin_client, db, private_reference
+):
+    before = db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE entry_type='case'"
+    ).fetchone()[0]
+
+    response = admin_client.post(
+        "/admin/cases/new",
+        data=_case_form(private_basis_reference=private_reference),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "extension_invalid"}
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE entry_type='case'"
+    ).fetchone()[0] == before
+
+
+def test_case_http_strips_private_basis_reference(admin_client, db):
+    created = _create_case(
+        admin_client,
+        db,
+        slug="normalized-private-reference",
+        private_basis_reference=" \u3000internal-reference-001\u2003 ",
+    )
+
+    assert db.execute(
+        "SELECT private_basis_reference FROM case_content WHERE content_item_id=?",
+        (created["id"],),
+    ).fetchone()[0] == "internal-reference-001"
+
+
+def test_raw_published_case_metric_nul_fails_closed_on_public_surfaces(
+    admin_client, db
+):
+    published = _publish_case_for_revision_test(
+        admin_client, db, "raw-public-metric-nul"
+    )
+    trigger_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_case_metrics_update'"
+    ).fetchone()[0]
+    db.execute("DROP TRIGGER protect_case_metrics_update")
+    db.execute(
+        "UPDATE case_metrics SET evidence_explanation=? WHERE case_content_item_id=?",
+        ("public\x00evidence", published["id"]),
+    )
+    db.execute(trigger_sql)
+    db.commit()
+
+    assert admin_client.get("/cases/raw-public-metric-nul").status_code == 404
+    assert "raw-public-metric-nul" not in admin_client.get("/cases").get_data(
+        as_text=True
+    )
+
+
+class _CaseInterleavingCursor:
+    def __init__(self, cursor, after_first_fetch):
+        self._cursor = cursor
+        self._after_first_fetch = after_first_fetch
+
+    def _fetched(self, value):
+        callback, self._after_first_fetch = self._after_first_fetch, None
+        if callback is not None:
+            callback()
+        return value
+
+    def fetchone(self):
+        return self._fetched(self._cursor.fetchone())
+
+    def fetchall(self):
+        return self._fetched(self._cursor.fetchall())
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            value = next(self._cursor)
+        except StopIteration:
+            self._fetched(None)
+            raise
+        return self._fetched(value)
+
+
+class _CaseInterleavingReadConnection:
+    def __init__(self, connection, replace_after_first_fetch):
+        self._connection = connection
+        self._replace_after_first_fetch = replace_after_first_fetch
+        self._first_read_wrapped = False
+        self._begin_seen = False
+        self.begin_before_first_read = False
+
+    def execute(self, sql, parameters=()):
+        statement = sql.strip().upper()
+        if statement == "BEGIN":
+            self._begin_seen = True
+        cursor = self._connection.execute(sql, parameters)
+        if statement.startswith("SELECT") and not self._first_read_wrapped:
+            self._first_read_wrapped = True
+            self.begin_before_first_read = self._begin_seen
+            return _CaseInterleavingCursor(cursor, self._replace_after_first_fetch)
+        return cursor
+
+    def rollback(self):
+        return self._connection.rollback()
+
+    def close(self):
+        return self._connection.close()
+
+
+def _commit_case_replacement(get_db, old_id, replacement_id, now_text):
+    writer = get_db()
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        old = writer.execute(
+            "SELECT content_group_id,slug FROM content_items WHERE id=?", (old_id,)
+        ).fetchone()
+        replacement = writer.execute(
+            "SELECT slug FROM content_items WHERE id=?", (replacement_id,)
+        ).fetchone()
+        writer.execute(
+            "UPDATE content_items SET status='archived',archived_at=?,"
+            "lock_version=lock_version+1,updated_at=? WHERE id=? AND status='published'",
+            (now_text, now_text, old_id),
+        )
+        if old["slug"] != replacement["slug"]:
+            writer.execute(
+                "UPDATE content_groups SET canonical_slug=?,updated_at=? WHERE id=?",
+                (replacement["slug"], now_text, old["content_group_id"]),
+            )
+            writer.execute(
+                "INSERT INTO content_slug_aliases "
+                "(entry_type,old_slug,content_group_id,created_at) VALUES ('case',?,?,?)",
+                (old["slug"], old["content_group_id"], now_text),
+            )
+        writer.execute(
+            "UPDATE content_items SET status='published',published_at=?,"
+            "lock_version=lock_version+1,updated_at=? WHERE id=? AND status='draft'",
+            (now_text, now_text, replacement_id),
+        )
+        writer.commit()
+    finally:
+        writer.close()
+
+
+@pytest.mark.parametrize("surface", ("list", "direct", "alias"))
+def test_public_case_reads_one_wal_snapshot_during_concurrent_replacement(
+    admin_client, db, monkeypatch, surface
+):
+    db.execute("PRAGMA journal_mode=WAL")
+    initial_slug = f"snapshot-case-{surface}"
+    current = _publish_case_for_revision_test(admin_client, db, initial_slug)
+    if surface == "alias":
+        renamed_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+        renamed = replace(
+            publishing_repository.load_content_draft(db, renamed_id),
+            slug=f"{initial_slug}-current",
+            title="快照旧修订标题",
+        )
+        save_content_draft(renamed_id, 1, renamed, actor="test-admin", now=NOW)
+        publish_content(renamed_id, 2, actor="test-admin", now=NOW)
+        current = db.execute(
+            "SELECT * FROM content_items WHERE id=?", (renamed_id,)
+        ).fetchone()
+    replacement_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    replacement_slug = (
+        f"{initial_slug}-replacement" if surface == "alias" else current["slug"]
+    )
+    replacement_title = "并发替换后的案例标题"
+    replacement = replace(
+        publishing_repository.load_content_draft(db, replacement_id),
+        slug=replacement_slug,
+        title=replacement_title,
+    )
+    save_content_draft(replacement_id, 1, replacement, actor="test-admin", now=NOW)
+    db.commit()
+    original_get_db = case_repository.models.get_db
+    replaced = {"committed": False}
+
+    def replace_after_first_fetch():
+        _commit_case_replacement(
+            original_get_db, current["id"], replacement_id, "2026-08-25 10:00:01"
+        )
+        replaced["committed"] = True
+
+    interleaved = _CaseInterleavingReadConnection(
+        original_get_db(), replace_after_first_fetch
+    )
+    monkeypatch.setattr(case_repository.models, "get_db", lambda: interleaved)
+
+    if surface == "list":
+        page = case_repository.public_cases(PageRequest(1, 20), NOW)
+        assert tuple(item.title for item in page.items) == (current["title"],)
+    else:
+        lookup_slug = initial_slug if surface == "alias" else current["slug"]
+        projection = case_repository.public_case(lookup_slug, NOW)
+        assert projection is not None
+        assert projection.title == current["title"]
+        assert projection.redirect is (surface == "alias")
+
+    assert interleaved.begin_before_first_read is True
+    assert replaced["committed"] is True
 
 
 def test_future_archived_and_legacy_cases_are_never_public(admin_client, db):

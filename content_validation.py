@@ -21,6 +21,9 @@ CASE_VERIFICATION = frozenset({"public_verified", "authorized_anonymous"})
 CASE_BASIS_TYPES = frozenset(
     {"public_source", "client_authorization", "internal_delivery_record"}
 )
+CASE_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+CASE_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+CASE_WECHAT_RE = re.compile(r"(?i)(?:微信|微信号|wechat|weixin|加微信)")
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RELATION_OWNERS = {
     "industry_case": "industry",
@@ -116,6 +119,15 @@ def _valid_optional_text(value, maximum):
     return value is None or (
         type(value) is str and 1 <= len(value) <= maximum
     )
+
+
+def _private_basis_reference(value):
+    if type(value) is not str or "\x00" in value:
+        raise ContentValidationError("extension_invalid")
+    normalized = value.strip()
+    if not normalized or len(normalized) > 300:
+        raise ContentValidationError("extension_invalid")
+    return normalized
 
 
 def _valid_sha256(value):
@@ -349,8 +361,12 @@ def _validate_extension(draft):
             import hashlib
 
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
-        elif extension["private_basis_reference"] is None:
-            raise ContentValidationError("extension_invalid")
+        elif extension["basis_type"] in {
+            "client_authorization", "internal_delivery_record"
+        }:
+            extension["private_basis_reference"] = _private_basis_reference(
+                extension["private_basis_reference"]
+            )
         elif extension["source_url"] is not None:
             extension["source_url"] = _normalize_https_url(extension["source_url"])
             import hashlib
@@ -383,9 +399,52 @@ def _validate_extension(draft):
 
 
 def _metric_text(value, maximum, code):
-    if type(value) is not str or not value.strip() or len(value) > maximum:
+    if (
+        type(value) is not str
+        or "\x00" in value
+        or not value.strip()
+        or len(value) > maximum
+    ):
         raise ContentValidationError(code)
     return value.strip()
+
+
+def _nested_public_strings(value):
+    if type(value) is str:
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _nested_public_strings(item)
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _nested_public_strings(item)
+
+
+def case_has_obvious_pii(draft):
+    """Auxiliary obvious-contact guard; this is not proof of anonymization."""
+    if not isinstance(draft, ContentDraft) or draft.entry_type != "case":
+        return False
+    values = [draft.title, draft.summary, draft.seo_title, draft.seo_description]
+    for block in draft.blocks:
+        values.extend((block.title or "", block.body_html or ""))
+        values.extend(_nested_public_strings(block.settings))
+    for metric in draft.metrics:
+        values.extend(
+            (
+                metric.name,
+                metric.before_value,
+                metric.after_value,
+                metric.unit,
+                metric.statistical_period,
+                metric.evidence_explanation,
+            )
+        )
+    return any(
+        CASE_EMAIL_RE.search(value)
+        or CASE_PHONE_RE.search(value)
+        or CASE_WECHAT_RE.search(value)
+        for value in values
+    )
 
 
 def _validate_metrics(draft):
@@ -480,7 +539,7 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
         raise ContentValidationError("maturity_invalid")
     extension = _validate_extension(draft)
     metrics = _validate_metrics(draft)
-    return replace(
+    validated = replace(
         draft,
         title=title,
         summary=summary,
@@ -491,3 +550,6 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
         relations=tuple(relations),
         metrics=metrics,
     )
+    if validated.entry_type == "case" and case_has_obvious_pii(validated):
+        raise ContentValidationError("obvious_pii_detected")
+    return validated

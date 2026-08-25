@@ -694,6 +694,128 @@ def test_case_metric_fields_have_literal_schema_limits(changes, code):
 
 
 @pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("name", "\x00处理时间", "metric_name_invalid"),
+        ("name", "处\x00理时间", "metric_name_invalid"),
+        ("before_value", "\x008", "metric_before_invalid"),
+        ("before_value", "8\x000", "metric_before_invalid"),
+        ("after_value", "\x002", "metric_after_invalid"),
+        ("after_value", "2\x000", "metric_after_invalid"),
+        ("unit", "\x00小时", "metric_unit_invalid"),
+        ("unit", "小\x00时", "metric_unit_invalid"),
+        ("statistical_period", "\x00连续 30 天", "metric_period_invalid"),
+        ("statistical_period", "连续\x00 30 天", "metric_period_invalid"),
+        ("evidence_explanation", "\x00交付记录", "metric_evidence_invalid"),
+        ("evidence_explanation", "交付\x00记录", "metric_evidence_invalid"),
+    ],
+)
+def test_case_metric_text_rejects_leading_or_embedded_nul(field, value, code):
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(_case_draft(metrics=(_metric(**{field: value}),)))
+
+    assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    "private_reference",
+    ("", " \t\r\n", "\u2002\u2003\u3000", "record\x00-001"),
+)
+def test_private_case_basis_requires_exact_nonblank_nul_free_reference(
+    private_reference,
+):
+    draft = _case_draft(metrics=(_metric(),))
+    invalid = replace(
+        draft,
+        extension={
+            **dict(draft.extension),
+            "private_basis_reference": private_reference,
+        },
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(invalid)
+
+    assert error.value.code == "extension_invalid"
+
+
+def test_private_case_basis_reference_is_stripped_before_persistence():
+    draft = _case_draft(metrics=(_metric(),))
+    validated = validate_content_draft(
+        replace(
+            draft,
+            extension={
+                **dict(draft.extension),
+                "private_basis_reference": " \u3000delivery-record-001\u2003 ",
+            },
+        )
+    )
+
+    assert validated.extension["private_basis_reference"] == "delivery-record-001"
+
+
+@pytest.mark.parametrize(
+    "draft_change",
+    (
+        {"title": "联系 owner@example.com"},
+        {"summary": "联系 owner@example.com"},
+        {"seo_title": "联系 owner@example.com"},
+        {"seo_description": "联系 owner@example.com"},
+        {
+            "blocks": (
+                ContentBlock("rich_text", body_html="<p>电话 13800138000</p>"),
+            )
+        },
+        {
+            "blocks": (
+                ContentBlock("heading", title="联系 owner@example.com", settings={"level": 2}),
+            )
+        },
+        {
+            "blocks": (
+                ContentBlock(
+                    "cta",
+                    settings={
+                        "label": "加微信获取证据",
+                        "url": "/assessment",
+                        "style": "primary",
+                    },
+                ),
+            )
+        },
+        {"metrics": (_metric(name="owner@example.com"),)},
+        {"metrics": (_metric(before_value="13800138000"),)},
+        {"metrics": (_metric(after_value="加微信"),)},
+        {"metrics": (_metric(unit="owner@example.com"),)},
+        {"metrics": (_metric(statistical_period="电话 13800138000"),)},
+        {"metrics": (_metric(evidence_explanation="请加微信号获取证据"),)},
+    ),
+)
+def test_case_domain_validation_rejects_obvious_pii_on_public_surfaces(draft_change):
+    draft = _case_draft(metrics=(_metric(),))
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(replace(draft, **draft_change))
+
+    assert error.value.code == "obvious_pii_detected"
+
+
+@dataclass(frozen=True)
+class _CaseDraftSubclass(ContentDraft):
+    mutable_extra: list = field(default_factory=list)
+
+
+def test_case_domain_pii_guard_cannot_be_bypassed_by_a_draft_subclass():
+    base = replace(_case_draft(metrics=(_metric(),)), title="联系 owner@example.com")
+    draft = _CaseDraftSubclass(**base.__dict__)
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(draft)
+
+    assert error.value.code == "obvious_pii_detected"
+
+
+@pytest.mark.parametrize(
     ("field", "code"),
     (
         ("title", "title_invalid"),

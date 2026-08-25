@@ -543,13 +543,25 @@ def _service_related_items(db, content_id, now, kind):
     }[kind]
     clause, arguments = _public_item_where(now)
     rows = db.execute(
-        "SELECT ci.title,ci.slug FROM " + relation_table + " relation "
+        "SELECT ci.id,ci.title,ci.slug FROM " + relation_table + " relation "
         "JOIN content_items ci ON ci.content_group_id=relation." + target_column + " "
         f"WHERE relation.{owner_column}=? AND ci.entry_type=? AND {clause} "
         "ORDER BY relation.sort_order,ci.id",
         (content_id, kind, *arguments),
     ).fetchall()
-    return tuple(MappingProxyType(dict(row)) for row in rows)
+    projected = []
+    for row in rows:
+        if kind == "case":
+            try:
+                publishing_repository.validate_case_public_completeness(
+                    db, row["id"], now
+                )
+            except ContentValidationError:
+                continue
+        projected.append(
+            MappingProxyType({"title": row["title"], "slug": row["slug"]})
+        )
+    return tuple(projected)
 
 
 def _service_projection(db, item, redirect, now, authority: ServiceAuthority | None = None):

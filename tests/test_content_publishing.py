@@ -485,6 +485,32 @@ def test_draft_copy_is_rejected_and_stale_lock_writes_nothing(db):
     ).fetchone()[0] == 0
 
 
+def test_copy_revision_rejects_non_exact_integer_expected_lock_without_writing(db):
+    content_id = create_content_draft(_announcement(), actor="admin", now=NOW)
+    publish_content(content_id, 1, actor="admin", now=NOW)
+
+    class LockVersionSubclass(int):
+        pass
+
+    with pytest.raises(ContentConflictError) as error:
+        copy_revision(
+            content_id,
+            actor="admin",
+            now=NOW,
+            expected_lock_version=LockVersionSubclass(2),
+        )
+
+    assert error.value.code == "stale_lock_version"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE content_group_id=?",
+        (_row(db, content_id)["content_group_id"],),
+    ).fetchone()[0] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events "
+        "WHERE event_code='content_revision_copied'"
+    ).fetchone()[0] == 0
+
+
 def test_only_schedule_can_set_clear_or_change_publish_at(db):
     direct_due = "2026-08-24 11:00:00"
     with pytest.raises(ContentValidationError) as create_error:
@@ -1201,6 +1227,233 @@ def test_caller_can_rollback_a_primitive_after_mid_aggregate_failure(db, monkeyp
     ).fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM content_audit_events").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("surface", ("title", "body", "metric"))
+@pytest.mark.parametrize(
+    "public_value",
+    (
+        "案例联系 owner@example.com",
+        "咨询电话 13800138000",
+        "请加微信号获取原始证据",
+    ),
+)
+def test_direct_case_create_and_save_reject_public_pii_without_residue(
+    db, surface, public_value
+):
+    slug = f"direct-pii-{surface}"
+    changes = {
+        "title": {"title": public_value},
+        "body": {
+            "blocks": (ContentBlock("rich_text", body_html=public_value),),
+        },
+        "metric": {
+            "metrics": (
+                replace(
+                    _verified_case(slug).metrics[0],
+                    evidence_explanation=public_value,
+                ),
+            )
+        },
+    }[surface]
+    invalid = replace(_verified_case(slug), **changes)
+
+    with pytest.raises(ContentValidationError) as create_error:
+        create_content_draft(invalid, actor="admin", now=NOW)
+    assert create_error.value.code == "obvious_pii_detected"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE slug=?", (slug,)
+    ).fetchone()[0] == 0
+
+    content_id = create_content_draft(
+        _verified_case(f"save-{slug}"), actor="admin", now=NOW
+    )
+    before = tuple(_row(db, content_id))
+    with pytest.raises(ContentValidationError) as save_error:
+        save_content_draft(content_id, 1, replace(invalid, slug=f"save-{slug}"), actor="admin", now=NOW)
+    assert save_error.value.code == "obvious_pii_detected"
+    assert tuple(_row(db, content_id)) == before
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_updated'",
+        (content_id,),
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "private_reference",
+    ("", " \t\n", "\u2002\u2003\u3000", "basis\x00record", "r" * 301, True),
+)
+def test_direct_private_basis_reference_failure_is_atomic(db, private_reference):
+    invalid = replace(
+        _verified_case("direct-private-reference"),
+        extension={
+            **dict(_verified_case().extension),
+            "private_basis_reference": private_reference,
+        },
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        create_content_draft(invalid, actor="admin", now=NOW)
+
+    assert error.value.code == "extension_invalid"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE slug='direct-private-reference'"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0] == 0
+
+    valid_id = create_content_draft(
+        _verified_case("direct-private-reference-save"), actor="admin", now=NOW
+    )
+    invalid_save = replace(
+        invalid,
+        slug="direct-private-reference-save",
+        content_group_id=_row(db, valid_id)["content_group_id"],
+    )
+    with pytest.raises(ContentValidationError) as save_error:
+        save_content_draft(
+            valid_id, 1, invalid_save, actor="admin", now=NOW
+        )
+    assert save_error.value.code == "extension_invalid"
+    assert _row(db, valid_id)["lock_version"] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_updated'",
+        (valid_id,),
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("mode", ("immediate", "due"))
+@pytest.mark.parametrize(
+    ("corruption_sql", "unsafe_value"),
+    (
+        ("UPDATE content_items SET title=? WHERE id=?", "owner@example.com"),
+        ("UPDATE content_items SET title=? WHERE id=?", "电话 13800138000"),
+        ("UPDATE content_items SET title=? WHERE id=?", "请加微信获取证据"),
+        ("UPDATE content_blocks SET body_html=? WHERE content_item_id=?", "owner@example.com"),
+        ("UPDATE content_blocks SET body_html=? WHERE content_item_id=?", "电话 13800138000"),
+        ("UPDATE content_blocks SET body_html=? WHERE content_item_id=?", "请加微信获取证据"),
+        (
+            "UPDATE case_metrics SET evidence_explanation=? WHERE case_content_item_id=?",
+            "owner@example.com",
+        ),
+        (
+            "UPDATE case_metrics SET evidence_explanation=? WHERE case_content_item_id=?",
+            "电话 13800138000",
+        ),
+        (
+            "UPDATE case_metrics SET evidence_explanation=? WHERE case_content_item_id=?",
+            "请加微信获取证据",
+        ),
+        (
+            "UPDATE case_content SET private_basis_reference=? WHERE content_item_id=?",
+            "\u2002\u2003\u3000",
+        ),
+        (
+            "UPDATE case_metrics SET statistical_period=? WHERE case_content_item_id=?",
+            "30\x00天",
+        ),
+    ),
+)
+def test_raw_invalid_case_revision_cannot_replace_old_public_revision(
+    db, mode, corruption_sql, unsafe_value
+):
+    suffix = hashlib.sha256((mode + corruption_sql + unsafe_value).encode()).hexdigest()[:10]
+    old_id = create_content_draft(
+        replace(
+            _verified_case(f"raw-case-{suffix}"),
+            blocks=(ContentBlock("rich_text", body_html="<p>公开交付过程</p>"),),
+        ),
+        actor="admin",
+        now=NOW,
+    )
+    publish_content(old_id, 1, actor="admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="admin", now=NOW)
+    due = NOW + timedelta(hours=1)
+    if mode == "due":
+        schedule_content(replacement_id, 1, due, actor="admin", now=NOW)
+        valid_id = create_content_draft(
+            _verified_case(f"valid-after-{suffix}"), actor="admin", now=NOW
+        )
+        schedule_content(valid_id, 1, due, actor="admin", now=NOW)
+    bypass_case_check = corruption_sql.startswith("UPDATE case_content ")
+    if bypass_case_check:
+        db.execute("PRAGMA ignore_check_constraints=ON")
+    try:
+        db.execute(corruption_sql, (unsafe_value, replacement_id))
+    finally:
+        if bypass_case_check:
+            db.execute("PRAGMA ignore_check_constraints=OFF")
+    db.commit()
+
+    if mode == "immediate":
+        with pytest.raises(ContentValidationError):
+            publish_content(replacement_id, 1, actor="admin", now=NOW)
+    else:
+        result = publish_due_content(now=due)
+        assert result.published_ids == (valid_id,)
+        assert result.failures == ((replacement_id, "validation_failed"),)
+        details = db.execute(
+            "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+            "AND event_code='content_due_failed'",
+            (replacement_id,),
+        ).fetchone()[0]
+        assert details == '{"reason_code":"validation_failed"}'
+        assert unsafe_value not in details
+
+    assert _row(db, old_id)["status"] == "published"
+    assert _row(db, replacement_id)["status"] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (replacement_id,),
+    ).fetchone()[0] == 0
+
+
+def test_due_case_source_freshness_failure_is_isolated_and_safe(db):
+    source_url = "https://example.com/private-query?token=must-not-leak"
+    source_hash = hashlib.sha256(source_url.encode()).hexdigest()
+    checked_at = "2026-08-24 10:00:00"
+    invalid = create_content_draft(
+        _public_case(
+            "due-stale-case-source",
+            check={
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+            },
+        ),
+        actor="admin",
+        now=NOW,
+    )
+    db.execute(
+        "UPDATE case_content SET source_url=?,source_url_sha256=?,source_check_code='https_ok',"
+        "source_checked_at=?,source_check_expires_at='2099-01-01 00:00:00',"
+        "source_check_url_sha256=? WHERE content_item_id=?",
+        (source_url, source_hash, checked_at, source_hash, invalid),
+    )
+    db.commit()
+    valid = create_content_draft(
+        _verified_case("due-after-stale-case-source"), actor="admin", now=NOW
+    )
+    due = NOW + timedelta(days=8)
+    schedule_content(invalid, 1, due, actor="admin", now=NOW)
+    schedule_content(valid, 1, due, actor="admin", now=NOW)
+
+    result = publish_due_content(now=due)
+
+    assert result.published_ids == (valid,)
+    assert result.failures == ((invalid, "validation_failed"),)
+    details = db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'",
+        (invalid,),
+    ).fetchone()[0]
+    assert details == '{"reason_code":"validation_failed"}'
+    assert source_url not in details
 
 
 def test_caller_can_rollback_update_after_mid_aggregate_failure(db, monkeypatch):

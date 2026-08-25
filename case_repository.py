@@ -205,7 +205,8 @@ def get_editor(content_id=None, *, form=None) -> EditorView:
         db.close()
 
 
-def ensure_editable(content_id, *, actor, now) -> int:
+def editable_revision(content_id) -> int | None:
+    """Discover an existing editable revision without writing on GET."""
     db = models.get_db()
     try:
         item = db.execute(
@@ -222,9 +223,19 @@ def ensure_editable(content_id, *, actor, now) -> int:
         ).fetchone()
         if draft is not None:
             return draft["id"]
+        return None
     finally:
         db.close()
-    return publishing_service.copy_revision(content_id, actor=actor, now=now)
+
+
+def copy_revision(content_id, expected_lock_version, *, actor, now) -> int:
+    return publishing_service.copy_revision(
+        content_id,
+        actor=actor,
+        now=now,
+        expected_lock_version=expected_lock_version,
+        expected_entry_type="case",
+    )
 
 
 def admin_cases(page_request: PageRequest) -> Page[AdminCaseRow]:
@@ -412,6 +423,7 @@ def public_cases(page_request: PageRequest, now) -> Page[PublicCase]:
     instant = as_shanghai(now)
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         ids = tuple(
             row["id"]
             for row in db.execute(
@@ -440,6 +452,7 @@ def public_cases(page_request: PageRequest, now) -> Page[PublicCase]:
             total_pages,
         )
     finally:
+        db.rollback()
         db.close()
 
 
@@ -447,6 +460,7 @@ def public_case(slug, now):
     instant = as_shanghai(now)
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         row = db.execute(
             "SELECT id FROM content_items WHERE entry_type='case' AND slug=? "
             "AND status='published' AND (publish_at IS NULL OR publish_at<=?)",
@@ -466,4 +480,5 @@ def public_case(slug, now):
             return None
         return _validated_public_case(db, alias["id"], instant, redirect=True)
     finally:
+        db.rollback()
         db.close()

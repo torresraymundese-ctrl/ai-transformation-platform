@@ -421,8 +421,7 @@ def _load_validated_publication_draft(db, content_id):
     return draft
 
 
-def validate_for_publication(db, content_id, now):
-    draft = _load_validated_publication_draft(db, content_id)
+def _validate_publication_media(db, draft):
     if draft.share_image_media_id is not None:
         media = db.execute(
             "SELECT detected_mime FROM media_assets WHERE id=? AND status='ready'",
@@ -457,47 +456,84 @@ def validate_for_publication(db, content_id, now):
         is None
     ):
         raise ContentValidationError("media_not_ready")
-    for relation in draft.relations:
-        target_type = "case" if relation.relation_type.endswith("_case") else "resource"
-        if db.execute(
-            "SELECT 1 FROM content_items WHERE content_group_id=? AND entry_type=? AND status='published'",
-            (relation.target_group_id, target_type),
-        ).fetchone() is None:
-            raise ContentValidationError("relation_target_not_published")
+
+
+def _validate_required_source(draft, now):
     required_source = (
         draft.entry_type == "case" and draft.extension.get("basis_type") == "public_source"
     ) or (
         draft.entry_type == "resource" and draft.extension.get("is_original") == 0
     )
-    if required_source:
-        source_hash = draft.extension.get("source_url_sha256")
-        checked_at = draft.extension.get("source_checked_at")
-        now_text = format_shanghai(now)
-        freshness_floor = format_shanghai(now - timedelta(days=7))
-        if (
-            draft.extension.get("source_check_code") != "https_ok"
-            or draft.extension.get("source_check_url_sha256") != source_hash
-            or not checked_at
-            or checked_at < freshness_floor
-            or checked_at > now_text
-            or not draft.extension.get("source_check_expires_at")
-            or draft.extension["source_check_expires_at"] < now_text
-        ):
-            raise ContentValidationError("source_check_invalid")
+    if not required_source:
+        return
+    source_hash = draft.extension.get("source_url_sha256")
+    checked_at = draft.extension.get("source_checked_at")
+    now_text = format_shanghai(now)
+    freshness_floor = format_shanghai(now - timedelta(days=7))
+    if (
+        draft.extension.get("source_check_code") != "https_ok"
+        or draft.extension.get("source_check_url_sha256") != source_hash
+        or not checked_at
+        or checked_at < freshness_floor
+        or checked_at > now_text
+        or not draft.extension.get("source_check_expires_at")
+        or draft.extension["source_check_expires_at"] < now_text
+    ):
+        raise ContentValidationError("source_check_invalid")
+
+
+def _validate_case_completeness(draft, now):
+    verification_code = draft.extension.get("verification_code")
+    expected_anonymized = 1 if verification_code == "authorized_anonymous" else 0
+    if (
+        verification_code not in CASE_VERIFICATION
+        or draft.extension.get("basis_type") not in CASE_BASIS_TYPES
+        or draft.extension.get("is_anonymized") != expected_anonymized
+        or draft.extension.get("is_verified") != 1
+        or draft.extension.get("review_confirmed") != 1
+        or not draft.extension.get("verified_at")
+        or draft.extension["verified_at"] > format_shanghai(now)
+        or not draft.metrics
+    ):
+        raise ContentValidationError("case_verification_incomplete")
+
+
+def validate_case_public_completeness(db, content_id, now):
+    """Validate one persisted case for public display without opening a transaction."""
+    draft = _load_validated_publication_draft(db, content_id)
+    if draft.entry_type != "case":
+        raise ContentValidationError("case_verification_incomplete")
+    _validate_publication_media(db, draft)
+    _validate_required_source(draft, now)
+    _validate_case_completeness(draft, now)
+    return draft
+
+
+def validate_for_publication(db, content_id, now):
+    draft = _load_validated_publication_draft(db, content_id)
+    _validate_publication_media(db, draft)
+    for relation in draft.relations:
+        target_type = "case" if relation.relation_type.endswith("_case") else "resource"
+        target = db.execute(
+            "SELECT id,publish_at FROM content_items WHERE content_group_id=? "
+            "AND entry_type=? AND status='published'",
+            (relation.target_group_id, target_type),
+        ).fetchone()
+        if target is None:
+            raise ContentValidationError("relation_target_not_published")
+        if target_type == "case":
+            try:
+                if (
+                    target["publish_at"] is not None
+                    and target["publish_at"] > format_shanghai(now)
+                ):
+                    raise ContentValidationError("case_verification_incomplete")
+                validate_case_public_completeness(db, target["id"], now)
+            except ContentValidationError as error:
+                raise ContentValidationError("relation_target_not_published") from error
+    _validate_required_source(draft, now)
     if draft.entry_type == "case":
-        verification_code = draft.extension.get("verification_code")
-        expected_anonymized = 1 if verification_code == "authorized_anonymous" else 0
-        if (
-            verification_code not in CASE_VERIFICATION
-            or draft.extension.get("basis_type") not in CASE_BASIS_TYPES
-            or draft.extension.get("is_anonymized") != expected_anonymized
-            or draft.extension.get("is_verified") != 1
-            or draft.extension.get("review_confirmed") != 1
-            or not draft.extension.get("verified_at")
-            or draft.extension["verified_at"] > format_shanghai(now)
-            or not draft.metrics
-        ):
-            raise ContentValidationError("case_verification_incomplete")
+        _validate_case_completeness(draft, now)
     if draft.entry_type == "industry":
         _validate_industry_publication(db, content_id, draft, now)
     if draft.entry_type == "scenario":

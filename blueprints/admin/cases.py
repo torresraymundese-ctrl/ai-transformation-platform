@@ -46,9 +46,6 @@ METRIC_SUFFIXES = frozenset(
 )
 METRIC_FIELD = re.compile(r"^metrics-(0|[1-9][0-9]*)-([a-z_]+)$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
-WECHAT_RE = re.compile(r"(?i)(?:微信|微信号|wechat|weixin|加微信)")
 
 
 def _actor():
@@ -108,32 +105,6 @@ def _metric(data, index):
         _one(data, prefix + "evidence_explanation"),
         index,
     )
-
-
-def _pii_texts(draft):
-    values = [
-        draft.title, draft.summary, draft.seo_title, draft.seo_description,
-        draft.extension.get("private_basis_reference") or "",
-    ]
-    for block in draft.blocks:
-        values.extend((block.title or "", block.body_html or ""))
-        values.extend(str(value) for value in block.settings.values())
-    for metric in draft.metrics:
-        values.extend(
-            (
-                metric.name, metric.before_value, metric.after_value, metric.unit,
-                metric.statistical_period, metric.evidence_explanation,
-            )
-        )
-    return tuple(values)
-
-
-def _reject_obvious_pii(draft):
-    if any(
-        EMAIL_RE.search(value) or PHONE_RE.search(value) or WECHAT_RE.search(value)
-        for value in _pii_texts(draft)
-    ):
-        raise CatalogFormError("obvious_pii_detected")
 
 
 def _parse_submission(data, *, content_id=None, now=None):
@@ -202,7 +173,6 @@ def _parse_submission(data, *, content_id=None, now=None):
         blocks=blocks,
         metrics=metrics,
     )
-    _reject_obvious_pii(draft)
     return action, supplied_id, lock_version, draft
 
 
@@ -245,10 +215,8 @@ def admin_case_edit_v2(content_id):
     draft = None
     try:
         if request.method == "GET":
-            editable_id = cases.ensure_editable(
-                content_id, actor=_actor(), now=_now()
-            )
-            if editable_id != content_id:
+            editable_id = cases.editable_revision(content_id)
+            if editable_id is not None and editable_id != content_id:
                 return redirect(url_for("admin.admin_case_edit_v2", content_id=editable_id))
             return render_template(
                 "admin/case_edit_v2.html", view=cases.get_editor(content_id), error=None
@@ -284,6 +252,33 @@ def admin_case_edit_v2(content_id):
         )
     except ContentValidationError as error:
         return jsonify({"error": error.code}), 400
+    except ContentStateError as error:
+        return jsonify({"error": error.code}), 409
+    except ContentNotFoundError:
+        abort(404)
+
+
+@bp.post("/admin/cases/<int:content_id>/copy")
+def admin_case_copy_v2(content_id):
+    try:
+        if set(request.form.keys()) != {
+            "csrf_token", "content_id", "expected_lock_version"
+        }:
+            raise CatalogFormError("unknown_field")
+        supplied_id = _positive_id(request.form, "content_id")
+        if supplied_id != content_id:
+            raise CatalogFormError("content_identity_invalid")
+        copied_id = cases.copy_revision(
+            content_id,
+            _positive_id(request.form, "expected_lock_version"),
+            actor=_actor(),
+            now=_now(),
+        )
+        return redirect(url_for("admin.admin_case_edit_v2", content_id=copied_id))
+    except CatalogFormError as error:
+        return _json_error(error)
+    except ContentConflictError as error:
+        return jsonify({"error": error.code}), 409
     except ContentStateError as error:
         return jsonify({"error": error.code}), 409
     except ContentNotFoundError:
