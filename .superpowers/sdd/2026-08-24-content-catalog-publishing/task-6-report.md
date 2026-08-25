@@ -1870,3 +1870,55 @@ Fix1l changed only:
 The historical full-suite outcome remains **UNKNOWN** and was not rerun. The
 historical PyPI-network violation remains **CONFIRMED**, and the frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1l controller verification
+
+The controller independently verified frozen Fix1l implementation commit
+`c71fd4477fbd42bdb0f0ab746d7ce886380a6e9a`. All effective pytest runs used
+the assigned Python `3.12.13` interpreter, a process-scoped `PYTHONPATH`
+pointing only at the checked-in offline `local-deps` overlay, imported
+`idna 3.19` from the assigned venv and `pypdf 6.10.0` from that overlay, used
+`-p no:cacheprovider`, and used a unique basetemp. Each controller confirmed
+the frozen HEAD and a clean all-files status before and after its read-only
+run.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1l-focused-001
+```
+
+Result: `583 passed in 292.41s (0:04:52)`, pytest and tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1l-public-partition-001
+```
+
+Result: `407 passed in 234.54s (0:03:54)`, pytest and tool `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1l-related-partition-001
+```
+
+Result: `336 passed in 148.99s (0:02:28)`, pytest and tool `exit_code=0`.
+
+For transparency, before the assigned interpreter was made explicit to the
+three controllers, each first resolved the PATH interpreter to
+`D:\Hermes Agent\venv\Scripts\python.exe`; those launches exited 1 before
+collection with `No module named pytest`. The focused controller also made a
+read-only probe with `C:\Python\python.exe`, which exited 1 for the same
+reason. No target test was collected or executed by those interpreters, and
+they are harness bootstrap errors rather than product-test results. No package
+was installed and no network was used. Each controller then rechecked frozen
+HEAD/clean status and completed the effective assigned-interpreter run shown
+above with its original unique basetemp.
+
+Controller `py_compile` over the two changed Python files,
+`git diff --check` for both `e194588..c71fd44` and
+`1c359a7..c71fd44`, and the no-direct-SQL guards for both catalog Blueprints
+all passed. No full suite, production server, Nginx, real database, network
+access, or dependency installation was used. The historical full-suite
+outcome remains **UNKNOWN** and was not rerun; the historical PyPI-network
+violation remains **CONFIRMED**; and the frozen `data_process_foundation`
+product-data limitation remains unchanged.
