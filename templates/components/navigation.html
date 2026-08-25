@@ -4,14 +4,24 @@
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" onerror="this.style.display='none'">
       企业<span>AI转型</span>平台
     </a>
-    <ul class="nav-links">
-      <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">首页</a></li>
-      <li><a href="/services" class="{% if request.path.startswith('/services') %}active{% endif %}">服务方案</a></li>
-      <li><a href="/cases" class="{% if request.path.startswith('/cases') %}active{% endif %}">案例库</a></li>
-      <li><a href="/insights" class="{% if request.path.startswith('/insights') or request.path.startswith('/article') %}active{% endif %}">资讯</a></li>
-      <li><a href="/assessment">免费评估</a></li>
-      <li><a href="/about">关于我们</a></li>
-    </ul>
-    <a href="/assessment" class="nav-cta">免费评估</a>
+    <div class="nav-links" data-primary-navigation>
+      <a href="/industries" class="{% if request.path.startswith('/industries') %}active{% endif %}">行业方案</a>
+      <a href="/scenarios" class="{% if request.path.startswith('/scenarios') %}active{% endif %}">AI 场景</a>
+      <a href="/service-packages" class="{% if request.path.startswith('/service-packages') %}active{% endif %}">服务与交付</a>
+      <a href="/cases" class="{% if request.path.startswith('/cases') or request.path.startswith('/resources') or request.path.startswith('/announcements') %}active{% endif %}">案例与资源</a>
+      <a href="/about" class="{% if request.path == '/about' %}active{% endif %}">关于我们</a>
+    </div>
+    <a href="/assessment" class="nav-cta" data-primary-cta>免费评估</a>
+    <details class="mobile-navigation" data-mobile-navigation>
+      <summary aria-label="打开导航菜单">菜单</summary>
+      <div class="mobile-navigation-panel">
+        <a href="/industries">行业方案</a>
+        <a href="/scenarios">AI 场景</a>
+        <a href="/service-packages">服务与交付</a>
+        <a href="/cases">案例与资源</a>
+        <a href="/about">关于我们</a>
+        <a href="/assessment">免费评估</a>
+      </div>
+    </details>
   </div>
 </nav>

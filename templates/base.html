@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}企业AI转型平台{% endblock %}</title>
+{% block robots_meta %}{% if request.path.startswith('/assessment/report/') %}<meta name="robots" content="noindex,nofollow">{% endif %}{% endblock %}
+{% if base_canonical %}<link rel="canonical" href="{{ base_canonical }}">{% endif %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <style>{% block extra_css %}{% endblock %}</style>
 {% block head %}{% endblock %}

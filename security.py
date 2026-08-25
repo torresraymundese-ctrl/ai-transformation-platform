@@ -5,7 +5,9 @@ import re
 import secrets
 import sqlite3
 import time
+import unicodedata
 from hmac import compare_digest
+from urllib.parse import urlsplit
 
 import bleach
 from flask import (abort, current_app, g, jsonify, make_response, redirect,
@@ -15,6 +17,7 @@ from werkzeug.exceptions import HTTPException
 
 from models import get_db
 from repository import DataConflictError
+from source_url_checker import normalize_source_url
 from validation import ValidationError
 
 
@@ -27,6 +30,43 @@ ALLOWED_HTML_ATTRIBUTES = {
     "a": ["href", "title"],
     "th": ["colspan", "rowspan"],
     "td": ["colspan", "rowspan"],
+}
+
+
+def _safe_sanitized_anchor(value):
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > 2048
+        or "\\" in value
+        or any(
+            character.isspace()
+            or unicodedata.category(character).startswith("C")
+            for character in value
+        )
+        or re.search(r"%(?![0-9A-Fa-f]{2})", value)
+    ):
+        return False
+    if value.startswith("/"):
+        return not value.startswith("//")
+    normalized, error = normalize_source_url(value)
+    return bool(
+        not error
+        and normalized
+        and len(normalized) <= 2048
+        and urlsplit(normalized).scheme == "https"
+    )
+
+
+def _allowed_anchor_attribute(tag, name, value):
+    if name == "title":
+        return True
+    return name == "href" and _safe_sanitized_anchor(value)
+
+
+SANITIZED_HTML_ATTRIBUTES = {
+    **ALLOWED_HTML_ATTRIBUTES,
+    "a": _allowed_anchor_attribute,
 }
 
 
@@ -121,8 +161,8 @@ def sanitize_html(value):
     cleaned = bleach.clean(
         without_active_blocks,
         tags=ALLOWED_HTML_TAGS,
-        attributes=ALLOWED_HTML_ATTRIBUTES,
-        protocols={"http", "https", "mailto"},
+        attributes=SANITIZED_HTML_ATTRIBUTES,
+        protocols={"https"},
         strip=True,
     )
     return Markup(cleaned)
@@ -256,6 +296,10 @@ def add_security_headers(response):
     response.headers.setdefault(
         "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
     )
+    if request.path.startswith("/admin") or request.path.startswith(
+        "/assessment/report/"
+    ):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 

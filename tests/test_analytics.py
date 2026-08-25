@@ -1043,16 +1043,19 @@ def test_public_pages_expose_safe_analytics_data_and_external_click_markers(clie
     services = client.get("/service-packages")
     assessment = client.get("/assessment")
     cases = client.get("/cases")
-    insights = client.get("/insights")
+    resources = client.get("/resources")
+    insights = client.get("/insights?category=announcement&next=https://evil.test")
     about = client.get("/about")
     assert all(
         response.status_code == 200
-        for response in (home, services, assessment, cases, insights, about)
+        for response in (home, services, assessment, cases, resources, about)
     )
+    assert insights.status_code == 301
+    assert insights.headers["Location"] == "/resources"
 
     pages = [
         BeautifulSoup(response.data, "html.parser")
-        for response in (home, services, assessment, cases, insights, about)
+        for response in (home, services, assessment, cases, resources, about)
     ]
     for page in pages:
         body = page.select_one(
@@ -1061,7 +1064,7 @@ def test_public_pages_expose_safe_analytics_data_and_external_click_markers(clie
         )
         assert body is not None
         assert re.fullmatch(r"[-_A-Za-z0-9]{20,}", body["data-analytics-csrf-token"])
-    for response in (home, services, assessment, cases, insights, about):
+    for response in (home, services, assessment, cases, resources, about):
         _assert_exact_private_no_store(response)
     for page in pages[:3]:
         assert not page.select("[onclick]")
@@ -1072,7 +1075,7 @@ def test_public_pages_expose_safe_analytics_data_and_external_click_markers(clie
         "services",
         "assessment",
         "cases",
-        "insights",
+        "resources",
         "about",
     ]
     marker_events = {

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field, FrozenInstanceError, replace
 from datetime import datetime, timezone
 import json
 
+from bs4 import BeautifulSoup
 import pytest
 
 from content_clock import SHANGHAI, as_shanghai, format_shanghai
@@ -395,6 +396,55 @@ def test_block_validation_sanitizes_html_and_enforces_exact_settings():
             )
         )
     assert error.value.code == "block_settings_invalid"
+
+
+def test_rich_text_links_keep_only_root_relative_or_https_destinations():
+    draft = _draft(
+        blocks=(
+            ContentBlock(
+                "rich_text",
+                body_html=(
+                    '<p><a href="/assessment">relative</a>'
+                    '<a href="https://example.com/reviewed">https</a>'
+                    '<a href="http://example.com/private">http</a>'
+                    '<a href="mailto:owner@example.com">mail</a>'
+                    '<a href="tel:4001803358">phone</a>'
+                    '<a href="//example.com/confused">scheme-relative</a></p>'
+                ),
+            ),
+        )
+    )
+
+    body = validate_content_draft(draft).blocks[0].body_html
+    page = BeautifulSoup(body, "html.parser")
+
+    assert [link.get("href") for link in page.select("a")] == [
+        "/assessment",
+        "https://example.com/reviewed",
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
+def test_rich_text_relative_link_rejects_unicode_control_characters():
+    validated = validate_content_draft(
+        _draft(
+            blocks=(
+                ContentBlock(
+                    "rich_text",
+                    body_html='<p><a href="/assessment\u202eevil">unsafe</a></p>',
+                ),
+            )
+        )
+    )
+
+    link = BeautifulSoup(
+        validated.blocks[0].body_html, "html.parser"
+    ).select_one("a")
+    assert link is not None
+    assert not link.has_attr("href")
 
 
 @pytest.mark.parametrize("settings", [None, "not-a-mapping", 7])

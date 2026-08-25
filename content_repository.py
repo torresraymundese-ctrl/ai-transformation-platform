@@ -1,26 +1,31 @@
 """Data access for public content, assessments, and CMS records."""
 
+import catalog_content_repository as catalog
+import case_repository as cases
+from content_clock import as_shanghai, format_shanghai, shanghai_now
+from content_validation import ContentValidationError
+import legacy_content_migration
 from models import get_db
+from pagination import PageRequest
+import publishing_repository
 from repository import execute_write
+import resource_repository as resources
 
 
-def home_page_data():
-    db = get_db()
-    try:
-        return {
-            "cases": db.execute(
-                "SELECT * FROM cases WHERE is_featured=1 ORDER BY sort_order LIMIT 3"
-            ).fetchall(),
-            "services": db.execute(
-                "SELECT * FROM services ORDER BY sort_order"
-            ).fetchall(),
-            "articles": db.execute(
-                "SELECT * FROM articles WHERE status='published' "
-                "ORDER BY created_at DESC LIMIT 6"
-            ).fetchall(),
-        }
-    finally:
-        db.close()
+def home_page_data(now=None):
+    """Compose the homepage exclusively from fail-closed V2 public projections."""
+    instant = now or shanghai_now()
+    page = PageRequest(1, 20)
+    return {
+        "industries": catalog.public_industries(instant)[:6],
+        "scenarios": catalog.public_scenarios(catalog.ScenarioFilters(), page, instant).items,
+        "services": catalog.public_services(page, instant).items,
+        "cases": cases.public_cases(page, instant).items,
+        "resources": resources.list_published_resources(
+            resources.ResourceFilters(None), page, now=instant
+        ).items,
+        "announcements": resources.list_current_announcements(now=instant)[:6],
+    }
 
 
 def services_by_tier():
@@ -110,6 +115,62 @@ def article_detail(article_id):
         ).fetchall()
         return article, related
     finally:
+        db.close()
+
+
+def legacy_article_resource_slug(article_id, now=None):
+    """Resolve one checksum-current clean mapping in one SQLite read snapshot."""
+    if type(article_id) is not int or not 1 <= article_id <= 2**63 - 1:
+        return None
+    instant = as_shanghai(now or shanghai_now())
+    db = get_db()
+    try:
+        db.execute("BEGIN")
+        source = db.execute(
+            "SELECT * FROM articles WHERE id=?", (article_id,)
+        ).fetchone()
+        if source is None:
+            return None
+        checksum = legacy_content_migration._canonical_checksum("articles", source)
+        mapping = db.execute(
+            "SELECT m.target_content_group_id,m.target_content_item_id,"
+            "g.canonical_slug,mapped.content_group_id AS mapped_group_id,"
+            "mapped.entry_type AS mapped_entry_type "
+            "FROM legacy_content_reviews review "
+            "JOIN legacy_content_mappings m ON m.source_table=review.source_table "
+            "AND m.source_id=review.source_id "
+            "JOIN content_groups g ON g.id=m.target_content_group_id "
+            "JOIN content_items mapped ON mapped.id=m.target_content_item_id "
+            "WHERE review.source_table='articles' AND review.source_id=? "
+            "AND review.decision_action='clean' AND review.target_type='resource' "
+            "AND review.target_group IS NULL AND review.review_stale_at IS NULL "
+            "AND review.source_checksum=? AND review.decision_source_checksum=? "
+            "AND m.source_checksum=? AND g.entry_type='resource'",
+            (article_id, checksum, checksum, checksum),
+        ).fetchone()
+        if (
+            mapping is None
+            or mapping["mapped_group_id"] != mapping["target_content_group_id"]
+            or mapping["mapped_entry_type"] != "resource"
+        ):
+            return None
+        current = db.execute(
+            "SELECT id,slug FROM content_items WHERE content_group_id=? "
+            "AND entry_type='resource' AND status='published' "
+            "AND (publish_at IS NULL OR publish_at<=?)",
+            (mapping["target_content_group_id"], format_shanghai(instant)),
+        ).fetchone()
+        if current is None or current["slug"] != mapping["canonical_slug"]:
+            return None
+        try:
+            publishing_repository.validate_resource_public_completeness(
+                db, current["id"], instant
+            )
+        except (ContentValidationError, TypeError, ValueError):
+            return None
+        return current["slug"]
+    finally:
+        db.rollback()
         db.close()
 
 

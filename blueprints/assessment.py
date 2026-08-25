@@ -49,6 +49,7 @@ from security import (
     request_identity_hash,
     require_public_csrf,
 )
+from source_url_checker import normalize_source_url
 from validation import ValidationError
 
 
@@ -621,18 +622,17 @@ def _privacy_disclosure():
     }
     if any(not isinstance(value, str) or not value.strip() for value in values.values()):
         raise AssessmentRulesUnavailable("privacy_configuration")
-    policy = urlsplit(values["policy_url"].strip())
+    policy_url, policy_error = normalize_source_url(values["policy_url"].strip())
     if (
-        policy.scheme not in {"http", "https"}
-        or not policy.netloc
-        or policy.username is not None
-        or policy.password is not None
+        policy_error is not None
+        or policy_url is None
+        or urlsplit(policy_url).scheme != "https"
     ):
         raise AssessmentRulesUnavailable("privacy_policy_url")
     return {
         "processor_name": values["processor_name"].strip(),
         "contact": values["contact"].strip(),
-        "policy_url": values["policy_url"].strip(),
+        "policy_url": policy_url,
         **PRIVACY_DISCLOSURE_TEXT,
     }
 

@@ -98,8 +98,8 @@ def test_assessment_rejects_overlong_company_name(client):
     assert response.get_json() == {"error": "invalid assessment payload"}
 
 
-def test_article_does_not_render_untrusted_script(client):
-    """Stored article HTML must be sanitized before browser rendering."""
+def test_unmapped_legacy_article_with_untrusted_script_is_private_404(client):
+    """Unreviewed legacy HTML must never reach the compatibility surface."""
     db = models.get_db()
     try:
         cursor = db.execute(
@@ -114,9 +114,9 @@ def test_article_does_not_render_untrusted_script(client):
 
     response = client.get(f"/article/{article_id}")
 
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert b'alert("xss")' not in response.data
-    assert "正文".encode("utf-8") in response.data
+    assert "正文".encode("utf-8") not in response.data
 
 
 def test_admin_write_rejects_missing_csrf_token(admin_client):
@@ -151,8 +151,8 @@ def test_admin_write_accepts_matching_csrf_token(admin_client):
     assert record["title"] == "合法后台提交"
 
 
-def test_announcement_does_not_render_untrusted_script(client):
-    """Previously stored announcement HTML must be sanitized when rendered."""
+def test_legacy_announcement_never_reaches_the_v2_resource_catalog(client):
+    """The compatibility alias must not revive unreviewed legacy announcements."""
     db = models.get_db()
     try:
         db.execute(
@@ -163,11 +163,14 @@ def test_announcement_does_not_render_untrusted_script(client):
     finally:
         db.close()
 
-    response = client.get("/insights")
+    response = client.get("/insights?category=announcement")
+    resources = client.get("/resources")
 
-    assert response.status_code == 200
-    assert b"alert(1)" not in response.data
-    assert "公告正文".encode("utf-8") in response.data
+    assert response.status_code == 301
+    assert response.headers["Location"] == "/resources"
+    assert resources.status_code == 200
+    assert b"alert(1)" not in resources.data
+    assert "公告正文".encode("utf-8") not in resources.data
 
 
 def test_admin_source_check_control_submits_csrf_token(admin_client):

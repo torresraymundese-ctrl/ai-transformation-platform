@@ -13,7 +13,7 @@
   <a href="/admin/data-requests" class="{% if request.path == '/admin/data-requests' %}active{% endif %}">隐私请求</a>
   <a href="/admin/assets" class="{% if '/admin/assets' in request.path %}active{% endif %}">资产管理</a>
   <a href="/admin/media" class="{% if '/admin/media' in request.path %}active{% endif %}">媒体管理</a>
-  <a href="/" target="_blank" rel="noopener">查看网站 →</a>
+  <a href="/" target="_blank" rel="noopener noreferrer">查看网站 →</a>
   <form method="POST" action="/admin/logout" style="margin:0;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" style="border:0;background:transparent;color:#9CA3AF;cursor:pointer;font:inherit;">退出</button>

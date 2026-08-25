@@ -616,6 +616,18 @@ def test_frozen_v2_snapshot_rejects_schema_cardinality_and_domain_corruption(
         _assert_private_cache_headers(response)
 
 
+def test_missing_html_report_has_one_private_robots_policy(client):
+    response = client.get("/assessment/report/999999")
+    page = BeautifulSoup(response.data, "html.parser")
+
+    assert response.status_code == 404
+    assert response.mimetype == "text/html"
+    assert [tag["content"] for tag in page.select('meta[name="robots"]')] == [
+        "noindex,nofollow"
+    ]
+    assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
+
+
 def test_html_report_renders_every_required_snapshot_section(
     completed_assessment, client
 ):
@@ -623,9 +635,9 @@ def test_html_report_renders_every_required_snapshot_section(
     page = BeautifulSoup(response.data, "html.parser")
 
     assert response.status_code == 200
-    assert page.select_one('meta[name="robots"]')["content"] == (
-        "noindex,nofollow,noarchive"
-    )
+    robots = page.select('meta[name="robots"]')
+    assert [tag["content"] for tag in robots] == ["noindex,nofollow,noarchive"]
+    assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
     assert page.select_one('link[href="/static/css/report.css"]')
     assert page.select_one("main.report-page[data-snapshot-sha256]")
 

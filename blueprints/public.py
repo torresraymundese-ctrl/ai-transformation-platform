@@ -1,12 +1,19 @@
 """Public website routes."""
 
-from flask import Blueprint, abort, redirect, render_template, request
+from flask import Blueprint, abort, current_app, redirect, render_template
 
 import content_repository
-from validation import ValidationError, text as valid_text
-
-
+from content_clock import shanghai_now
 bp = Blueprint("public", __name__)
+
+
+def _canonical(path):
+    return f"{current_app.config['PUBLIC_BASE_URL']}{path}"
+
+
+def _content_now():
+    provider = current_app.config.get("CONTENT_NOW_PROVIDER")
+    return provider() if callable(provider) else shanghai_now()
 
 
 def svc_emoji(icon):
@@ -25,12 +32,11 @@ def health():
 
 @bp.route("/")
 def index():
-    data = content_repository.home_page_data()
+    data = content_repository.home_page_data(now=_content_now())
     return render_template(
         "index.html",
-        cases=data["cases"],
-        services=data["services"],
-        articles=data["articles"],
+        canonical=_canonical("/"),
+        **data,
     )
 
 
@@ -41,37 +47,26 @@ def services_page():
 
 @bp.route("/assessment")
 def assessment_page():
-    return render_template("assessment.html")
+    return render_template(
+        "assessment.html", base_canonical=_canonical("/assessment")
+    )
 
 
 @bp.route("/insights")
 def insights_page():
-    category = valid_text(request.args, "category", maximum=32)
-    if category and category not in {
-        "insight", "whitepaper", "tech", "announcement"
-    }:
-        raise ValidationError("category has an invalid value")
-    tag = valid_text(request.args, "tag", maximum=100)
-    search = valid_text(request.args, "search", maximum=100)
-    data = content_repository.insight_page_data(category, tag, search)
-    return render_template(
-        "insights.html",
-        articles=data["articles"],
-        current_category=category,
-        current_tag=tag,
-        announcements=data["announcements"],
-        search=search,
-    )
+    return redirect("/resources", code=301)
 
 
 @bp.route("/article/<int:article_id>")
 def article_page(article_id):
-    article, related = content_repository.article_detail(article_id)
-    if article is None:
+    slug = content_repository.legacy_article_resource_slug(
+        article_id, now=_content_now()
+    )
+    if slug is None:
         abort(404)
-    return render_template("article.html", article=article, related=related)
+    return redirect(f"/resources/{slug}", code=301)
 
 
 @bp.route("/about")
 def about_page():
-    return render_template("about.html")
+    return render_template("about.html", base_canonical=_canonical("/about"))

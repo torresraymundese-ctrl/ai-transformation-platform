@@ -29,8 +29,8 @@ def _resource_form(**overrides):
     return form
 
 
-def test_legacy_javascript_source_url_is_not_rendered_as_a_link(client):
-    """Previously stored active-scheme URLs must not become executable links."""
+def test_legacy_javascript_source_url_cannot_enter_the_redirect_mapping(client):
+    """An unsafe legacy source remains private instead of gaining a public link."""
     db = models.get_db()
     try:
         cursor = db.execute(
@@ -45,8 +45,9 @@ def test_legacy_javascript_source_url_is_not_rendered_as_a_link(client):
 
     response = client.get(f"/article/{article_id}")
 
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert b'href="javascript:' not in response.data
+    assert b"javascript:alert(1)" not in response.data
 
 
 def test_admin_rejects_active_scheme_source_url(admin_client):

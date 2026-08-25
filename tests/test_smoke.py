@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from bs4 import BeautifulSoup
 
 import models
 
@@ -11,7 +12,7 @@ PUBLIC_PATHS = [
     "/service-packages",
     "/cases",
     "/assessment",
-    "/insights",
+    "/resources",
     "/about",
     "/static/logo.png",
     "/static/qr.png",
@@ -48,13 +49,25 @@ def test_health_endpoint_returns_expected_contract(client):
     assert response.get_json() == {"status": "ok"}
 
 
-def test_shared_home_navigation_and_footer_stay_on_the_task7_baseline(client):
+def test_shared_home_navigation_and_footer_use_the_confirmed_catalog_routes(client):
     response = client.get("/")
-    html = response.get_data(as_text=True)
+    page = BeautifulSoup(response.data, "html.parser")
 
     assert response.status_code == 200
-    assert html.count('href="/services"') == 9
-    assert 'href="/service-packages"' not in html
+    assert [
+        link.get_text(" ", strip=True)
+        for link in page.select("[data-primary-navigation] > a")
+    ] == ["行业方案", "AI 场景", "服务与交付", "案例与资源", "关于我们"]
+    assert page.select_one('a[href="/service-packages"]') is not None
+    assert page.select_one('a[href="/resources"]') is not None
+    assert page.select('a[href="/services"],a[href^="/insights"]') == []
+
+
+def test_legacy_insights_path_is_a_query_dropping_redirect(client):
+    response = client.get("/insights?category=announcement&tag=RAG")
+
+    assert response.status_code == 301
+    assert response.headers["Location"] == "/resources"
 
 
 def test_admin_redirects_unauthenticated_requests_to_login(client):

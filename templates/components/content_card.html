@@ -1,0 +1,7 @@
+{% macro content_card(item, href, eyebrow='') -%}
+<article class="card content-card">
+  {% if eyebrow %}<p class="content-card-eyebrow">{{ eyebrow }}</p>{% endif %}
+  <h3><a href="{{ href }}">{{ item.title }}</a></h3>
+  <p>{{ item.summary }}</p>
+</article>
+{%- endmacro %}

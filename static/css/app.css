@@ -53,6 +53,16 @@ a:hover {
   color: var(--primary-hover);
 }
 
+a:focus-visible,
+summary:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, 0.45);
+  outline-offset: 3px;
+}
+
 /* Navigation */
 .nav {
   background: rgba(255, 255, 255, 0.72);
@@ -129,6 +139,49 @@ a:hover {
   color: #fff !important;
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0, 113, 227, 0.3);
+}
+
+.mobile-navigation {
+  display: none;
+  position: relative;
+}
+
+.mobile-navigation summary {
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.mobile-navigation summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-navigation-panel {
+  background: #fff;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  gap: 4px;
+  min-width: 190px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+}
+
+.mobile-navigation-panel a {
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.mobile-navigation-panel a:hover,
+.mobile-navigation-panel a:focus-visible {
+  background: var(--primary-light);
 }
 
 /* Hero */
@@ -393,6 +446,44 @@ a:hover {
   gap: 24px;
 }
 
+.content-card h3 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+
+.content-card p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.content-card .content-card-eyebrow {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.section-action {
+  margin-top: 32px;
+  text-align: center;
+}
+
+.home-final-cta {
+  background: var(--bg-gray);
+  text-align: center;
+}
+
+.home-final-cta h2 {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.home-final-cta p {
+  color: var(--text-secondary);
+  margin-bottom: 28px;
+}
+
 /* Footer */
 .footer {
   background: var(--bg-gray);
@@ -584,6 +675,14 @@ body.has-sticky-cta {
 
   .nav-links {
     display: none;
+  }
+
+  .nav-cta {
+    display: none;
+  }
+
+  .mobile-navigation {
+    display: block;
   }
 
   .section {
