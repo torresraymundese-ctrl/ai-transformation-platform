@@ -6,6 +6,7 @@ from threading import Barrier, Thread
 
 import pytest
 
+import case_repository
 import manage
 import models
 import publishing_repository
@@ -1270,7 +1271,13 @@ def test_direct_case_create_and_save_reject_public_pii_without_residue(
     )
     before = tuple(_row(db, content_id))
     with pytest.raises(ContentValidationError) as save_error:
-        save_content_draft(content_id, 1, replace(invalid, slug=f"save-{slug}"), actor="admin", now=NOW)
+        save_content_draft(
+            content_id,
+            1,
+            replace(invalid, slug=f"save-{slug}"),
+            actor="admin",
+            now=NOW,
+        )
     assert save_error.value.code == "obvious_pii_detected"
     assert tuple(_row(db, content_id)) == before
     assert db.execute(
@@ -1278,6 +1285,168 @@ def test_direct_case_create_and_save_reject_public_pii_without_residue(
         "AND event_code='content_updated'",
         (content_id,),
     ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_direct_case_create_and_save_reject_visible_html_pii_without_residue(
+    db, body_html
+):
+    invalid_create = replace(
+        _verified_case("visible-html-create"),
+        blocks=(ContentBlock("rich_text", body_html=body_html),),
+    )
+
+    with pytest.raises(ContentValidationError) as create_error:
+        create_content_draft(invalid_create, actor="admin", now=NOW)
+    assert create_error.value.code == "obvious_pii_detected"
+    assert str(create_error.value) == "obvious_pii_detected"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE slug='visible-html-create'"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0] == 0
+
+    clean = _verified_case("visible-html-save")
+    content_id = create_content_draft(clean, actor="admin", now=NOW)
+    before = tuple(_row(db, content_id))
+    invalid_save = replace(
+        clean,
+        blocks=(ContentBlock("rich_text", body_html=body_html),),
+    )
+    with pytest.raises(ContentValidationError) as save_error:
+        save_content_draft(
+            content_id, 1, invalid_save, actor="admin", now=NOW
+        )
+    assert save_error.value.code == "obvious_pii_detected"
+    assert tuple(_row(db, content_id)) == before
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_blocks WHERE content_item_id=?",
+        (content_id,),
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_updated'",
+        (content_id,),
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_visible_html_pii_cannot_replace_the_current_public_case(db, body_html):
+    slug = "visible-html-immediate"
+    old_id = create_content_draft(
+        replace(
+            _verified_case(slug),
+            title="原公开案例",
+            blocks=(ContentBlock("rich_text", body_html="<p>已脱敏过程</p>"),),
+        ),
+        actor="admin",
+        now=NOW,
+    )
+    publish_content(old_id, 1, actor="admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="admin", now=NOW)
+    db.execute(
+        "UPDATE content_blocks SET body_html=? WHERE content_item_id=?",
+        (body_html, replacement_id),
+    )
+    db.commit()
+    replacement_before = tuple(_row(db, replacement_id))
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(replacement_id, 1, actor="admin", now=NOW)
+
+    assert error.value.code == "obvious_pii_detected"
+    assert _row(db, old_id)["status"] == "published"
+    assert tuple(_row(db, replacement_id)) == replacement_before
+    public = case_repository.public_case(slug, NOW)
+    assert public is not None
+    assert public.title == "原公开案例"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (replacement_id,),
+    ).fetchone()[0] == 0
+    audit_text = " ".join(
+        row[0] or ""
+        for row in db.execute(
+            "SELECT details_json FROM content_audit_events WHERE content_item_id=?",
+            (replacement_id,),
+        )
+    )
+    assert body_html not in audit_text
+
+
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_due_visible_html_pii_failure_is_isolated_and_keeps_old_case_online(
+    db, body_html
+):
+    slug = "visible-html-due"
+    old_id = create_content_draft(
+        replace(
+            _verified_case(slug),
+            title="到期失败后仍在线的案例",
+            blocks=(ContentBlock("rich_text", body_html="<p>已脱敏过程</p>"),),
+        ),
+        actor="admin",
+        now=NOW,
+    )
+    publish_content(old_id, 1, actor="admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="admin", now=NOW)
+    valid_id = create_content_draft(
+        _verified_case("visible-html-due-valid"), actor="admin", now=NOW
+    )
+    due = NOW + timedelta(hours=1)
+    schedule_content(replacement_id, 1, due, actor="admin", now=NOW)
+    schedule_content(valid_id, 1, due, actor="admin", now=NOW)
+    db.execute(
+        "UPDATE content_blocks SET body_html=? WHERE content_item_id=?",
+        (body_html, replacement_id),
+    )
+    db.commit()
+
+    result = publish_due_content(now=due)
+
+    assert result.published_ids == (valid_id,)
+    assert result.failures == ((replacement_id, "validation_failed"),)
+    assert _row(db, old_id)["status"] == "published"
+    failed = _row(db, replacement_id)
+    assert (failed["status"], failed["publish_at"], failed["lock_version"]) == (
+        "draft", None, 3,
+    )
+    public = case_repository.public_case(slug, due)
+    assert public is not None
+    assert public.title == "到期失败后仍在线的案例"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (replacement_id,),
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'",
+        (replacement_id,),
+    ).fetchone()[0] == '{"reason_code":"validation_failed"}'
 
 
 @pytest.mark.parametrize(

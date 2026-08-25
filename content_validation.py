@@ -1,6 +1,7 @@
 """Exact server validation for immutable content aggregates."""
 
 from dataclasses import replace
+from html.parser import HTMLParser
 import json
 import math
 import re
@@ -420,13 +421,31 @@ def _nested_public_strings(value):
             yield from _nested_public_strings(item)
 
 
+class _VisibleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _visible_html_text(value):
+    parser = _VisibleTextParser()
+    parser.feed(value)
+    parser.close()
+    return "".join(parser.parts)
+
+
 def case_has_obvious_pii(draft):
     """Auxiliary obvious-contact guard; this is not proof of anonymization."""
     if not isinstance(draft, ContentDraft) or draft.entry_type != "case":
         return False
     values = [draft.title, draft.summary, draft.seo_title, draft.seo_description]
     for block in draft.blocks:
-        values.extend((block.title or "", block.body_html or ""))
+        values.extend(
+            (block.title or "", _visible_html_text(block.body_html or ""))
+        )
         values.extend(_nested_public_strings(block.settings))
     for metric in draft.metrics:
         values.extend(

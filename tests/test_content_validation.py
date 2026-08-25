@@ -800,6 +800,45 @@ def test_case_domain_validation_rejects_obvious_pii_on_public_surfaces(draft_cha
     assert error.value.code == "obvious_pii_detected"
 
 
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_case_domain_rejects_pii_in_final_visible_block_text(body_html):
+    draft = replace(
+        _case_draft(metrics=(_metric(),)),
+        blocks=(ContentBlock("rich_text", body_html=body_html),),
+    )
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(draft)
+
+    assert error.value.code == "obvious_pii_detected"
+
+
+def test_case_domain_visible_pii_scan_ignores_allowed_hidden_attributes():
+    draft = replace(
+        _case_draft(metrics=(_metric(),)),
+        blocks=(
+            ContentBlock(
+                "rich_text",
+                body_html=(
+                    '<p><a href="mailto:owner@example.com" title="微信">'
+                    "查看公开来源</a></p>"
+                ),
+            ),
+        ),
+    )
+
+    validated = validate_content_draft(draft)
+
+    assert "查看公开来源" in validated.blocks[0].body_html
+
+
 @dataclass(frozen=True)
 class _CaseDraftSubclass(ContentDraft):
     mutable_extra: list = field(default_factory=list)

@@ -209,6 +209,48 @@ def test_case_writes_require_auth_csrf_exact_fields_and_explicit_privacy_review(
     } & {row[1] for row in db.execute("PRAGMA table_info(case_content)")}
 
 
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_case_http_visible_html_pii_failure_is_fixed_and_does_not_leak(
+    admin_client, db, body_html
+):
+    before = db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE entry_type='case'"
+    ).fetchone()[0]
+    before_created_audit = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0]
+
+    response = admin_client.post(
+        "/admin/cases/new",
+        data=_case_form(**{"blocks-0-body": body_html}),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "obvious_pii_detected"}
+    assert body_html not in response.get_data(as_text=True)
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_items WHERE entry_type='case'"
+    ).fetchone()[0] == before
+    audit_text = " ".join(
+        str(value)
+        for row in db.execute(
+            "SELECT actor,action,status_code,ip_hash FROM admin_audit_logs"
+        )
+        for value in row
+    )
+    assert body_html not in audit_text
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0] == before_created_audit
+
+
 def test_case_publish_requires_authenticity_review_time_and_complete_metric(
     admin_client, db
 ):
@@ -720,6 +762,50 @@ def test_raw_published_case_metric_nul_fails_closed_on_public_surfaces(
     assert "raw-public-metric-nul" not in admin_client.get("/cases").get_data(
         as_text=True
     )
+
+
+@pytest.mark.parametrize(
+    "body_html",
+    (
+        "<p>联系 owner&#64;example.com</p>",
+        "<p>电话 138<strong>0013</strong>8000</p>",
+        "<p>请加微<strong>信</strong>获取材料</p>",
+    ),
+)
+def test_raw_published_visible_html_pii_fails_closed_on_list_and_detail(
+    admin_client, db, body_html
+):
+    slug = "raw-visible-html-pii"
+    draft = _create_case(
+        admin_client,
+        db,
+        slug=slug,
+        title="不得出现的联系方式案例",
+    )
+    published = admin_client.post(
+        f"/admin/cases/{draft['id']}",
+        data=_edit_form(db, draft["id"], action="publish"),
+    )
+    assert published.status_code == 302
+    content_id = draft["id"]
+    trigger_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_content_blocks_update'"
+    ).fetchone()[0]
+    db.execute("DROP TRIGGER protect_content_blocks_update")
+    db.execute(
+        "UPDATE content_blocks SET body_html=? WHERE content_item_id=?",
+        (body_html, content_id),
+    )
+    db.execute(trigger_sql)
+    db.commit()
+
+    detail = admin_client.get(f"/cases/{slug}")
+    listing = admin_client.get("/cases")
+
+    assert detail.status_code == 404
+    assert listing.status_code == 200
+    assert "不得出现的联系方式案例" not in listing.get_data(as_text=True)
 
 
 class _CaseInterleavingCursor:
