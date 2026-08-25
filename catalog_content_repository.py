@@ -835,6 +835,28 @@ def _industry_projection(db, item, redirect, now):
     })
 
 
+def has_current_public_projection(db, content_id, now):
+    """Check one published revision using the active public read snapshot."""
+    clause, arguments = _public_item_where(now)
+    item = db.execute(
+        f"SELECT ci.* FROM content_items ci WHERE ci.id=? AND {clause}",
+        (content_id, *arguments),
+    ).fetchone()
+    if item is None:
+        return False
+    if item["entry_type"] == "case":
+        publishing_repository.validate_case_public_completeness(db, content_id, now)
+        return True
+    projector = {
+        "industry": _industry_projection,
+        "scenario": _scenario_projection,
+        "service": _service_projection,
+    }.get(item["entry_type"])
+    if projector is None:
+        return False
+    return projector(db, item, False, now) is not None
+
+
 def public_industry(slug: str, now) -> Mapping[str, Any] | None:
     db = models.get_db()
     try:

@@ -1,3 +1,4 @@
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -17,11 +18,16 @@ from werkzeug.test import EnvironBuilder
 from werkzeug.wrappers import Response
 
 import models
+import blueprints.public_catalog as public_catalog_blueprint
 import media_service
 import publishing_repository
 from content_clock import SHANGHAI
-from content_contracts import ContentBlock, ContentDraft
-from publishing_service import create_content_draft, publish_content
+from content_contracts import CaseMetric, ContentBlock, ContentDraft
+from publishing_service import (
+    create_content_draft,
+    publish_content,
+    save_content_draft,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -261,6 +267,113 @@ def _publish_sourced_resource_attachment(db, asset_id, *, slug):
     db.commit()
     publish_content(content_id, 1, actor="media-test", now=published_at)
     return content_id
+
+
+def _publish_case_image_reference(asset_id):
+    now = datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
+    content_id = create_content_draft(
+        ContentDraft(
+            entry_type="case",
+            slug="media-public-case",
+            title="媒体公开案例",
+            summary="通过完整案例公开门禁后引用分享图。",
+            seo_title="媒体公开案例",
+            seo_description="验证案例详情与媒体授权使用同一公开完整性。",
+            share_image_media_id=asset_id,
+            extension={
+                "verification_code": "authorized_anonymous",
+                "is_anonymized": 1,
+                "basis_type": "internal_delivery_record",
+                "private_basis_reference": "media-case-record-001",
+                "source_url": None,
+                "source_url_sha256": None,
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+                "is_verified": 1,
+                "review_confirmed": 1,
+                "verified_at": "2026-08-25 09:00:00",
+            },
+            blocks=(ContentBlock("rich_text", body_html="<p>公开案例正文。</p>"),),
+            metrics=(
+                CaseMetric(
+                    "处理时间", "8", "2", "小时", "连续 30 天", "经脱敏交付记录核验。"
+                ),
+            ),
+        ),
+        actor="media-test",
+        now=now,
+    )
+    publish_content(content_id, 1, actor="media-test", now=now)
+    return content_id, "/cases/media-public-case"
+
+
+def _publish_catalog_image_reference(db, asset_id, entry_type):
+    now = datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
+    if entry_type in {"industry", "service"}:
+        db.execute(
+            "UPDATE content_items SET status='published',published_at='2026-08-25 10:00:00' "
+            "WHERE entry_type='scenario' AND status='draft'"
+        )
+        db.commit()
+    code = {
+        "industry": "manufacturing",
+        "scenario": "mfg_knowledge_assistant",
+        "service": "foundation_workshop",
+    }[entry_type]
+    table, identity = {
+        "industry": ("industries", "industry_id"),
+        "scenario": ("scenarios", "scenario_id"),
+        "service": ("services", "service_id"),
+    }[entry_type]
+    item = db.execute(
+        "SELECT ci.* FROM content_items ci JOIN content_groups g "
+        f"ON g.id=ci.content_group_id JOIN {table} core ON core.id=g.{identity} "
+        "WHERE ci.entry_type=? AND ci.status='draft' AND core.code=?",
+        (entry_type, code),
+    ).fetchone()
+    draft = publishing_repository.load_content_draft(db, item["id"])
+    lock_version = save_content_draft(
+        item["id"],
+        item["lock_version"],
+        replace(draft, share_image_media_id=asset_id),
+        actor="media-test",
+        now=now,
+    )
+    publish_content(item["id"], lock_version, actor="media-test", now=now)
+    path = {
+        "industry": "/industries/manufacturing",
+        "scenario": "/scenarios/mfg-knowledge-assistant",
+        "service": "/service-packages/foundation-workshop",
+    }[entry_type]
+    return item["id"], path
+
+
+def _break_public_reference(db, content_id, entry_type):
+    if entry_type == "case":
+        trigger_sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='protect_case_metrics_delete'"
+        ).fetchone()[0]
+        db.execute("DROP TRIGGER protect_case_metrics_delete")
+        db.execute(
+            "DELETE FROM case_metrics WHERE case_content_item_id=?", (content_id,)
+        )
+        db.execute(trigger_sql)
+    else:
+        table, identity = {
+            "industry": ("industries", "industry_id"),
+            "scenario": ("scenarios", "scenario_id"),
+            "service": ("services", "service_id"),
+        }[entry_type]
+        db.execute(
+            f"UPDATE {table} SET status='archived' WHERE id=("
+            f"SELECT {identity} FROM content_groups g JOIN content_items ci "
+            "ON ci.content_group_id=g.id WHERE ci.id=?)",
+            (content_id,),
+        )
+    db.commit()
 
 
 def test_media_upload_requires_authentication_and_csrf(client, media_root):
@@ -599,6 +712,41 @@ def test_public_media_allows_a_healthy_shared_reference_when_another_is_expired(
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "public, max-age=0, must-revalidate"
+
+
+@pytest.mark.parametrize("entry_type", ("case", "industry", "scenario", "service"))
+def test_public_media_requires_the_same_complete_projection_as_every_public_detail(
+    client, admin_client, db, monkeypatch, entry_type
+):
+    now = datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
+    assert _upload(
+        admin_client,
+        f"{entry_type}-projection.png",
+        "image/png",
+        _image_bytes(),
+    ).status_code == 302
+    asset = _latest_asset()
+    if entry_type == "case":
+        content_id, detail_path = _publish_case_image_reference(asset["id"])
+    else:
+        content_id, detail_path = _publish_catalog_image_reference(
+            db, asset["id"], entry_type
+        )
+    monkeypatch.setattr(media_service, "shanghai_now", lambda: now)
+    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: now)
+    assert client.get(detail_path).status_code == 200
+    assert client.get(f"/media/{asset['id']}/image").status_code == 200
+
+    _break_public_reference(db, content_id, entry_type)
+
+    assert client.get(detail_path).status_code == 404
+    assert client.get(f"/media/{asset['id']}/image").status_code == 404
+
+    _publish_reference(db, asset_id=asset["id"], kind="share")
+
+    shared = client.get(f"/media/{asset['id']}/image")
+    assert shared.status_code == 200
+    assert shared.headers["Cache-Control"] == "public, max-age=0, must-revalidate"
 
 
 @pytest.mark.parametrize("reference_kind", ("share", "image_block"))

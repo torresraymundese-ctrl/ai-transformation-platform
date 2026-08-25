@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, FrozenInstanceError, replace
 from datetime import datetime, timezone
+import json
 
 import pytest
 
@@ -522,6 +523,43 @@ def test_public_urls_accept_exactly_2048_characters(field, url):
         assert len(validated.extension["cta_url"]) == 2048
     else:
         assert len(validated.blocks[0].settings["url"]) == 2048
+
+
+@pytest.mark.parametrize(
+    ("unicode_count", "expected_serialized_bytes", "expected_code"),
+    (
+        (215, 2000, None),
+        (216, 2009, "block_settings_too_large"),
+    ),
+)
+def test_cta_normalized_settings_respect_the_frozen_two_kibibyte_aggregate_limit(
+    unicode_count, expected_serialized_bytes, expected_code
+):
+    draft = _draft(
+        blocks=(
+            ContentBlock(
+                "cta",
+                settings={
+                    "label": "继续",
+                    "url": "https://example.com/" + "路" * unicode_count,
+                    "style": "primary",
+                },
+            ),
+        )
+    )
+
+    if expected_code is not None:
+        with pytest.raises(ContentValidationError) as error:
+            validate_content_draft(draft)
+        assert error.value.code == expected_code
+        return
+
+    validated = validate_content_draft(draft)
+    settings = dict(validated.blocks[0].settings)
+    assert len(settings["url"]) == 1955
+    assert len(
+        json.dumps(settings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ) == expected_serialized_bytes
 
 
 def test_dangerous_source_url_error_precedes_other_resource_completeness_errors():

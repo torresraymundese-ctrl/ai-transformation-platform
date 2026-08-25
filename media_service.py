@@ -194,7 +194,12 @@ def get_published_media_asset(asset_id, *, kind, now=None):
                     ):
                         continue
                 else:
-                    return _asset(asset_row)
+                    from catalog_content_repository import has_current_public_projection
+
+                    if not has_current_public_projection(
+                        connection, reference["id"], instant
+                    ):
+                        continue
             except (ContentContractError, ContentValidationError):
                 continue
             return _asset(asset_row)

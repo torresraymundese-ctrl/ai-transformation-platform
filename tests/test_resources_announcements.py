@@ -1215,6 +1215,53 @@ def test_admin_posts_enforce_2048_for_every_public_url(
     assert (row is not None) is (expected_status == 302)
 
 
+@pytest.mark.parametrize(
+    ("unicode_count", "expected_status", "expected_settings_bytes"),
+    (
+        (215, 302, 2000),
+        (216, 400, None),
+    ),
+)
+def test_admin_cta_revalidates_the_two_kibibyte_limit_after_url_normalization(
+    admin_client, db, unicode_count, expected_status, expected_settings_bytes
+):
+    admin_client.application.config["PROPAGATE_EXCEPTIONS"] = False
+    slug = f"normalized-cta-{unicode_count}"
+    before_audit = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0]
+
+    response = admin_client.post(
+        "/admin/resources/new",
+        data=_resource_form(
+            slug=slug,
+            **{
+                "blocks-0-type": "cta",
+                "blocks-0-title": "下一步",
+                "blocks-0-body": "",
+                "blocks-0-cta_label": "继续",
+                "blocks-0-cta_url": "https://example.com/" + "路" * unicode_count,
+                "blocks-0-cta_style": "primary",
+            },
+        ),
+    )
+
+    row = db.execute(
+        "SELECT ci.id,length(CAST(cb.settings_json AS BLOB)) AS settings_bytes "
+        "FROM content_items ci LEFT JOIN content_blocks cb ON cb.content_item_id=ci.id "
+        "WHERE ci.slug=?",
+        (slug,),
+    ).fetchone()
+    created_audit = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_created'"
+    ).fetchone()[0]
+    assert (response.status_code, None if row is None else row["settings_bytes"]) == (
+        expected_status,
+        expected_settings_bytes,
+    )
+    assert created_audit - before_audit == (1 if expected_status == 302 else 0)
+
+
 @pytest.mark.parametrize("kind", ("source", "announcement_cta", "block_cta"))
 def test_legacy_published_oversized_urls_fail_closed(client, admin_client, db, kind):
     oversized = _exact_url("https://example.com/", 2049)
@@ -1810,6 +1857,83 @@ def test_due_blob_resource_isolated_and_later_announcement_publishes(db):
     ).fetchone()[0]
     assert details == '{"reason_code":"validation_failed"}'
     assert "blob" not in details
+
+
+def _inject_nonfinite_block_settings(db, content_id):
+    db.execute("PRAGMA ignore_check_constraints=ON")
+    try:
+        db.execute(
+            "UPDATE content_blocks SET block_type='heading',settings_json=? "
+            "WHERE content_item_id=?",
+            ('{"level":NaN}', content_id),
+        )
+    finally:
+        db.execute("PRAGMA ignore_check_constraints=OFF")
+    db.commit()
+
+
+def test_direct_replacement_converts_nonfinite_persisted_block_to_validation_error(db):
+    old_id = create_content_draft(
+        _resource_draft("nan-direct-resource"), actor="test-admin", now=NOW
+    )
+    publish_content(old_id, 1, actor="test-admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="test-admin", now=NOW)
+    _inject_nonfinite_block_settings(db, replacement_id)
+    before_success = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_published'"
+    ).fetchone()[0]
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(replacement_id, 1, actor="test-admin", now=NOW)
+
+    assert error.value.code == "extension_invalid"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (old_id,)
+    ).fetchone()[0] == "published"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (replacement_id,)
+    ).fetchone()[0] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_published'"
+    ).fetchone()[0] == before_success
+
+
+def test_due_nonfinite_block_isolated_and_later_announcement_publishes(db):
+    old_id = create_content_draft(
+        _resource_draft("nan-due-resource"), actor="test-admin", now=NOW
+    )
+    publish_content(old_id, 1, actor="test-admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="test-admin", now=NOW)
+    announcement_id = create_content_draft(
+        _announcement_draft("after-nan-due-resource"), actor="test-admin", now=NOW
+    )
+    due = NOW + timedelta(hours=1)
+    schedule_content(replacement_id, 1, due, actor="test-admin", now=NOW)
+    schedule_content(announcement_id, 1, due, actor="test-admin", now=NOW)
+    _inject_nonfinite_block_settings(db, replacement_id)
+
+    result = publish_due_content(now=due, actor="task9-fix2-due")
+
+    assert result.published_ids == (announcement_id,)
+    assert result.failures == ((replacement_id, "validation_failed"),)
+    states = {
+        row["id"]: (row["status"], row["publish_at"], row["lock_version"])
+        for row in db.execute(
+            "SELECT id,status,publish_at,lock_version FROM content_items "
+            "WHERE id IN (?,?,?)",
+            (old_id, replacement_id, announcement_id),
+        )
+    }
+    assert states[old_id][0] == "published"
+    assert states[replacement_id] == ("draft", None, 3)
+    assert states[announcement_id][0] == "published"
+    details = db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'",
+        (replacement_id,),
+    ).fetchone()[0]
+    assert details == '{"reason_code":"validation_failed"}'
+    assert "NaN" not in details
 
 
 def test_domain_validation_rejects_whitespace_copyright_and_null_announcement_interval():

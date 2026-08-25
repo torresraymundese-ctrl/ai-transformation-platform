@@ -339,17 +339,7 @@ def update_content_draft(
     return expected_lock_version + 1
 
 
-def load_content_draft(db, content_id):
-    item = db.execute("SELECT * FROM content_items WHERE id=?", (content_id,)).fetchone()
-    if item is None:
-        raise ContentNotFoundError()
-    table, columns = EXTENSION_TABLES[item["entry_type"]]
-    extension_row = db.execute(
-        f"SELECT {','.join(columns)} FROM {table} WHERE content_item_id=?", (content_id,)
-    ).fetchone()
-    if extension_row is None:
-        raise ContentValidationError("extension_missing")
-    extension = {column: extension_row[column] for column in columns}
+def _persisted_draft_contract(db, content_id, item, extension):
     blocks = tuple(
         ContentBlock(
             block_type=row["block_type"],
@@ -392,23 +382,37 @@ def load_content_draft(db, content_id):
             (content_id,),
         )
     )
+    return ContentDraft(
+        entry_type=item["entry_type"],
+        slug=item["slug"],
+        title=item["title"],
+        summary=item["summary"],
+        seo_title=item["seo_title"],
+        seo_description=item["seo_description"],
+        content_group_id=item["content_group_id"],
+        share_image_media_id=item["share_image_media_id"],
+        publish_at=item["publish_at"],
+        extension=extension,
+        blocks=blocks,
+        relations=tuple(relations),
+        maturity_codes=maturity,
+        metrics=metrics,
+    )
+
+
+def load_content_draft(db, content_id):
+    item = db.execute("SELECT * FROM content_items WHERE id=?", (content_id,)).fetchone()
+    if item is None:
+        raise ContentNotFoundError()
+    table, columns = EXTENSION_TABLES[item["entry_type"]]
+    extension_row = db.execute(
+        f"SELECT {','.join(columns)} FROM {table} WHERE content_item_id=?", (content_id,)
+    ).fetchone()
+    if extension_row is None:
+        raise ContentValidationError("extension_missing")
+    extension = {column: extension_row[column] for column in columns}
     try:
-        return ContentDraft(
-            entry_type=item["entry_type"],
-            slug=item["slug"],
-            title=item["title"],
-            summary=item["summary"],
-            seo_title=item["seo_title"],
-            seo_description=item["seo_description"],
-            content_group_id=item["content_group_id"],
-            share_image_media_id=item["share_image_media_id"],
-            publish_at=item["publish_at"],
-            extension=extension,
-            blocks=blocks,
-            relations=tuple(relations),
-            maturity_codes=maturity,
-            metrics=metrics,
-        )
+        return _persisted_draft_contract(db, content_id, item, extension)
     except ContentContractError as error:
         raise ContentValidationError("extension_invalid") from error
 

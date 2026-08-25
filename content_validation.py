@@ -288,6 +288,12 @@ def _validate_block(block, index):
         raise ContentValidationError("block_order_invalid")
     if block.block_type == "cta":
         settings["url"] = _normalize_cta(settings["url"])
+        if len(
+            json.dumps(
+                settings, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
+        ) > 2_000:
+            raise ContentValidationError("block_settings_too_large")
     return replace(
         block, title=title, body_html=body, settings=settings, sort_order=index
     )
