@@ -595,6 +595,152 @@ def _inject_blank_block_title(db, revision_id):
     db.commit()
 
 
+def _published_scenario_candidates(db, industry_id):
+    rows = db.execute(
+        "SELECT DISTINCT ci.id,s.code FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id "
+        "JOIN scenario_branches sb ON sb.scenario_id=g.scenario_id "
+        "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND (ci.publish_at IS NULL OR ci.publish_at<=?) AND ib.industry_id=? "
+        "ORDER BY ci.id",
+        (NOW, industry_id),
+    ).fetchall()
+    candidates = tuple((row["id"], row["code"]) for row in rows)
+    assert candidates
+    return candidates
+
+
+def _replace_first_block_titles(db, content_ids, title):
+    trigger = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_content_blocks_update'"
+    ).fetchone()
+    assert trigger is not None
+    originals = []
+    db.execute("DROP TRIGGER protect_content_blocks_update")
+    try:
+        for content_id in content_ids:
+            block = db.execute(
+                "SELECT id,title FROM content_blocks WHERE content_item_id=? "
+                "ORDER BY sort_order,id LIMIT 1",
+                (content_id,),
+            ).fetchone()
+            assert block is not None
+            originals.append((block["title"], block["id"]))
+            db.execute(
+                "UPDATE content_blocks SET title=? WHERE id=?", (title, block["id"])
+            )
+    finally:
+        db.execute(trigger["sql"])
+    db.commit()
+    return tuple(originals)
+
+
+def _restore_block_titles(db, originals):
+    trigger = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='protect_content_blocks_update'"
+    ).fetchone()
+    assert trigger is not None
+    db.execute("DROP TRIGGER protect_content_blocks_update")
+    try:
+        db.executemany("UPDATE content_blocks SET title=? WHERE id=?", originals)
+    finally:
+        db.execute(trigger["sql"])
+    db.commit()
+
+
+def _publication_state_snapshot(db, content_ids):
+    placeholders = ",".join("?" for _ in content_ids)
+    items = tuple(
+        tuple(row) for row in db.execute(
+            "SELECT id,status,lock_version,published_at,archived_at FROM content_items "
+            f"WHERE id IN ({placeholders}) ORDER BY id",
+            content_ids,
+        )
+    )
+    audits = tuple(
+        tuple(row) for row in db.execute(
+            "SELECT content_item_id,event_code,actor_text,details_json,created_at "
+            f"FROM content_audit_events WHERE content_item_id IN ({placeholders}) "
+            "ORDER BY id",
+            content_ids,
+        )
+    )
+    return items, audits
+
+
+def test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles(
+    client, db
+):
+    current, revision_id = _saved_industry_revision(db)
+    assert client.get("/industries/manufacturing").status_code == 200
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    candidate_ids = tuple(candidate_id for candidate_id, _ in candidates)
+    originals = _replace_first_block_titles(db, candidate_ids, "   ")
+    damaged_before = client.get("/industries/manufacturing")
+    assert damaged_before.status_code == 404
+    state_before = _publication_state_snapshot(db, (current["id"], revision_id))
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert error.value.code == "industry_public_incomplete"
+    assert _publication_state_snapshot(db, (current["id"], revision_id)) == state_before
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=1)
+    damaged_after = client.get("/industries/manufacturing")
+    assert (damaged_after.status_code, damaged_after.data) == (
+        damaged_before.status_code, damaged_before.data
+    )
+
+    _restore_block_titles(db, originals)
+    assert client.get("/industries/manufacturing").status_code == 200
+
+
+def test_industry_publish_continues_from_blank_candidates_to_a_healthy_scenario(
+    client, db
+):
+    current, revision_id = _saved_industry_revision(db)
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    # The fallback data_process_foundation candidate is intentionally excluded.
+    known_healthy = tuple(
+        (candidate_id, code) for candidate_id, code in candidates
+        if code in {
+            "mfg_knowledge_assistant",
+            "mfg_operations_reporting",
+            "mfg_quality_inspection",
+        }
+    )
+    assert len(known_healthy) == 3
+    healthy_id, _ = max(known_healthy)
+    earlier_ids = tuple(
+        candidate_id for candidate_id, _ in candidates if candidate_id < healthy_id
+    )
+    assert earlier_ids
+    _replace_first_block_titles(db, earlier_ids, "   ")
+    candidate_ids = tuple(candidate_id for candidate_id, _ in candidates)
+    candidates_before = _publication_state_snapshot(db, candidate_ids)
+
+    result = publish_content(revision_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    assert (result.published_id, result.archived_id) == (revision_id, current["id"])
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()[0] == "published"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (current["id"],)
+    ).fetchone()[0] == "archived"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 1
+    assert _publication_state_snapshot(db, candidate_ids) == candidates_before
+    assert client.get("/industries/manufacturing").status_code == 200
+
+
 def test_immediate_publish_rejects_persisted_blank_block_title_and_keeps_current_public(
     client, db
 ):

@@ -537,8 +537,7 @@ def _validate_industry_publication(db, content_id, draft, now):
     ).fetchall()
     for candidate in candidates:
         try:
-            candidate_draft = validate_content_draft(load_content_draft(db, candidate["id"]))
-            _validate_scenario_publication(db, candidate["id"], candidate_draft)
+            validate_for_publication(db, candidate["id"], now)
         except ContentValidationError:
             continue
         return

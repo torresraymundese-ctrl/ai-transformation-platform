@@ -1922,3 +1922,139 @@ access, or dependency installation was used. The historical full-suite
 outcome remains **UNKNOWN** and was not rerun; the historical PyPI-network
 violation remains **CONFIRMED**; and the frozen `data_process_foundation`
 product-data limitation remains unchanged.
+
+## Fix1m — validate nested public catalog dependencies
+
+Fix1m began from clean linked-worktree baseline
+`88b2870a24c611a916656fb7023c847f72b3ad7b` on
+`codex/ai-platform-2.0-core`. It was limited to the external fresh-review P2:
+industry publication treated a published scenario candidate as healthy after
+only normalized draft validation plus the scenario aggregate check, bypassing
+the direct-publication raw/validated block-title consistency gate. Task 7,
+public projection behavior, the progress ledger, and external task cards stayed
+frozen.
+
+### Root cause, fixture, and RED
+
+The formal service chain is `publish_content` -> `_publish_in_transaction` ->
+`validate_for_publication`. Direct scenario publication loads both raw and
+validated drafts and rejects a persisted title changed by normalization as
+`block_title_invalid`. `_validate_industry_publication`, however, previously
+called `validate_content_draft(load_content_draft(...))` followed by
+`_validate_scenario_publication` for each published candidate. The normalized
+candidate therefore lost the evidence that a legacy first-block title was
+whitespace-only.
+
+The regression tests exercise real `publish_content`, disposable SQLite, and
+the real public route. Since the current schema correctly prevents editing
+published children, the legacy-data fixture saves the exact
+`protect_content_blocks_update` trigger SQL, drops only that trigger while
+injecting/restoring the historical bad title, and recreates it in `finally`
+before committing. The negative chain establishes that every due published
+manufacturing candidate is malformed, snapshots both industry revisions and
+their audit rows, and verifies failed publication changes none of their
+status, lock, publication/archive timestamps, or audits. The shared damage
+correctly makes the existing public read gate return 404 both before and after
+the failed attempt; after the fixture restores the shared scenario titles, the
+still-published old industry revision is again HTTP 200. This is dependency
+restoration evidence, not a claim that the damaged public projection stays
+open.
+
+The positive chain selects the greatest-ID candidate among the three known
+complete manufacturing scenarios, explicitly excluding the frozen incomplete
+`data_process_foundation` fallback, and corrupts every earlier candidate. This
+forces the industry loop to encounter rejected candidates before a healthy
+one. It verifies successful replacement, exactly one `content_published`
+audit, unchanged candidate state/audits, and HTTP 200 for the new public
+industry.
+
+Three pre-RED fixture corrections were required before production code was
+edited and are not claimed as TDD evidence: `2 failed in 1.59s` (exit 1,
+published-child immutability blocked injection), `2 failed in 1.65s` (exit 1,
+an incorrect audit-column name), and `2 failed in 1.62s` (exit 1, one genuine
+missing exception plus one order-dependent fixture assertion). After those
+test-only corrections, the authoritative RED used the assigned interpreter,
+process-scoped offline overlay, no pytest cache provider, and the assigned
+basetemp:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1m-red-industry-dependency-001' 'tests\test_public_catalog.py::test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles' 'tests\test_public_catalog.py::test_industry_publish_continues_from_blank_candidates_to_a_healthy_scenario'
+```
+
+```text
+1 failed, 1 passed in 1.60s
+pytest/tool exit_code=1
+```
+
+The only authoritative RED failure was behavioral: formal
+`publish_content` completed instead of raising `ContentValidationError` when
+all candidates had legacy blank titles (`DID NOT RAISE`). There was no
+collection, fixture, or setup error in this run.
+
+### Minimal GREEN
+
+The candidate loop now calls
+`validate_for_publication(db, candidate["id"], now)` inside its existing
+`ContentValidationError` isolation boundary. Candidate rows are constrained to
+scenario items, so the shared gate terminates at `_validate_scenario_publication`
+without industry recursion. It performs the same read-only aggregate checks as
+direct publication, introduces no truthy shortcut or write, and preserves the
+stable outer `industry_public_incomplete` result when no candidate survives.
+
+The same two tests used the unique GREEN basetemp:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1m-green-industry-dependency-002' 'tests\test_public_catalog.py::test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles' 'tests\test_public_catalog.py::test_industry_publish_continues_from_blank_candidates_to_a_healthy_scenario'
+```
+
+```text
+2 passed in 1.42s
+pytest/tool exit_code=0
+```
+
+### Frozen responsibility and static verification
+
+After code and tests were frozen, the required responsibility set was started
+exactly once:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m pytest -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1m-responsibility-final-003' tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py
+```
+
+```text
+585 passed in 239.34s (0:03:59)
+pytest/tool exit_code=0
+```
+
+All pytest commands used `..\..\.venv\Scripts\python.exe` (Python 3.12.13),
+with `PYTHONPATH` set for that process only and only to the checked-in
+`local-deps` overlay. No full suite was run.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+& '..\..\.venv\Scripts\python.exe' -m py_compile publishing_repository.py tests\test_public_catalog.py
+git diff --check
+rg -n "models\.get_db|sqlite3|\.execute\(" blueprints\public_catalog.py
+rg -n "models\.get_db|sqlite3|\.execute\(" blueprints\admin\catalog.py
+```
+
+`py_compile` and `git diff --check` exited 0. Both direct-SQL guards returned no
+matches (`rg` exit 1, interpreted as PASS). Before this report append,
+`git status --short` contained only `publishing_repository.py` and
+`tests/test_public_catalog.py`.
+
+Fix1m changed only:
+
+- `publishing_repository.py`
+- `tests/test_public_catalog.py`
+- this report
+
+The historical full-suite outcome remains **UNKNOWN** and was not rerun. The
+historical PyPI-network violation remains **CONFIRMED**. No network access,
+dependency installation, full/production server, Nginx, real database, or
+external package generation occurred; all database activity used disposable
+SQLite. The frozen `data_process_foundation` product-data limitation remains
+unchanged.
