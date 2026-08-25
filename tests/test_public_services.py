@@ -591,6 +591,75 @@ def test_malformed_injected_service_authority_fails_closed_without_type_leak(db)
         ) is None
 
 
+def test_top_level_malformed_service_authority_injection_fails_closed(db):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    authority = catalog._service_authority(db, current["service_id"], NOW)
+
+    malformed_authorities = (
+        object(),
+        {},
+        replace(authority, service_id=[]),
+    )
+    for malformed in malformed_authorities:
+        assert catalog.public_service(
+            current["slug"], NOW, authority=malformed
+        ) is None
+
+
+def test_service_list_omits_one_invalid_authority_without_hiding_healthy_services(
+    published_services, db,
+):
+    invalid = _service_item(db, "foundation_workshop", "published")
+    healthy = _service_item(db, "knowledge_assistant_pilot", "published")
+    db.execute(
+        "UPDATE service_deliverables SET description=' ' "
+        "WHERE id=(SELECT MIN(id) FROM service_deliverables WHERE service_id=?)",
+        (invalid["service_id"],),
+    )
+    db.commit()
+
+    response = published_services.get("/service-packages")
+    document = _page(response)
+    titles = tuple(
+        node.get_text(strip=True) for node in document.select("[data-service-card] h2")
+    )
+
+    assert response.status_code == 200
+    assert healthy["title"] in titles
+    assert invalid["title"] not in titles
+    assert published_services.get(
+        f"/service-packages/{invalid['slug']}"
+    ).status_code == 404
+    assert published_services.get(
+        f"/service-packages/{healthy['slug']}"
+    ).status_code == 200
+
+
+def test_service_list_empty_and_archived_lifecycle_remains_available(client, db):
+    empty = _page(client.get("/service-packages"))
+    assert empty.select("[data-service-card]") == []
+    assert "暂无已发布服务包" in empty.get_text(" ", strip=True)
+
+    _publish_scenario_content(db)
+    published = _publish_service(db, "foundation_workshop")
+    available = _page(client.get("/service-packages"))
+    assert tuple(
+        node.get_text(strip=True)
+        for node in available.select("[data-service-card] h2")
+    ) == (published["title"],)
+
+    archive_content(
+        published["id"], published["lock_version"], actor="test-admin", now=NOW
+    )
+    archived = _page(client.get("/service-packages"))
+    assert archived.select("[data-service-card]") == []
+    assert "暂无已发布服务包" in archived.get_text(" ", strip=True)
+    assert client.get(
+        f"/service-packages/{published['slug']}"
+    ).status_code == 404
+
+
 def _corrupt_service_dependency(db, current, draft_id, source):
     service_id = current["service_id"]
     if source == "maturity":

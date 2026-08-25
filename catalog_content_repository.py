@@ -560,11 +560,15 @@ def _service_projection(db, item, redirect, now, authority: ServiceAuthority | N
     ).fetchone()
     if group is None or group["service_id"] is None:
         return None
-    if authority is not None and authority.service_id != group["service_id"]:
-        return None
-    authority = authority if authority is not None else _service_authority(db, group["service_id"], now)
-    if not valid_service_authority(authority):
-        return None
+    if authority is None:
+        authority = _service_authority(db, group["service_id"], now)
+        if not valid_service_authority(authority):
+            return None
+    else:
+        if not valid_service_authority(authority):
+            return None
+        if authority.service_id != group["service_id"]:
+            return None
     blocks = _blocks(db, item["id"])
     maturity_codes = _names(
         db,
