@@ -2138,16 +2138,19 @@ already-published scenario: optional related case/resource records may later
 be legally archived, while the scenario and industry public projections remain
 complete because they do not consume those optional relation tables.
 
-The new regression uses real services and disposable SQLite without mocking a
-target function. It publishes the checked-in catalog fixture, creates and
-formally publishes a verified case, copies/saves/formally publishes the
-`mfg_knowledge_assistant` scenario with a `scenario_case` relation, and then
-legally archives the case through `archive_content`. It verifies that the
-relation row remains and the scenario is still HTTP 200. Every other published
-manufacturing scenario candidate is then legally archived through
-`archive_content`; the candidate query is asserted to contain exactly the
-relation-bearing scenario. The old manufacturing industry and that scenario
-are both HTTP 200 before attempting the industry replacement.
+The authoritative RED regression used real services and disposable SQLite
+without mocking a target function. It published the checked-in catalog
+fixture, created and formally published a verified case, copied/saved/formally
+published the `mfg_knowledge_assistant` scenario with a `scenario_case`
+relation, and then legally archived the case through `archive_content`. It
+verified that the relation row remained and the scenario was still HTTP 200.
+At that RED stage, it isolated the relation-bearing candidate by using the
+already-reviewed legacy-title fixture to make every other published
+manufacturing candidate invalid. It asserted that the target candidate was
+present exactly once and that both the old manufacturing industry and the
+target scenario were HTTP 200, but it did **not** yet formally archive the
+other candidates or assert a one-row candidate query. Those fixture
+refinements were added only after the first GREEN, as recorded below.
 
 Before any production edit, the authoritative RED used the absolute assigned
 snapshot interpreter, a process-scoped checked-in overlay, no pytest cache
@@ -2166,9 +2169,10 @@ pytest/tool exit_code=1
 The single failure was the intended consumer-visible behavior: final
 `publish_content` raised
 `ContentValidationError('industry_public_incomplete')` from the candidate
-loop. All preceding formal lifecycle, persisted-relation, unique-candidate,
-scenario HTTP 200, and industry HTTP 200 assertions had succeeded. There was
-no fixture, setup, collection, import, or environment failure before this RED.
+loop. All preceding formal target/scenario lifecycle, persisted-relation,
+candidate-membership, scenario HTTP 200, and industry HTTP 200 assertions had
+succeeded. There was no fixture, setup, collection, import, or environment
+failure before this RED.
 
 ### Minimal GREEN and review refinement
 
@@ -2194,7 +2198,9 @@ it was intentionally interrupted. It has no terminal summary or outcome, is
 not classified as a product pass/failure, and is not responsibility evidence.
 
 After applying those test-only lifecycle and tuple-comparison refinements, the
-authoritative narrow GREEN used the new unique basetemp:
+formal archival of every other candidate and exact one-row candidate assertion
+became GREEN/controller evidence; they are not attributed to the earlier RED.
+The authoritative narrow GREEN used the new unique basetemp:
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path -LiteralPath '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
