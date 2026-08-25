@@ -2489,7 +2489,7 @@ remains **CONFIRMED**.
 
 ## Fix1p — scope nested scenario services to the public projection
 
-**Status: DONE_WITH_CONCERNS, awaiting fresh external scoped review.** Fix1p
+**Status: CLEAN.** Fix1p
 started from clean baseline
 `9dee7c6598bbc66a0283b55ee4a9fcb7c8f4e57e` on
 `codex/ai-platform-2.0-core`. It addresses only the new external-review P2:
@@ -2666,5 +2666,23 @@ Result: `336 passed in 159.73s (0:02:39)`, pytest/controller `exit_code=0`.
 The controller did not run the full suite. It did not use a real network,
 install a package, access production/Nginx/a real database, update the
 ledger/task card, or start Task 7. The historical full-suite outcome remains
+**UNKNOWN/NOT PROVEN**, and the historical PyPI-network violation remains
+**CONFIRMED**.
+
+## Fix1p external scoped review
+
+The external “审查企业AI转型平台” task independently reviewed the complete
+`1c359a79492699d08ec3b054724e4fecf9d7f7fa..371cc05f62095b12bc521bb1ca6fdc2d9862254a`
+net diff. Its package had 30 commits, 28 files/headers, 407245 bytes,
+PowerShell line count 7891, SHA-256
+`BA178D5D99B38633E068624C193C986E147BA9315173A1CB2032EE86ACF7183E`, and
+passed reverse binary apply validation. The reviewer independently confirmed
+the published-service WHERE boundary, zero-service fail-closed behavior,
+direct-scenario strictness, lifecycle coverage, and clean tracked status.
+
+The reviewer returned the exact release-gate phrase
+`审查通过，可以继续下一步` with no new blocking finding. Task 6 is therefore
+formally CLEAN and Task 7 is authorized. This verdict does not change the
+historical evidence limits: the Task 6 full-suite outcome remains
 **UNKNOWN/NOT PROVEN**, and the historical PyPI-network violation remains
 **CONFIRMED**.
