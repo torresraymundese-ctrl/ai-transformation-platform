@@ -595,11 +595,15 @@ def _exact_timestamp(value):
 def _exact_nonblank(value, maximum):
     return (
         type(value) is str
-        and "\x00" not in value
         and value == value.strip()
         and bool(value)
         and len(value) <= maximum
+        and all(not unicodedata.category(character).startswith("C") for character in value)
     )
+
+
+def _exact_enum(value, allowed):
+    return type(value) is str and value in allowed
 
 
 def _freeze_target(value):
@@ -645,7 +649,7 @@ def _validate_decision_target(source_table, target):
         }
         if set(target) not in (base, approved):
             raise LegacyDecisionError("invalid service target")
-        if target.get("target_group") not in SERVICE_GROUPS:
+        if not _exact_enum(target.get("target_group"), SERVICE_GROUPS):
             raise LegacyDecisionError("invalid service target")
         if set(target) == approved and not (
             type(target["target_content_id"]) is int
@@ -690,8 +694,10 @@ def _validate_decision_target(source_table, target):
         if set(target) != keys:
             raise LegacyDecisionError("invalid case target")
         if (
-            target["verification_code"]
-            not in {"public_verified", "authorized_anonymous"}
+            not _exact_enum(
+                target["verification_code"],
+                {"public_verified", "authorized_anonymous"},
+            )
             or type(target["is_anonymized"]) is not int
             or target["is_anonymized"] not in (0, 1)
             or (
@@ -700,8 +706,10 @@ def _validate_decision_target(source_table, target):
                 ("public_verified", 0),
                 ("authorized_anonymous", 1),
             }
-            or target["basis_type"]
-            not in {"client_authorization", "internal_delivery_record"}
+            or not _exact_enum(
+                target["basis_type"],
+                {"client_authorization", "internal_delivery_record"},
+            )
             or not _exact_nonblank(target["private_basis_reference"], 300)
             or type(target["metrics"]) is not list
             or len(target["metrics"]) > 20
@@ -724,7 +732,7 @@ def _decision_from_object(value):
     source_checksum = value["source_checksum"]
     action = value["action"]
     confirmations = value["confirmations"]
-    if source_table not in SOURCE_TABLES:
+    if not _exact_enum(source_table, SOURCE_TABLES):
         raise LegacyDecisionError("invalid decision source")
     if (
         type(source_id) is not int
@@ -733,7 +741,7 @@ def _decision_from_object(value):
         raise LegacyDecisionError("invalid decision source id")
     if type(source_checksum) is not str or _HEX_SHA256.fullmatch(source_checksum) is None:
         raise LegacyDecisionError("invalid decision checksum")
-    if type(action) is not str or action not in ACTIONS:
+    if not _exact_enum(action, ACTIONS):
         raise LegacyDecisionError("invalid decision action")
     if (
         type(confirmations) is not list
@@ -797,7 +805,7 @@ def load_legacy_decisions(path) -> tuple[LegacyDecision, ...]:
                 object_pairs_hook=_decision_object,
                 parse_constant=_reject_json_constant,
             )
-        except (json.JSONDecodeError, LegacyDecisionError, RecursionError) as error:
+        except (ValueError, RecursionError) as error:
             raise LegacyDecisionError("invalid decision JSON") from error
         decision = _decision_from_object(raw)
         identity = (decision.source_table, decision.source_id)
@@ -1119,15 +1127,35 @@ def _case_draft(source_row, decision, now):
 
 
 def _service_target(db, decision):
-    if decision.target["target_group"] not in SERVICE_GROUPS:
+    if not _exact_enum(decision.target["target_group"], SERVICE_GROUPS):
         return None
     return db.execute(
-        "SELECT cg.id AS group_id,ci.id AS content_id,ci.lock_version "
+        "SELECT cg.id AS group_id,ci.id AS content_id,ci.lock_version,ci.publish_at,"
+        "s.code AS service_code "
         "FROM content_groups cg JOIN services s ON s.id=cg.service_id "
         "JOIN content_items ci ON ci.content_group_id=cg.id AND ci.status='draft' "
         "WHERE cg.entry_type='service' AND s.code=?",
         (decision.target["target_group"],),
     ).fetchone()
+
+
+def _service_mapping_matches(*codes):
+    return (
+        bool(codes)
+        and all(_exact_enum(code, SERVICE_GROUPS) for code in codes)
+        and len(set(codes)) == 1
+    )
+
+
+def _service_rule_target(source_code):
+    rules = _load_mapping_rules()
+    targets = rules["service_code_targets"]
+    target = targets.get(source_code) if type(targets) is dict else None
+    if type(target) is not dict or not _exact_enum(
+        target.get("target_group"), SERVICE_GROUPS
+    ):
+        return None
+    return target["target_group"]
 
 
 def _service_merge_draft(db, source_row, target_row):
@@ -1271,6 +1299,16 @@ def _migration_item(decision, status, **kwargs):
     )
 
 
+def _slug_conflicts(db, entry_type, slug):
+    return db.execute(
+        "SELECT EXISTS(SELECT 1 FROM content_groups "
+        "WHERE entry_type=? AND canonical_slug=?) OR "
+        "EXISTS(SELECT 1 FROM content_slug_aliases "
+        "WHERE entry_type=? AND old_slug=?)",
+        (entry_type, slug, entry_type, slug),
+    ).fetchone()[0] == 1
+
+
 def _prepare_decision(db, decision, now, *, require_merge_approval):
     source_row = _source_row_by_identity(
         db, decision.source_table, decision.source_id
@@ -1302,10 +1340,11 @@ def _prepare_decision(db, decision, now, *, require_merge_approval):
                 "WHERE source_table='services' AND source_id=?",
                 (decision.source_id,),
             ).fetchone()
-            if (
-                source_row["code"] != expected_service_code
-                or review_target is None
-                or review_target["target_group"] != expected_service_code
+            if review_target is None or not _service_mapping_matches(
+                source_row["code"],
+                review_target["target_group"],
+                expected_service_code,
+                mapping["service_code"],
             ):
                 return _PreparedMigration(
                     _migration_item(decision, "service_mapping_invalid")
@@ -1330,9 +1369,13 @@ def _prepare_decision(db, decision, now, *, require_merge_approval):
         return _PreparedMigration(_migration_item(decision, error))
     try:
         if decision.source_table == "services":
-            if review["target_group"] not in SERVICE_GROUPS or decision.target[
-                "target_group"
-            ] != review["target_group"]:
+            rule_target = _service_rule_target(source_row["code"])
+            if not _service_mapping_matches(
+                source_row["code"],
+                rule_target,
+                review["target_group"],
+                decision.target["target_group"],
+            ):
                 return _PreparedMigration(
                     _migration_item(decision, "service_mapping_invalid")
                 )
@@ -1340,6 +1383,20 @@ def _prepare_decision(db, decision, now, *, require_merge_approval):
             if target is None:
                 return _PreparedMigration(
                     _migration_item(decision, "target_draft_missing")
+                )
+            if not _service_mapping_matches(
+                source_row["code"],
+                rule_target,
+                review["target_group"],
+                decision.target["target_group"],
+                target["service_code"],
+            ):
+                return _PreparedMigration(
+                    _migration_item(decision, "service_mapping_invalid")
+                )
+            if target["publish_at"] is not None:
+                return _PreparedMigration(
+                    _migration_item(decision, "target_scheduled")
                 )
             approved = set(decision.target) == {
                 "target_group",
@@ -1399,11 +1456,7 @@ def _prepare_decision(db, decision, now, *, require_merge_approval):
         else:
             draft = _case_draft(source_row, decision, now)
         draft = validate_content_draft(draft)
-        collision = db.execute(
-            "SELECT 1 FROM content_groups WHERE entry_type=? AND canonical_slug=?",
-            (draft.entry_type, draft.slug),
-        ).fetchone()
-        if collision is not None:
+        if _slug_conflicts(db, draft.entry_type, draft.slug):
             return _PreparedMigration(_migration_item(decision, "target_conflict"))
         return _PreparedMigration(
             _migration_item(
@@ -1552,7 +1605,12 @@ def apply_legacy_decisions(db, decisions, *, actor, now):
                     else None
                 ),
             )
-            if mapping_error or mapping is None:
+            if (
+                mapping_error
+                or mapping is None
+                or mapping["target_content_item_id"] != content_id
+                or mapping["target_content_group_id"] != group_id
+            ):
                 raise ContentValidationError("mapping_invalid")
             _write_migration_audit(db, content_id, decision, actor, now)
             lock = db.execute(

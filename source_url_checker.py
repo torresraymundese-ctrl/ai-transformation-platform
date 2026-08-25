@@ -36,6 +36,17 @@ INVALID_SOURCE_CODES = frozenset(
         "response_too_large",
     }
 )
+UNREACHABLE_SOURCE_CODES = frozenset(
+    {
+        "dns_failed",
+        "peer_mismatch",
+        "redirect_invalid",
+        "too_many_redirects",
+        "http_status",
+        "network_error",
+        "redirect_requires_update",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -52,13 +63,21 @@ def source_state_for_check(result, *, has_source):
     """Map a bounded source check to the review table's exact public states."""
     if type(has_source) is not bool:
         raise ValueError("has_source must be an exact boolean")
-    if not has_source:
+    if (
+        type(result) not in (FetchResult, SourceCheckResult)
+        or type(result.ok) is not bool
+        or type(result.code) is not str
+    ):
+        raise ValueError("invalid source check result")
+    if not has_source and result.ok is False and result.code == "source_missing":
         return "missing"
-    if result.ok and result.code == "https_ok":
+    if has_source and result.ok is True and result.code == "https_ok":
         return "reachable"
-    if result.code in INVALID_SOURCE_CODES:
+    if has_source and result.ok is False and result.code in INVALID_SOURCE_CODES:
         return "invalid"
-    return "unreachable"
+    if has_source and result.ok is False and result.code in UNREACHABLE_SOURCE_CODES:
+        return "unreachable"
+    raise ValueError("invalid source check result")
 
 
 def _normalized_host(host):
@@ -399,9 +418,12 @@ def check_source_url(url, transport: PinnedHttpTransport, now: datetime):
         )
     except Exception:
         fetched = FetchResult(False, "network_error", normalized, None, None, b"")
+    if type(fetched) is not FetchResult:
+        raise ValueError("invalid source check result")
+    source_state_for_check(fetched, has_source=True)
     final_url = fetched.final_url or normalized
     final_digest = hashlib.sha256(final_url.encode("utf-8")).hexdigest()
-    ok = fetched.ok and final_url == normalized
+    ok = fetched.ok is True and final_url == normalized
     code = (
         "redirect_requires_update"
         if fetched.ok and final_url != normalized

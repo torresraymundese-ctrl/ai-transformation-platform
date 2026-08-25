@@ -37,6 +37,23 @@ def test_source_check_maps_only_exact_generic_codes_to_review_states(
     assert source_state_for_check(result, has_source=has_source) == expected
 
 
+@pytest.mark.parametrize(
+    ("has_source", "result"),
+    (
+        (True, object()),
+        (True, FetchResult(1, "https_ok", "", None, None, b"")),
+        (True, FetchResult(False, [], "", None, None, b"")),
+        (True, FetchResult(True, "network_error", "", None, None, b"")),
+        (True, FetchResult(False, "https_ok", "", None, None, b"")),
+        (True, FetchResult(False, "unknown_private_code", "", None, None, b"")),
+        (False, FetchResult(False, "network_error", "", None, None, b"")),
+    ),
+)
+def test_source_state_rejects_non_exact_or_inconsistent_results(has_source, result):
+    with pytest.raises(ValueError, match="invalid source check result"):
+        source_state_for_check(result, has_source=has_source)
+
+
 class FakeResponse:
     def __init__(self, *, status=200, body=b"ok", headers=None, peer_ip="93.184.216.34"):
         self.status = status
