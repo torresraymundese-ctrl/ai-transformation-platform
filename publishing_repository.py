@@ -402,14 +402,18 @@ def load_content_draft(db, content_id):
     )
 
 
-def validate_for_publication(db, content_id, now):
+def _load_validated_publication_draft(db, content_id):
     raw_draft = load_content_draft(db, content_id)
     draft = validate_content_draft(raw_draft)
-    if any(
-        raw_block.title != validated_block.title
-        for raw_block, validated_block in zip(raw_draft.blocks, draft.blocks)
+    if tuple(block.title for block in raw_draft.blocks) != tuple(
+        block.title for block in draft.blocks
     ):
         raise ContentValidationError("block_title_invalid")
+    return draft
+
+
+def validate_for_publication(db, content_id, now):
+    draft = _load_validated_publication_draft(db, content_id)
     if draft.share_image_media_id is not None:
         media = db.execute(
             "SELECT detected_mime FROM media_assets WHERE id=? AND status='ready'",
@@ -537,7 +541,8 @@ def _validate_industry_publication(db, content_id, draft, now):
     ).fetchall()
     for candidate in candidates:
         try:
-            validate_for_publication(db, candidate["id"], now)
+            candidate_draft = _load_validated_publication_draft(db, candidate["id"])
+            _validate_scenario_publication(db, candidate["id"], candidate_draft)
         except ContentValidationError:
             continue
         return

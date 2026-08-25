@@ -13,12 +13,12 @@ import app as app_module
 import blueprints.public_catalog as public_catalog_blueprint
 import catalog_content_repository as catalog
 from content_clock import SHANGHAI
-from content_contracts import ContentBlock, ContentDraft
+from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_json import ContentJsonError, decode_database_json
 from content_validation import ContentValidationError
 import media_service
 import publishing_repository
-from publishing_service import copy_revision, publish_content, publish_due_content, save_content_draft, schedule_content
+from publishing_service import copy_revision, create_content_draft, publish_content, publish_due_content, save_content_draft, schedule_content
 from publishing_service import archive_content
 
 
@@ -670,6 +670,148 @@ def _publication_state_snapshot(db, content_ids):
         )
     )
     return items, audits
+
+
+def test_industry_publish_keeps_public_scenario_healthy_after_relation_target_archive(
+    client, db
+):
+    publish_catalog(db)
+    target_id = create_content_draft(
+        ContentDraft(
+            entry_type="case",
+            slug="archived-scenario-relation-target",
+            title="后续归档的场景关联案例",
+            summary="验证可选关联目标归档后不会破坏场景公开健康性。",
+            seo_title="场景关联案例归档验证",
+            seo_description="验证可选案例归档后的公开目录发布边界。",
+            extension={
+                "verification_code": "verified-internal-record",
+                "is_anonymized": 1,
+                "basis_type": "private_authorization",
+                "private_basis_reference": "archived-relation-target-001",
+                "source_url": None,
+                "source_url_sha256": None,
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+                "is_verified": 1,
+                "review_confirmed": 1,
+                "verified_at": NOW,
+            },
+            metrics=(
+                CaseMetric(
+                    "场景关联验证指标",
+                    "8",
+                    "2",
+                    "小时",
+                    "连续 30 天",
+                    "由已确认的内部交付记录对比得出。",
+                ),
+            ),
+        ),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    publish_content(target_id, 1, actor="test-admin", now=NOW_DATETIME)
+    target = db.execute(
+        "SELECT content_group_id,lock_version,status FROM content_items WHERE id=?",
+        (target_id,),
+    ).fetchone()
+    assert target["status"] == "published"
+
+    scenario = db.execute(
+        "SELECT ci.id,ci.slug FROM content_items ci JOIN content_groups g "
+        "ON g.id=ci.content_group_id JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND s.code='mfg_knowledge_assistant'"
+    ).fetchone()
+    scenario_revision = copy_revision(
+        scenario["id"], actor="test-admin", now=NOW_DATETIME
+    )
+    scenario_draft = publishing_repository.load_content_draft(db, scenario_revision)
+    scenario_lock = save_content_draft(
+        scenario_revision,
+        1,
+        replace(
+            scenario_draft,
+            relations=(
+                ContentRelation("scenario_case", target["content_group_id"]),
+            ),
+        ),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    scenario_result = publish_content(
+        scenario_revision,
+        scenario_lock,
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    assert (scenario_result.published_id, scenario_result.archived_id) == (
+        scenario_revision,
+        scenario["id"],
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+
+    archive_content(
+        target_id,
+        target["lock_version"],
+        actor="test-admin",
+        now=NOW_DATETIME + timedelta(minutes=1),
+    )
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (target_id,)
+    ).fetchone()[0] == "archived"
+    assert db.execute(
+        "SELECT case_content_group_id FROM scenario_cases "
+        "WHERE scenario_content_item_id=?",
+        (scenario_revision,),
+    ).fetchone()[0] == target["content_group_id"]
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+
+    current, industry_revision = _saved_industry_revision(db)
+    candidates = _published_scenario_candidates(db, current["industry_id"])
+    assert sum(candidate_id == scenario_revision for candidate_id, _ in candidates) == 1
+    other_candidates = tuple(
+        candidate_id for candidate_id, _ in candidates if candidate_id != scenario_revision
+    )
+    assert other_candidates
+    for candidate_id in other_candidates:
+        lock_version = db.execute(
+            "SELECT lock_version FROM content_items WHERE id=?", (candidate_id,)
+        ).fetchone()[0]
+        archive_content(
+            candidate_id,
+            lock_version,
+            actor="test-admin",
+            now=NOW_DATETIME + timedelta(minutes=2),
+        )
+    assert _published_scenario_candidates(db, current["industry_id"]) == (
+        (scenario_revision, "mfg_knowledge_assistant"),
+    )
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
+
+    result = publish_content(
+        industry_revision,
+        1,
+        actor="test-admin",
+        now=NOW_DATETIME + timedelta(minutes=3),
+    )
+
+    assert (result.published_id, result.archived_id) == (
+        industry_revision,
+        current["id"],
+    )
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (current["id"],)
+    ).fetchone()[0] == "archived"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (industry_revision,)
+    ).fetchone()[0] == "published"
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
+    assert client.get("/industries/manufacturing").status_code == 200
 
 
 def test_industry_publish_rejects_when_all_published_scenario_candidates_have_blank_titles(
