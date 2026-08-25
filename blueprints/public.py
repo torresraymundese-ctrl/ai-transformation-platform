@@ -39,20 +39,6 @@ def services_page():
     return redirect("/service-packages", code=301)
 
 
-@bp.route("/cases")
-def cases_page():
-    industry = valid_text(request.args, "industry", maximum=100)
-    search = valid_text(request.args, "search", maximum=100)
-    cases, industries = content_repository.search_cases(industry, search)
-    return render_template(
-        "cases.html",
-        cases=cases,
-        industries=industries,
-        current_industry=industry,
-        search=search,
-    )
-
-
 @bp.route("/assessment")
 def assessment_page():
     return render_template("assessment.html")

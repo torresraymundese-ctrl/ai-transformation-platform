@@ -17,6 +17,10 @@ from source_url_checker import normalize_source_url
 ENTRY_TYPES = frozenset({"industry", "scenario", "service", "case", "resource", "announcement"})
 MATURITY_CODES = frozenset({"explore", "pilot", "scale", "collaborate"})
 BLOCK_TYPES = frozenset({"heading", "rich_text", "image_text", "metric", "steps", "download", "cta"})
+CASE_VERIFICATION = frozenset({"public_verified", "authorized_anonymous"})
+CASE_BASIS_TYPES = frozenset(
+    {"public_source", "client_authorization", "internal_delivery_record"}
+)
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RELATION_OWNERS = {
     "industry_case": "industry",
@@ -327,11 +331,11 @@ def _validate_extension(draft):
         if set(extension) != allowed:
             raise ContentValidationError("extension_invalid")
         if (
-            not _valid_optional_text(extension["verification_code"], 64)
-            or extension["verification_code"] is None
+            type(extension["verification_code"]) is not str
+            or extension["verification_code"] not in CASE_VERIFICATION
             or not _valid_flag(extension["is_anonymized"])
             or type(extension["basis_type"]) is not str
-            or extension["basis_type"] not in {"public_source", "private_authorization"}
+            or extension["basis_type"] not in CASE_BASIS_TYPES
             or not _valid_optional_text(extension["private_basis_reference"], 300)
             or not _valid_sha256(extension["source_url_sha256"])
             or not _valid_optional_text(extension["source_check_code"], 64)

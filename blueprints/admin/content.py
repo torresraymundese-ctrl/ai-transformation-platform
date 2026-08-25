@@ -97,11 +97,6 @@ def admin_article_new():
     return render_template("admin/article_edit.html", article=None)
 
 
-@bp.route("/admin/cases")
-def admin_cases():
-    return render_template("admin/cases.html", cases=content_repository.list_cases())
-
-
 @bp.route("/admin/case/new", methods=["GET", "POST"])
 def admin_case_new():
     return "旧案例编辑器已停用；请等待案例迁移审阅流程。", 410

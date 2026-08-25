@@ -238,7 +238,8 @@ def test_008_migration_allows_exact_service_owner_and_seed_is_explicit(db):
     versions = tuple(row[0] for row in db.execute(
         "SELECT version FROM schema_migrations ORDER BY version"
     ))
-    assert versions[-1] == "008_service_content_maturity"
+    assert "008_service_content_maturity" in versions
+    assert versions[-1] == "009_case_basis_types"
 
     actual = {}
     for code in SERVICE_MATURITY:

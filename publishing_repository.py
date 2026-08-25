@@ -1,6 +1,7 @@
 """SQLite repository for content aggregates; caller owns every transaction."""
 
 from dataclasses import replace
+from datetime import timedelta
 from html import unescape
 import json
 import re
@@ -11,6 +12,8 @@ from content_clock import format_shanghai
 from content_json import ContentJsonError, decode_database_json
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_validation import (
+    CASE_BASIS_TYPES,
+    CASE_VERIFICATION,
     ContentValidationError,
     is_exact_nonblank_text,
     is_valid_public_budget_range,
@@ -408,6 +411,8 @@ def _load_validated_publication_draft(db, content_id):
     except ContentValidationError as error:
         if raw_draft.entry_type == "service" and error.code == "maturity_invalid":
             raise ContentValidationError("service_public_incomplete") from error
+        if raw_draft.entry_type == "case" and error.code == "extension_invalid":
+            raise ContentValidationError("case_verification_incomplete") from error
         raise
     if tuple(block.title for block in raw_draft.blocks) != tuple(
         block.title for block in draft.blocks
@@ -466,15 +471,32 @@ def validate_for_publication(db, content_id, now):
     )
     if required_source:
         source_hash = draft.extension.get("source_url_sha256")
+        checked_at = draft.extension.get("source_checked_at")
+        now_text = format_shanghai(now)
+        freshness_floor = format_shanghai(now - timedelta(days=7))
         if (
             draft.extension.get("source_check_code") != "https_ok"
             or draft.extension.get("source_check_url_sha256") != source_hash
+            or not checked_at
+            or checked_at < freshness_floor
+            or checked_at > now_text
             or not draft.extension.get("source_check_expires_at")
-            or draft.extension["source_check_expires_at"] < format_shanghai(now)
+            or draft.extension["source_check_expires_at"] < now_text
         ):
             raise ContentValidationError("source_check_invalid")
     if draft.entry_type == "case":
-        if not draft.extension.get("is_verified") or not draft.extension.get("review_confirmed") or not draft.metrics:
+        verification_code = draft.extension.get("verification_code")
+        expected_anonymized = 1 if verification_code == "authorized_anonymous" else 0
+        if (
+            verification_code not in CASE_VERIFICATION
+            or draft.extension.get("basis_type") not in CASE_BASIS_TYPES
+            or draft.extension.get("is_anonymized") != expected_anonymized
+            or draft.extension.get("is_verified") != 1
+            or draft.extension.get("review_confirmed") != 1
+            or not draft.extension.get("verified_at")
+            or draft.extension["verified_at"] > format_shanghai(now)
+            or not draft.metrics
+        ):
             raise ContentValidationError("case_verification_incomplete")
     if draft.entry_type == "industry":
         _validate_industry_publication(db, content_id, draft, now)

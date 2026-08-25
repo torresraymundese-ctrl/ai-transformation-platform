@@ -254,6 +254,169 @@ def insert_media(db, suffix, *, status="pending", storage_suffix=None):
     return media_id
 
 
+def _insert_case_extension(db, item_id, basis_type):
+    source_url = "https://example.com/case" if basis_type == "public_source" else None
+    source_hash = hashlib.sha256(source_url.encode()).hexdigest() if source_url else None
+    db.execute(
+        "INSERT INTO case_content "
+        "(content_item_id,verification_code,is_anonymized,basis_type,"
+        "private_basis_reference,source_url,source_url_sha256,is_verified,"
+        "review_confirmed,verified_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            item_id,
+            "public_verified" if basis_type == "public_source" else "authorized_anonymous",
+            0 if basis_type == "public_source" else 1,
+            basis_type,
+            None if basis_type == "public_source" else f"evidence-{basis_type}",
+            source_url,
+            source_hash,
+            1,
+            1,
+            SHANGHAI_TIME,
+        ),
+    )
+
+
+def test_009_case_basis_types_apply_on_an_empty_database(tmp_path, monkeypatch):
+    """A fresh schema must accept only the three editable structured basis codes."""
+    db = sqlite3.connect(tmp_path / "empty-case-basis.db")
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+        migrations.apply_migrations(db)
+
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "009_case_basis_types"
+
+        stored = []
+        for index, basis_type in enumerate(
+            ("public_source", "client_authorization", "internal_delivery_record")
+        ):
+            slug = f"empty-basis-{index}"
+            group_id = insert_group(db, entry_type="case", slug=slug)
+            item_id = insert_item(db, group_id, entry_type="case", slug=slug)
+            _insert_case_extension(db, item_id, basis_type)
+            stored.append(db.execute(
+                "SELECT basis_type FROM case_content WHERE content_item_id=?",
+                (item_id,),
+            ).fetchone()[0])
+
+        assert stored == [
+            "public_source", "client_authorization", "internal_delivery_record"
+        ]
+        invalid_group = insert_group(db, entry_type="case", slug="invalid-basis")
+        invalid_item = insert_item(
+            db, invalid_group, entry_type="case", slug="invalid-basis"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_case_extension(db, invalid_item, "invented_basis")
+    finally:
+        db.close()
+
+
+def test_009_preserves_legacy_case_rows_and_case_integrity_guards(
+    tmp_path, monkeypatch
+):
+    """Upgrading must preserve legacy evidence exactly without making it publishable."""
+    through_008 = tmp_path / "migrations-through-008"
+    through_008.mkdir()
+    for path in sorted((PROJECT_ROOT / "migrations").glob("00[1-8]_*.sql")):
+        shutil.copy2(path, through_008 / path.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", through_008)
+
+    db = sqlite3.connect(tmp_path / "legacy-case-basis.db")
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        migrations.apply_migrations(db)
+        legacy_group = insert_group(db, entry_type="case", slug="legacy-private")
+        legacy_item = insert_item(
+            db, legacy_group, entry_type="case", slug="legacy-private"
+        )
+        _insert_case_extension(db, legacy_item, "private_authorization")
+        legacy_before = tuple(db.execute(
+            "SELECT * FROM case_content WHERE content_item_id=?", (legacy_item,)
+        ).fetchone())
+        columns_before = tuple(db.execute("PRAGMA table_info(case_content)"))
+        foreign_keys_before = tuple(db.execute("PRAGMA foreign_key_list(case_content)"))
+        preserved_trigger_names = {
+            "validate_case_content_insert",
+            "validate_case_content_update",
+            "protect_case_content_update",
+            "prevent_published_extension_delete_case",
+            "validate_content_publication",
+        }
+        trigger_sql_before = {
+            row["name"]: row["sql"]
+            for row in db.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger'"
+            )
+            if row["name"] in preserved_trigger_names
+        }
+        assert set(trigger_sql_before) == preserved_trigger_names
+        db.commit()
+
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+        migrations.apply_migrations(db)
+        migrations.apply_migrations(db)
+
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "009_case_basis_types"
+        assert tuple(db.execute(
+            "SELECT * FROM case_content WHERE content_item_id=?", (legacy_item,)
+        ).fetchone()) == legacy_before
+        assert tuple(db.execute("PRAGMA table_info(case_content)")) == columns_before
+        assert tuple(db.execute("PRAGMA foreign_key_list(case_content)")) == foreign_keys_before
+        assert {
+            row["name"]: row["sql"]
+            for row in db.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger'"
+            )
+            if row["name"] in preserved_trigger_names
+        } == trigger_sql_before
+
+        with pytest.raises(sqlite3.IntegrityError, match="legacy case basis"):
+            publish(db, legacy_item)
+        assert db.execute(
+            "SELECT status FROM content_items WHERE id=?", (legacy_item,)
+        ).fetchone()[0] == "draft"
+
+        for index, basis_type in enumerate(
+            ("client_authorization", "internal_delivery_record")
+        ):
+            slug = f"upgraded-basis-{index}"
+            group_id = insert_group(db, entry_type="case", slug=slug)
+            item_id = insert_item(db, group_id, entry_type="case", slug=slug)
+            _insert_case_extension(db, item_id, basis_type)
+            publish(db, item_id)
+            with pytest.raises(
+                sqlite3.IntegrityError, match="non-draft content children"
+            ):
+                db.execute(
+                    "UPDATE case_content SET private_basis_reference='changed' "
+                    "WHERE content_item_id=?",
+                    (item_id,),
+                )
+            with pytest.raises(
+                sqlite3.IntegrityError, match="published content extension is required"
+            ):
+                db.execute(
+                    "DELETE FROM case_content WHERE content_item_id=?", (item_id,)
+                )
+
+        wrong_group = insert_group(db, entry_type="announcement", slug="wrong-case")
+        wrong_item = insert_item(db, wrong_group, slug="wrong-case")
+        with pytest.raises(
+            sqlite3.IntegrityError, match="case extension does not match content type"
+        ):
+            _insert_case_extension(db, wrong_item, "client_authorization")
+    finally:
+        db.close()
+
+
 def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
     db_through_005, monkeypatch
 ):
@@ -375,7 +538,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "008_service_content_maturity"
+        )][-1] == "009_case_basis_types"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
@@ -1052,6 +1215,7 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         "protect_industry_resources_update",
         "protect_industry_resources_delete",
         "validate_content_publication",
+        "reject_legacy_case_basis_publication",
         "prevent_published_extension_delete_industry",
         "prevent_published_extension_delete_scenario",
         "prevent_published_extension_delete_service",

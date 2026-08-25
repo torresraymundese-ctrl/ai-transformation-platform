@@ -1097,9 +1097,9 @@ def test_industry_publish_keeps_public_scenario_healthy_after_relation_target_ar
             seo_title="场景关联案例归档验证",
             seo_description="验证可选案例归档后的公开目录发布边界。",
             extension={
-                "verification_code": "verified-internal-record",
+                "verification_code": "authorized_anonymous",
                 "is_anonymized": 1,
-                "basis_type": "private_authorization",
+                "basis_type": "internal_delivery_record",
                 "private_basis_reference": "archived-relation-target-001",
                 "source_url": None,
                 "source_url_sha256": None,

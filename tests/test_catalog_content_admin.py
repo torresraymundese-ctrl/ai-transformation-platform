@@ -48,9 +48,9 @@ def _publish_case_target(db, slug, title):
         seo_title=title,
         seo_description="查看经授权并已完成内部核验的匿名案例。",
         extension={
-            "verification_code": f"verification-{slug}",
+            "verification_code": "authorized_anonymous",
             "is_anonymized": 1,
-            "basis_type": "private_authorization",
+            "basis_type": "internal_delivery_record",
             "private_basis_reference": f"internal-{slug}",
             "source_url": None,
             "source_url_sha256": None,

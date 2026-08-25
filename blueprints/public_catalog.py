@@ -3,6 +3,7 @@
 from flask import Blueprint, abort, current_app, redirect, render_template, request
 
 import catalog_content_repository as catalog
+import case_repository as cases
 from content_clock import shanghai_now
 from pagination import parse_pagination
 
@@ -71,4 +72,24 @@ def service_package_detail(slug):
     return render_template(
         "service_package_detail.html", service=service,
         canonical=_canonical(f"/service-packages/{service['slug']}"),
+    )
+
+
+@bp.get("/cases")
+def cases_page():
+    page = cases.public_cases(parse_pagination(request.args), shanghai_now())
+    return render_template("cases.html", page=page, canonical=_canonical("/cases"))
+
+
+@bp.get("/cases/<slug>")
+def case_detail(slug):
+    case = cases.public_case(slug, shanghai_now())
+    if case is None:
+        abort(404)
+    if case.redirect:
+        return redirect(f"/cases/{case.slug}", code=301)
+    return render_template(
+        "case_detail.html",
+        case=case,
+        canonical=_canonical(f"/cases/{case.slug}"),
     )

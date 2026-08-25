@@ -106,6 +106,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "006_content_catalog",
         "007_scenario_public_inputs",
         "008_service_content_maturity",
+        "009_case_basis_types",
     ]
     assert sentinel == "keep-me"
 

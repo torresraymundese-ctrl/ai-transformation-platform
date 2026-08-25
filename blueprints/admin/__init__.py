@@ -6,4 +6,4 @@ from flask import Blueprint
 bp = Blueprint("admin", __name__)
 
 
-from . import assets, auth, catalog, content, leads, media  # noqa: E402,F401
+from . import assets, auth, cases, catalog, content, leads, media  # noqa: E402,F401

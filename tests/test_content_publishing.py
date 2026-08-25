@@ -138,9 +138,9 @@ def _verified_case(slug="verified-case"):
         seo_title="经授权匿名案例",
         seo_description="查看经授权且具备指标依据的匿名客户案例。",
         extension={
-            "verification_code": "verified-internal-record",
+            "verification_code": "authorized_anonymous",
             "is_anonymized": 1,
-            "basis_type": "private_authorization",
+            "basis_type": "internal_delivery_record",
             "private_basis_reference": "internal-delivery-record-001",
             "source_url": None,
             "source_url_sha256": None,
@@ -172,8 +172,8 @@ def _public_case(slug="public-case", *, check=None):
     return replace(
         _verified_case(slug),
         extension={
-            "verification_code": "verified-public-source",
-            "is_anonymized": 1,
+            "verification_code": "public_verified",
+            "is_anonymized": 0,
             "basis_type": "public_source",
             "private_basis_reference": None,
             "source_url": source_url,
@@ -192,6 +192,44 @@ def _public_case(slug="public-case", *, check=None):
 
 def _row(db, content_id):
     return db.execute("SELECT * FROM content_items WHERE id=?", (content_id,)).fetchone()
+
+
+@pytest.mark.parametrize(
+    "corruption_sql",
+    [
+        "UPDATE case_content SET verification_code='public_verified',is_anonymized=1 WHERE content_item_id=?",
+        "UPDATE case_content SET verification_code='authorized_anonymous',is_anonymized=0 WHERE content_item_id=?",
+        "UPDATE case_content SET is_verified=0 WHERE content_item_id=?",
+        "UPDATE case_content SET review_confirmed=0 WHERE content_item_id=?",
+        "UPDATE case_content SET verified_at=NULL WHERE content_item_id=?",
+        "UPDATE case_content SET basis_type='private_authorization' WHERE content_item_id=?",
+    ],
+)
+def test_case_publish_gate_rejects_inconsistent_or_legacy_verification_without_writes(
+    db, corruption_sql
+):
+    content_id = create_content_draft(
+        _verified_case(f"case-gate-{hashlib.sha256(corruption_sql.encode()).hexdigest()[:8]}"),
+        actor="admin",
+        now=NOW,
+    )
+    before_lock_version = _row(db, content_id)["lock_version"]
+    db.execute(corruption_sql, (content_id,))
+    db.commit()
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(content_id, 1, actor="admin", now=NOW)
+
+    assert error.value.code == "case_verification_incomplete"
+    current = _row(db, content_id)
+    assert (current["status"], current["lock_version"], current["published_at"]) == (
+        "draft", before_lock_version, None,
+    )
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_published'",
+        (content_id,),
+    ).fetchone()[0] == 0
 
 
 def _ready_media(db, storage_name="ready-media.pdf", mime="application/pdf"):
@@ -640,6 +678,38 @@ def test_due_failure_is_isolated_and_records_only_safe_reason(db):
         (invalid,),
     ).fetchone()[0]
     assert details == '{"reason_code":"validation_failed"}'
+
+
+def test_due_case_gate_failure_is_isolated_and_records_no_private_evidence(db):
+    invalid = create_content_draft(
+        _verified_case("due-invalid-case"), actor="admin", now=NOW
+    )
+    valid = create_content_draft(
+        _announcement("due-after-invalid-case"), actor="admin", now=NOW
+    )
+    due = NOW + timedelta(hours=1)
+    schedule_content(invalid, 1, due, actor="admin", now=NOW)
+    schedule_content(valid, 1, due, actor="admin", now=NOW)
+    db.execute(
+        "UPDATE case_content SET review_confirmed=0 WHERE content_item_id=?",
+        (invalid,),
+    )
+    db.commit()
+
+    result = publish_due_content(now=due)
+
+    assert result.published_ids == (valid,)
+    assert result.failures == ((invalid, "validation_failed"),)
+    assert (_row(db, invalid)["status"], _row(db, invalid)["publish_at"]) == (
+        "draft", None,
+    )
+    details = db.execute(
+        "SELECT details_json FROM content_audit_events "
+        "WHERE content_item_id=? AND event_code='content_due_failed'",
+        (invalid,),
+    ).fetchone()[0]
+    assert details == '{"reason_code":"validation_failed"}'
+    assert "internal-delivery-record-001" not in details
 
 
 def test_due_failure_rolls_back_partial_archive_before_recording_safe_failure(db):

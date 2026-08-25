@@ -558,9 +558,9 @@ def _case_draft(*, metrics):
         seo_title="指标案例",
         seo_description="验证案例指标的类型、长度、数量和排序规则。",
         extension={
-            "verification_code": "verified-internal-record",
+            "verification_code": "authorized_anonymous",
             "is_anonymized": 1,
-            "basis_type": "private_authorization",
+            "basis_type": "internal_delivery_record",
             "private_basis_reference": "internal-delivery-record-001",
             "source_url": None,
             "source_url_sha256": None,
@@ -598,6 +598,57 @@ def test_case_extension_scalars_and_flags_require_exact_schema_types(
     with pytest.raises(ContentValidationError) as error:
         validate_content_draft(invalid)
 
+    assert error.value.code == "extension_invalid"
+
+
+@pytest.mark.parametrize(
+    ("verification_code", "is_anonymized", "basis_type"),
+    [
+        ("public_verified", 0, "client_authorization"),
+        ("authorized_anonymous", 1, "internal_delivery_record"),
+    ],
+)
+def test_case_extension_accepts_only_exact_editable_authenticity_and_basis_codes(
+    verification_code, is_anonymized, basis_type
+):
+    draft = _case_draft(metrics=(_metric(),))
+    validated = validate_content_draft(
+        replace(
+            draft,
+            extension={
+                **dict(draft.extension),
+                "verification_code": verification_code,
+                "is_anonymized": is_anonymized,
+                "basis_type": basis_type,
+            },
+        )
+    )
+
+    assert validated.extension["verification_code"] == verification_code
+    assert validated.extension["basis_type"] == basis_type
+
+
+@pytest.mark.parametrize(
+    "extension_change",
+    [
+        {"verification_code": "public-verified"},
+        {"verification_code": True},
+        {"basis_type": "private_authorization"},
+        {"basis_type": "internal-delivery-record"},
+        {"basis_type": True},
+    ],
+)
+def test_case_extension_rejects_legacy_approximate_and_non_string_codes(
+    extension_change
+):
+    draft = _case_draft(metrics=(_metric(),))
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(
+            replace(
+                draft,
+                extension={**dict(draft.extension), **extension_change},
+            )
+        )
     assert error.value.code == "extension_invalid"
 
 
