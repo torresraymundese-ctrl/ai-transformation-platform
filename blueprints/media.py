@@ -33,7 +33,7 @@ def _send_public(asset, *, attachment):
     )
     response.set_etag(asset.sha256, weak=False)
     response.cache_control.clear()
-    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.make_conditional(request)
     return response

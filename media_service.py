@@ -11,6 +11,8 @@ import uuid
 from flask import current_app, has_app_context
 
 from content_clock import format_shanghai, shanghai_now
+from content_contracts import ContentContractError
+from content_validation import ContentValidationError
 from media_validation import (
     ATTACHMENT_MIMES,
     IMAGE_MIMES,
@@ -19,6 +21,7 @@ from media_validation import (
     validate_media_file,
 )
 import models
+import publishing_repository
 
 
 DEFAULT_MEDIA_CONFIG = {
@@ -138,40 +141,66 @@ def list_media_assets():
 
 def get_published_media_asset(asset_id, *, kind, now=None):
     """Return a ready asset only when a current publication references it."""
-    current_clause = "ci.status='published' AND (ci.publish_at IS NULL OR ci.publish_at<=?)"
     if kind == "image":
         allowed = IMAGE_MIMES
-        reference = (
-            "EXISTS (SELECT 1 FROM content_items ci "
-            f"WHERE {current_clause} AND ci.share_image_media_id=ma.id) OR "
-            "EXISTS (SELECT 1 FROM content_blocks cb JOIN content_items ci "
-            f"ON ci.id=cb.content_item_id WHERE {current_clause} "
-            "AND cb.block_type='image_text' AND cb.media_asset_id=ma.id)"
+        reference_clause = (
+            "ci.share_image_media_id=? OR EXISTS ("
+            "SELECT 1 FROM content_blocks cb WHERE cb.content_item_id=ci.id "
+            "AND cb.block_type='image_text' AND cb.media_asset_id=?)"
         )
     elif kind == "download":
         allowed = ATTACHMENT_MIMES
-        reference = (
-            "EXISTS (SELECT 1 FROM content_blocks cb JOIN content_items ci "
-            f"ON ci.id=cb.content_item_id WHERE {current_clause} "
-            "AND cb.block_type='download' AND cb.media_asset_id=ma.id) OR "
-            "EXISTS (SELECT 1 FROM resource_content rc JOIN content_items ci "
-            f"ON ci.id=rc.content_item_id WHERE {current_clause} "
-            "AND rc.attachment_media_id=ma.id)"
+        reference_clause = (
+            "EXISTS (SELECT 1 FROM content_blocks cb WHERE cb.content_item_id=ci.id "
+            "AND cb.block_type='download' AND cb.media_asset_id=?) OR EXISTS ("
+            "SELECT 1 FROM resource_content rc WHERE rc.content_item_id=ci.id "
+            "AND rc.attachment_media_id=?)"
         )
     else:
         raise ValueError("unknown public media kind")
     placeholders = ",".join("?" for _ in allowed)
-    timestamp = format_shanghai(shanghai_now() if now is None else now)
+    instant = shanghai_now() if now is None else now
+    timestamp = format_shanghai(instant)
     connection = models.get_db()
     try:
-        row = connection.execute(
-            f"SELECT ma.* FROM media_assets ma "
-            f"WHERE ma.id=? AND ma.status='ready' "
-            f"AND ma.detected_mime IN ({placeholders}) AND ({reference})",
-            (asset_id, *sorted(allowed), timestamp, timestamp),
+        connection.execute("BEGIN")
+        asset_row = connection.execute(
+            f"SELECT * FROM media_assets WHERE id=? AND status='ready' "
+            f"AND detected_mime IN ({placeholders})",
+            (asset_id, *sorted(allowed)),
         ).fetchone()
-        return _asset(row)
+        if asset_row is None:
+            return None
+        references = connection.execute(
+            "SELECT ci.id,ci.entry_type FROM content_items ci "
+            "WHERE ci.status='published' AND (ci.publish_at IS NULL OR ci.publish_at<=?) "
+            f"AND ({reference_clause}) ORDER BY ci.id",
+            (timestamp, asset_id, asset_id),
+        ).fetchall()
+        for reference in references:
+            try:
+                if reference["entry_type"] == "resource":
+                    publishing_repository.validate_resource_public_completeness(
+                        connection, reference["id"], instant
+                    )
+                elif reference["entry_type"] == "announcement":
+                    draft = publishing_repository.validate_announcement_public_completeness(
+                        connection, reference["id"], instant
+                    )
+                    if not (
+                        draft.extension["valid_from"]
+                        <= timestamp
+                        <= draft.extension["valid_until"]
+                    ):
+                        continue
+                else:
+                    return _asset(asset_row)
+            except (ContentContractError, ContentValidationError):
+                continue
+            return _asset(asset_row)
+        return None
     finally:
+        connection.rollback()
         connection.close()
 
 

@@ -2,18 +2,22 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 import hashlib
 import io
+import json
+import sqlite3
 
 from bs4 import BeautifulSoup
 from pypdf import PdfWriter
 import pytest
 
 import models
+import blueprints.public_catalog as public_catalog_blueprint
 from content_clock import SHANGHAI
 from content_contracts import ContentBlock, ContentDraft, ContentRelation
 from content_validation import ContentValidationError, validate_content_draft
 from pagination import PageRequest
 import publishing_repository
 from publishing_service import (
+    archive_content,
     copy_revision,
     create_content_draft,
     publish_content,
@@ -254,6 +258,101 @@ def _announcement_draft(slug):
         },
         blocks=(ContentBlock("rich_text", "正文", "<p>公开公告</p>", {}, None, 0),),
     )
+
+
+def _publish_related_resource(db, slug, *, title, sourced=False):
+    if sourced:
+        source_url = f"https://example.com/{slug}"
+        source_hash = hashlib.sha256(source_url.encode()).hexdigest()
+        draft = replace(
+            _resource_draft(slug),
+            title=title,
+            seo_title=title,
+            extension={
+                **dict(_resource_draft(slug).extension),
+                "is_original": 0,
+                "source_name": "公开来源",
+                "source_url": source_url,
+                "source_url_sha256": source_hash,
+                "original_published_at": "2026-08-18 09:00:00",
+                "copyright_notice": "原文版权归公开来源所有。",
+            },
+        )
+        published_at = datetime(2026, 8, 18, 10, 0, 0, tzinfo=SHANGHAI)
+    else:
+        draft = replace(_resource_draft(slug), title=title, seo_title=title)
+        published_at = NOW
+        source_hash = None
+    content_id = create_content_draft(
+        draft, actor="test-admin", now=published_at
+    )
+    if sourced:
+        db.execute(
+            "UPDATE resource_content SET source_check_code='https_ok',"
+            "source_checked_at='2026-08-18 10:00:00',"
+            "source_check_expires_at='2099-01-01 00:00:00',"
+            "source_check_url_sha256=? WHERE content_item_id=?",
+            (source_hash, content_id),
+        )
+        db.commit()
+    publish_content(content_id, 1, actor="test-admin", now=published_at)
+    return db.execute(
+        "SELECT id,content_group_id,slug,title,lock_version FROM content_items WHERE id=?",
+        (content_id,),
+    ).fetchone()
+
+
+def _content_owner_row(db, owner_kind):
+    config = {
+        "service": ("services", "service_id", "foundation_workshop"),
+        "scenario": ("scenarios", "scenario_id", "mfg_knowledge_assistant"),
+        "industry": ("industries", "industry_id", "manufacturing"),
+    }
+    table, identity, code = config[owner_kind]
+    return db.execute(
+        "SELECT ci.* FROM content_items ci JOIN content_groups g "
+        f"ON g.id=ci.content_group_id JOIN {table} core ON core.id=g.{identity} "
+        "WHERE ci.entry_type=? AND ci.status='draft' AND core.code=?",
+        (owner_kind, code),
+    ).fetchone()
+
+
+def _publish_owner_with_resources(db, owner_kind, resources):
+    if owner_kind == "industry":
+        scenario = _content_owner_row(db, "scenario")
+        publish_content(
+            scenario["id"],
+            scenario["lock_version"],
+            actor="test-admin",
+            now=NOW,
+        )
+    owner = _content_owner_row(db, owner_kind)
+    draft = publishing_repository.load_content_draft(db, owner["id"])
+    existing = tuple(
+        relation
+        for relation in draft.relations
+        if relation.relation_type != f"{owner_kind}_resource"
+    )
+    relations = existing + tuple(
+        ContentRelation(f"{owner_kind}_resource", resource["content_group_id"])
+        for resource in resources
+    )
+    lock_version = save_content_draft(
+        owner["id"],
+        owner["lock_version"],
+        replace(draft, relations=relations),
+        actor="test-admin",
+        now=NOW,
+    )
+    publish_content(
+        owner["id"], lock_version, actor="test-admin", now=NOW
+    )
+    path = {
+        "service": f"/service-packages/{owner['slug']}",
+        "scenario": f"/scenarios/{owner['slug']}",
+        "industry": f"/industries/{owner['slug']}",
+    }[owner_kind]
+    return path
 
 
 def test_v2_routes_have_single_owners_and_remove_legacy_admin_writers(
@@ -1059,6 +1158,139 @@ def test_announcement_rejects_missing_or_invalid_interval_and_unsafe_cta(
     ).fetchone()[0] == before
 
 
+def _exact_url(prefix, length):
+    assert len(prefix) <= length
+    return prefix + "a" * (length - len(prefix))
+
+
+@pytest.mark.parametrize(
+    ("kind", "length", "expected_status"),
+    (
+        ("source", 2048, 302),
+        ("source", 2049, 400),
+        ("announcement_cta", 2048, 302),
+        ("announcement_cta", 2049, 400),
+        ("block_cta", 1900, 302),
+        ("block_cta", 2049, 400),
+    ),
+)
+def test_admin_posts_enforce_2048_for_every_public_url(
+    admin_client, db, kind, length, expected_status
+):
+    marker = f"{kind.replace('_', '-')}-{length}"
+    if kind == "source":
+        form = _resource_form(
+            slug=f"admin-url-{marker}",
+            is_original="0",
+            source_name="公开来源",
+            source_url=_exact_url("https://example.com/", length),
+        )
+        path = "/admin/resources/new"
+    elif kind == "announcement_cta":
+        form = _announcement_form(
+            slug=f"admin-url-{marker}",
+            cta_url=_exact_url("/", length),
+        )
+        path = "/admin/announcements/new"
+    else:
+        form = _resource_form(
+            slug=f"admin-url-{marker}",
+            **{
+                "blocks-0-type": "cta",
+                "blocks-0-title": "下一步",
+                "blocks-0-body": "",
+                "blocks-0-cta_label": "继续",
+                "blocks-0-cta_url": _exact_url("https://example.com/", length),
+                "blocks-0-cta_style": "primary",
+            },
+        )
+        path = "/admin/resources/new"
+
+    response = admin_client.post(path, data=form)
+
+    assert response.status_code == expected_status
+    row = db.execute(
+        "SELECT status FROM content_items WHERE slug=?", (f"admin-url-{marker}",)
+    ).fetchone()
+    assert (row is not None) is (expected_status == 302)
+
+
+@pytest.mark.parametrize("kind", ("source", "announcement_cta", "block_cta"))
+def test_legacy_published_oversized_urls_fail_closed(client, admin_client, db, kind):
+    oversized = _exact_url("https://example.com/", 2049)
+    if kind == "announcement_cta":
+        item = _create_announcement(
+            admin_client,
+            db,
+            action="save",
+            slug="legacy-oversized-announcement-cta",
+            cta_url="/assessment",
+        )
+        db.execute(
+            "UPDATE announcement_content SET cta_url=? WHERE content_item_id=?",
+            (oversized, item["id"]),
+        )
+        path = "/announcements/legacy-oversized-announcement-cta"
+    elif kind == "source":
+        item = _create_resource(
+            admin_client,
+            db,
+            action="save",
+            slug="legacy-oversized-source-url",
+            is_original="0",
+            source_name="公开来源",
+            source_url="https://example.com/short",
+        )
+        source_hash = hashlib.sha256(oversized.encode()).hexdigest()
+        db.execute(
+            "UPDATE resource_content SET source_url=?,source_url_sha256=?,"
+            "source_check_code='https_ok',source_checked_at='2026-08-25 10:00:00',"
+            "source_check_expires_at='2026-09-01 10:00:00',"
+            "source_check_url_sha256=? WHERE content_item_id=?",
+            (oversized, source_hash, source_hash, item["id"]),
+        )
+        path = "/resources/legacy-oversized-source-url"
+    else:
+        item = _create_resource(
+            admin_client,
+            db,
+            action="save",
+            slug="legacy-oversized-block-cta",
+            **{
+                "blocks-0-type": "cta",
+                "blocks-0-title": "下一步",
+                "blocks-0-body": "",
+                "blocks-0-cta_label": "继续",
+                "blocks-0-cta_url": "/assessment",
+                "blocks-0-cta_style": "primary",
+            },
+        )
+        db.execute("PRAGMA ignore_check_constraints=ON")
+        db.execute(
+            "UPDATE content_blocks SET settings_json=? WHERE content_item_id=?",
+            (
+                json.dumps(
+                    {"label": "继续", "url": oversized, "style": "primary"},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                item["id"],
+            ),
+        )
+        db.execute("PRAGMA ignore_check_constraints=OFF")
+        path = "/resources/legacy-oversized-block-cta"
+    db.execute(
+        "UPDATE content_items SET status='published',published_at='2026-08-25 10:00:00' "
+        "WHERE id=?",
+        (item["id"],),
+    )
+    db.commit()
+
+    response = client.get(path)
+
+    assert response.status_code == 404
+
+
 def test_public_read_models_are_snapshot_bounded_and_only_return_current_content(
     admin_client, db
 ):
@@ -1388,6 +1620,93 @@ def test_related_resource_target_must_be_public_complete_not_status_only(db):
     ).fetchone()[0] == "draft"
 
 
+@pytest.mark.parametrize("owner_kind", ("service", "scenario", "industry"))
+def test_formally_published_owner_resources_render_ordered_navigable_links(
+    client, db, owner_kind
+):
+    first = _publish_related_resource(
+        db,
+        f"{owner_kind}-ordered-resource-first",
+        title=f"{owner_kind} 资源第一项",
+    )
+    second = _publish_related_resource(
+        db,
+        f"{owner_kind}-ordered-resource-second",
+        title=f"{owner_kind} 资源第二项",
+    )
+    path = _publish_owner_with_resources(db, owner_kind, (second, first))
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    document = BeautifulSoup(response.data, "html.parser")
+    links = document.select('[data-related-kind="resource"] a')
+    assert [link.get_text(strip=True) for link in links] == [
+        second["title"], first["title"]
+    ]
+    assert [link["href"] for link in links] == [
+        f"/resources/{second['slug']}", f"/resources/{first['slug']}"
+    ]
+
+
+@pytest.mark.parametrize("owner_kind", ("service", "scenario", "industry"))
+@pytest.mark.parametrize("mutation", ("archived", "stale", "corrupt"))
+def test_owner_resource_links_omit_targets_that_lose_public_completeness(
+    client, db, monkeypatch, owner_kind, mutation
+):
+    target = _publish_related_resource(
+        db,
+        f"{owner_kind}-{mutation}-resource",
+        title=f"MUST-HIDE-{owner_kind}-{mutation}",
+        sourced=mutation == "stale",
+    )
+    path = _publish_owner_with_resources(db, owner_kind, (target,))
+    exact = NOW
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: exact
+    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: exact)
+    before = client.get(path)
+    resource_path = f"/resources/{target['slug']}"
+    assert before.status_code == 200
+    assert client.get(resource_path).status_code == 200
+    assert BeautifulSoup(before.data, "html.parser").select_one(
+        f'a[href="{resource_path}"]'
+    ) is not None
+
+    if mutation == "archived":
+        archive_content(
+            target["id"], target["lock_version"], actor="test-admin", now=NOW
+        )
+        current = exact
+    elif mutation == "stale":
+        current = exact + timedelta(seconds=1)
+    else:
+        replacement_id = copy_revision(target["id"], actor="test-admin", now=NOW)
+        archive_content(
+            target["id"], target["lock_version"], actor="test-admin", now=NOW
+        )
+        db.execute(
+            "UPDATE resource_content SET copyright_notice=? WHERE content_item_id=?",
+            (sqlite3.Binary(b"z" * 16), replacement_id),
+        )
+        db.execute(
+            "UPDATE content_items SET status='published',published_at='2026-08-25 10:00:00' "
+            "WHERE id=?",
+            (replacement_id,),
+        )
+        db.commit()
+        current = exact
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: current
+    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: current)
+
+    after = client.get(path)
+
+    assert after.status_code == 200
+    assert client.get(resource_path).status_code == 404
+    document = BeautifulSoup(after.data, "html.parser")
+    assert document.select('[data-related-kind="resource"]') == []
+    assert target["title"] not in document.get_text(" ", strip=True)
+
+
 def test_due_job_isolates_malformed_resource_from_valid_announcement(db):
     bad_id = create_content_draft(
         _resource_draft("due-malformed-resource"), actor="test-admin", now=NOW
@@ -1417,6 +1736,80 @@ def test_due_job_isolates_malformed_resource_from_valid_announcement(db):
     }
     assert states[bad_id] == ("draft", None)
     assert states[good_id][0] == "published"
+
+
+def test_direct_resource_replacement_converts_persisted_blob_to_stable_validation(
+    db,
+):
+    old_id = create_content_draft(
+        _resource_draft("blob-direct-resource"), actor="test-admin", now=NOW
+    )
+    publish_content(old_id, 1, actor="test-admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="test-admin", now=NOW)
+    db.execute(
+        "UPDATE resource_content SET copyright_notice=? WHERE content_item_id=?",
+        (sqlite3.Binary(b"x" * 16), replacement_id),
+    )
+    db.commit()
+    before_success = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_published'"
+    ).fetchone()[0]
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(replacement_id, 1, actor="test-admin", now=NOW)
+
+    assert error.value.code == "extension_invalid"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (old_id,)
+    ).fetchone()[0] == "published"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (replacement_id,)
+    ).fetchone()[0] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE event_code='content_published'"
+    ).fetchone()[0] == before_success
+
+
+def test_due_blob_resource_isolated_and_later_announcement_publishes(db):
+    old_id = create_content_draft(
+        _resource_draft("blob-due-resource"), actor="test-admin", now=NOW
+    )
+    publish_content(old_id, 1, actor="test-admin", now=NOW)
+    replacement_id = copy_revision(old_id, actor="test-admin", now=NOW)
+    announcement_id = create_content_draft(
+        _announcement_draft("after-blob-due-resource"), actor="test-admin", now=NOW
+    )
+    due = NOW + timedelta(hours=1)
+    schedule_content(replacement_id, 1, due, actor="test-admin", now=NOW)
+    schedule_content(announcement_id, 1, due, actor="test-admin", now=NOW)
+    db.execute(
+        "UPDATE resource_content SET copyright_notice=? WHERE content_item_id=?",
+        (sqlite3.Binary(b"y" * 16), replacement_id),
+    )
+    db.commit()
+
+    result = publish_due_content(now=due, actor="task9-fix1-due")
+
+    assert result.published_ids == (announcement_id,)
+    assert result.failures == ((replacement_id, "validation_failed"),)
+    states = {
+        row["id"]: (row["status"], row["publish_at"], row["lock_version"])
+        for row in db.execute(
+            "SELECT id,status,publish_at,lock_version FROM content_items "
+            "WHERE id IN (?,?,?)",
+            (old_id, replacement_id, announcement_id),
+        )
+    }
+    assert states[old_id][0] == "published"
+    assert states[replacement_id] == ("draft", None, 3)
+    assert states[announcement_id][0] == "published"
+    details = db.execute(
+        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'",
+        (replacement_id,),
+    ).fetchone()[0]
+    assert details == '{"reason_code":"validation_failed"}'
+    assert "blob" not in details
 
 
 def test_domain_validation_rejects_whitespace_copyright_and_null_announcement_interval():

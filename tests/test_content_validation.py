@@ -449,6 +449,92 @@ def test_resource_source_url_rejects_control_characters_before_persistence():
     assert error.value.code == "source_url_invalid"
 
 
+def _url_with_exact_length(prefix, length, character="a"):
+    assert len(prefix) <= length
+    return prefix + character * (length - len(prefix))
+
+
+@pytest.mark.parametrize(
+    ("field", "url", "expected_code"),
+    (
+        ("source", _url_with_exact_length("https://example.com/", 2049), "source_url_invalid"),
+        ("announcement", _url_with_exact_length("/", 2049), "extension_invalid"),
+        ("block", _url_with_exact_length("https://example.com/", 2049), "block_settings_invalid"),
+        ("source", "https://example.com/" + "路" * 680, "source_url_invalid"),
+        ("announcement", "https://example.com/" + "路" * 680, "extension_invalid"),
+        ("block", "https://example.com/" + "路" * 680, "block_settings_invalid"),
+    ),
+)
+def test_public_urls_reject_raw_or_normalized_values_over_2048(
+    field, url, expected_code
+):
+    if field == "source":
+        draft = _external_resource(source_url=url)
+    elif field == "announcement":
+        draft = _draft(
+            extension={**dict(_draft().extension), "cta_url": url}
+        )
+    else:
+        draft = _draft(
+            blocks=(
+                ContentBlock(
+                    "cta",
+                    settings={"label": "安全链接", "url": url, "style": "primary"},
+                ),
+            )
+        )
+
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(draft)
+
+    assert error.value.code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("field", "url"),
+    (
+        ("source", _url_with_exact_length("https://example.com/", 2048)),
+        ("announcement", _url_with_exact_length("/", 2048)),
+    ),
+)
+def test_public_urls_accept_exactly_2048_characters(field, url):
+    if field == "source":
+        draft = _external_resource(source_url=url)
+    elif field == "announcement":
+        draft = _draft(
+            extension={**dict(_draft().extension), "cta_url": url}
+        )
+    else:
+        draft = _draft(
+            blocks=(
+                ContentBlock(
+                    "cta",
+                    settings={"label": "安全链接", "url": url, "style": "primary"},
+                ),
+            )
+        )
+
+    validated = validate_content_draft(draft)
+
+    if field == "source":
+        assert len(validated.extension["source_url"]) == 2048
+    elif field == "announcement":
+        assert len(validated.extension["cta_url"]) == 2048
+    else:
+        assert len(validated.blocks[0].settings["url"]) == 2048
+
+
+def test_dangerous_source_url_error_precedes_other_resource_completeness_errors():
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(
+            _external_resource(
+                source_url="javascript:alert(1)", copyright_notice="   "
+            )
+        )
+
+    assert error.value.code == "source_url_invalid"
+
+
 @pytest.mark.parametrize(
     "url",
     [

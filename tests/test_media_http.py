@@ -1,11 +1,13 @@
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import render_template_string
 from PIL import Image
@@ -16,7 +18,10 @@ from werkzeug.wrappers import Response
 
 import models
 import media_service
+import publishing_repository
 from content_clock import SHANGHAI
+from content_contracts import ContentBlock, ContentDraft
+from publishing_service import create_content_draft, publish_content
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -101,7 +106,7 @@ def _latest_asset():
 
 
 def _publish_reference(db, *, asset_id, kind, publish_at=None):
-    slug = f"media-{kind}-{asset_id}"
+    slug = f"media-{kind.replace('_', '-')}-{asset_id}"
     group_id = db.execute(
         "INSERT INTO content_groups (entry_type,canonical_slug,created_at,updated_at) "
         "VALUES ('announcement',?,'2026-08-24 10:00:00','2026-08-24 10:00:00')",
@@ -115,12 +120,29 @@ def _publish_reference(db, *, asset_id, kind, publish_at=None):
         "'2026-08-24 10:00:00','2026-08-24 10:00:00')",
         (group_id, slug, asset_id if kind == "share" else None),
     ).lastrowid
-    db.execute("INSERT INTO announcement_content (content_item_id) VALUES (?)", (content_id,))
+    db.execute(
+        "INSERT INTO announcement_content (content_item_id,valid_from,valid_until) "
+        "VALUES (?,'2000-01-01 00:00:00','2099-01-01 00:00:00')",
+        (content_id,),
+    )
     if kind in {"image_block", "download"}:
+        settings = (
+            {"alignment": "left", "alt_text": "公开图片"}
+            if kind == "image_block"
+            else {"label": "下载附件"}
+        )
         db.execute(
             "INSERT INTO content_blocks "
-            "(content_item_id,block_type,media_asset_id,sort_order) VALUES (?,?,?,0)",
-            (content_id, "image_text" if kind == "image_block" else "download", asset_id),
+            "(content_item_id,block_type,title,body_html,settings_json,media_asset_id,sort_order) "
+            "VALUES (?,?,?,?,?,?,0)",
+            (
+                content_id,
+                "image_text" if kind == "image_block" else "download",
+                "公开媒体",
+                "<p>公开媒体说明</p>" if kind == "image_block" else None,
+                json.dumps(settings, ensure_ascii=False, separators=(",", ":")),
+                asset_id,
+            ),
         )
     db.execute(
         "UPDATE content_items SET status='published',published_at='2026-08-24 10:00:00',"
@@ -128,6 +150,11 @@ def _publish_reference(db, *, asset_id, kind, publish_at=None):
         (publish_at, content_id),
     )
     db.commit()
+    publishing_repository.validate_announcement_public_completeness(
+        db,
+        content_id,
+        datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI),
+    )
 
 
 def _publish_resource_attachment(db, asset_id, *, publish_at=None):
@@ -147,8 +174,9 @@ def _publish_resource_attachment(db, asset_id, *, publish_at=None):
     ).lastrowid
     db.execute(
         "INSERT INTO resource_content "
-        "(content_item_id,resource_type,is_original,attachment_media_id) "
-        "VALUES (?,'report',1,?)",
+        "(content_item_id,resource_type,is_original,original_published_at,"
+        "copyright_notice,attachment_media_id) "
+        "VALUES (?,'report',1,'2026-08-20 09:00:00','本站原创',?)",
         (content_id, asset_id),
     )
     db.execute(
@@ -157,6 +185,82 @@ def _publish_resource_attachment(db, asset_id, *, publish_at=None):
         (publish_at, content_id),
     )
     db.commit()
+
+
+def _publish_announcement_download(db, asset_id, *, slug, valid_from, valid_until):
+    content_id = create_content_draft(
+        ContentDraft(
+            entry_type="announcement",
+            slug=slug,
+            title=f"公告 {slug}",
+            summary="公开媒体有效期边界公告。",
+            seo_title=f"公告 {slug}",
+            seo_description="验证公告媒体只在当前有效期内公开。",
+            extension={
+                "valid_from": valid_from,
+                "valid_until": valid_until,
+                "cta_url": None,
+            },
+            blocks=(
+                ContentBlock(
+                    "download",
+                    title="公告附件",
+                    settings={"label": "下载公告附件"},
+                    media_asset_id=asset_id,
+                ),
+            ),
+        ),
+        actor="media-test",
+        now=datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI),
+    )
+    publish_content(
+        content_id,
+        1,
+        actor="media-test",
+        now=datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI),
+    )
+    return content_id
+
+
+def _publish_sourced_resource_attachment(db, asset_id, *, slug):
+    source_url = f"https://example.com/{slug}"
+    source_hash = hashlib.sha256(source_url.encode()).hexdigest()
+    published_at = datetime(2026, 8, 18, 10, 0, 0, tzinfo=SHANGHAI)
+    content_id = create_content_draft(
+        ContentDraft(
+            entry_type="resource",
+            slug=slug,
+            title=f"来源资源 {slug}",
+            summary="公开媒体来源新鲜度边界资源。",
+            seo_title=f"来源资源 {slug}",
+            seo_description="验证资源媒体随来源检查新鲜度撤销公开资格。",
+            extension={
+                "resource_type": "report",
+                "is_original": 0,
+                "source_name": "公开来源",
+                "source_url": source_url,
+                "source_url_sha256": source_hash,
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+                "original_published_at": "2026-08-18 09:00:00",
+                "copyright_notice": "原文版权归公开来源所有。",
+                "attachment_media_id": asset_id,
+            },
+        ),
+        actor="media-test",
+        now=published_at,
+    )
+    db.execute(
+        "UPDATE resource_content SET source_check_code='https_ok',source_checked_at=?,"
+        "source_check_expires_at='2099-01-01 00:00:00',source_check_url_sha256=? "
+        "WHERE content_item_id=?",
+        ("2026-08-18 10:00:00", source_hash, content_id),
+    )
+    db.commit()
+    publish_content(content_id, 1, actor="media-test", now=published_at)
+    return content_id
 
 
 def test_media_upload_requires_authentication_and_csrf(client, media_root):
@@ -299,7 +403,7 @@ def test_public_inline_image_requires_current_published_reference_and_safe_heade
     assert published.mimetype == "image/png"
     assert published.headers["Content-Disposition"].startswith("inline")
     assert published.headers["ETag"] == f'"{asset["sha256"]}"'
-    assert published.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert published.headers["Cache-Control"] == "public, max-age=0, must-revalidate"
     assert published.headers["X-Content-Type-Options"] == "nosniff"
 
 
@@ -329,7 +433,7 @@ def test_public_attachment_requires_published_download_reference_and_attachment_
     assert response.headers["Content-Disposition"].startswith("attachment;")
     assert "reviewed-report.pdf" in response.headers["Content-Disposition"]
     assert response.headers["ETag"] == f'"{asset["sha256"]}"'
-    assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    assert response.headers["Cache-Control"] == "public, max-age=0, must-revalidate"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert client.get(f"/media/{asset['id']}/image").status_code == 404
 
@@ -348,6 +452,153 @@ def test_published_resource_attachment_uses_only_the_download_route(
     assert download.data == data
     assert download.headers["Content-Disposition"].startswith("attachment;")
     assert client.get(f"/media/{asset['id']}/image").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("instant", "expected_status"),
+    (
+        (datetime(2026, 8, 25, 9, 59, 59, tzinfo=SHANGHAI), 404),
+        (datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI), 200),
+        (datetime(2026, 8, 25, 11, 0, 0, tzinfo=SHANGHAI), 200),
+        (datetime(2026, 8, 25, 11, 0, 1, tzinfo=SHANGHAI), 404),
+    ),
+)
+def test_public_announcement_media_follows_exact_current_interval(
+    client, admin_client, db, monkeypatch, instant, expected_status
+):
+    assert _upload(
+        admin_client,
+        f"announcement-{instant:%H%M%S}.pdf",
+        "application/pdf",
+        _pdf_bytes(),
+    ).status_code == 302
+    asset = _latest_asset()
+    _publish_announcement_download(
+        db,
+        asset["id"],
+        slug=f"announcement-media-{instant:%H%M%S}",
+        valid_from="2026-08-25 10:00:00",
+        valid_until="2026-08-25 11:00:00",
+    )
+    monkeypatch.setattr(media_service, "shanghai_now", lambda: instant)
+
+    response = client.get(f"/media/{asset['id']}/download")
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    ("instant", "expected_status"),
+    (
+        (datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI), 200),
+        (datetime(2026, 8, 25, 10, 0, 1, tzinfo=SHANGHAI), 404),
+    ),
+)
+def test_public_resource_media_follows_exact_seven_day_source_freshness(
+    client, admin_client, db, monkeypatch, instant, expected_status
+):
+    assert _upload(
+        admin_client,
+        f"source-{instant:%H%M%S}.pdf",
+        "application/pdf",
+        _pdf_bytes(),
+    ).status_code == 302
+    asset = _latest_asset()
+    _publish_sourced_resource_attachment(
+        db, asset["id"], slug=f"source-media-{instant:%H%M%S}"
+    )
+    monkeypatch.setattr(media_service, "shanghai_now", lambda: instant)
+
+    response = client.get(f"/media/{asset['id']}/download")
+
+    assert response.status_code == expected_status
+
+
+def test_public_media_rejects_malformed_legacy_reference(
+    client, admin_client, db, monkeypatch
+):
+    assert _upload(
+        admin_client, "malformed-reference.pdf", "application/pdf", _pdf_bytes()
+    ).status_code == 302
+    asset = _latest_asset()
+    content_id = create_content_draft(
+        ContentDraft(
+            entry_type="resource",
+            slug="malformed-media-resource",
+            title="不得授权的损坏资源",
+            summary="持久化损坏的资源不得授权附件。",
+            seo_title="不得授权的损坏资源",
+            seo_description="验证旧数据损坏时媒体端点关闭。",
+            extension={
+                "resource_type": "report",
+                "is_original": 1,
+                "source_name": None,
+                "source_url": None,
+                "source_url_sha256": None,
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+                "original_published_at": "2026-08-20 09:00:00",
+                "copyright_notice": "本站原创",
+                "attachment_media_id": asset["id"],
+            },
+        ),
+        actor="media-test",
+        now=datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI),
+    )
+    db.execute(
+        "UPDATE resource_content SET copyright_notice=? WHERE content_item_id=?",
+        (sqlite3.Binary(b"x" * 16), content_id),
+    )
+    db.execute(
+        "UPDATE content_items SET status='published',published_at='2026-08-24 10:00:00' "
+        "WHERE id=?",
+        (content_id,),
+    )
+    db.commit()
+    monkeypatch.setattr(
+        media_service,
+        "shanghai_now",
+        lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI),
+    )
+
+    response = client.get(f"/media/{asset['id']}/download")
+
+    assert response.status_code == 404
+
+
+def test_public_media_allows_a_healthy_shared_reference_when_another_is_expired(
+    client, admin_client, db, monkeypatch
+):
+    assert _upload(
+        admin_client, "shared-reference.pdf", "application/pdf", _pdf_bytes()
+    ).status_code == 302
+    asset = _latest_asset()
+    _publish_announcement_download(
+        db,
+        asset["id"],
+        slug="expired-shared-media-reference",
+        valid_from="2026-08-24 08:00:00",
+        valid_until="2026-08-24 09:00:00",
+    )
+    _publish_announcement_download(
+        db,
+        asset["id"],
+        slug="healthy-shared-media-reference",
+        valid_from="2026-08-25 09:00:00",
+        valid_until="2026-08-25 11:00:00",
+    )
+    monkeypatch.setattr(
+        media_service,
+        "shanghai_now",
+        lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI),
+    )
+
+    response = client.get(f"/media/{asset['id']}/download")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "public, max-age=0, must-revalidate"
 
 
 @pytest.mark.parametrize("reference_kind", ("share", "image_block"))

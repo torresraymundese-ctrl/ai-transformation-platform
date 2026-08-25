@@ -27,7 +27,7 @@
   {% if service.scenarios or service.cases or service.resources %}<section data-service-section="related-content"><h2>关联内容</h2>
     {% if service.scenarios %}<h3>关联场景</h3><ul>{% for item in service.scenarios %}{% if item.title %}<li data-related-kind="scenario">{% if item.slug %}<a href="{{ url_for('public_catalog.scenario_detail', slug=item.slug) }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}</li>{% endif %}{% endfor %}</ul>{% endif %}
     {% if service.cases %}<h3>相关案例</h3><ul>{% for item in service.cases %}<li data-related-kind="case">{{ item.title }}</li>{% endfor %}</ul>{% endif %}
-    {% if service.resources %}<h3>相关资源</h3><ul>{% for item in service.resources %}<li data-related-kind="resource">{{ item.title }}</li>{% endfor %}</ul>{% endif %}
+    {% if service.resources %}<h3>相关资源</h3><ul>{% for item in service.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul>{% endif %}
   </section>{% else %}<section data-service-section="related-content" hidden aria-hidden="true"></section>{% endif %}
   <section data-service-section="pricing-disclaimer"><p>{{ service.public_disclaimer }}</p></section>
   <p><a class="btn btn-primary" data-service-cta="primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费 AI 就绪度评估</a> <a class="btn btn-outline" data-service-cta="secondary" href="/cases">查看客户案例</a></p>

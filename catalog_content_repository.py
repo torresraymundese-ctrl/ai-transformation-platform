@@ -300,7 +300,7 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
     ).fetchall()
     cards = []
     for row in rows:
-        scenario = _scenario_projection(db, row, False)
+        scenario = _scenario_projection(db, row, False, now)
         if scenario is None:
             continue
         cards.append(ScenarioCard(
@@ -320,6 +320,7 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
 def public_industries(now) -> tuple[Mapping[str, Any], ...]:
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         clause, arguments = _public_item_where(now)
         rows = db.execute(
             "SELECT ci.* "
@@ -333,6 +334,7 @@ def public_industries(now) -> tuple[Mapping[str, Any], ...]:
             if (industry := _industry_projection(db, row, False, now)) is not None
         )
     finally:
+        db.rollback()
         db.close()
 
 
@@ -517,7 +519,7 @@ def _published_scenario_identity(db, scenario_id, now):
     ).fetchone()
     if item is None:
         return None
-    return _scenario_projection(db, item, False)
+    return _scenario_projection(db, item, False, now)
 
 
 def _service_authority(db, service_id, now):
@@ -539,7 +541,6 @@ def _service_authority(db, service_id, now):
 def _service_related_items(db, content_id, now, kind):
     relation_table, owner_column, target_column = {
         "case": ("service_cases", "service_content_item_id", "case_content_group_id"),
-        "resource": ("service_resources", "service_content_item_id", "resource_content_group_id"),
     }[kind]
     clause, arguments = _public_item_where(now)
     rows = db.execute(
@@ -551,15 +552,42 @@ def _service_related_items(db, content_id, now, kind):
     ).fetchall()
     projected = []
     for row in rows:
-        if kind == "case":
-            try:
-                publishing_repository.validate_case_public_completeness(
-                    db, row["id"], now
-                )
-            except ContentValidationError:
-                continue
+        try:
+            publishing_repository.validate_case_public_completeness(
+                db, row["id"], now
+            )
+        except ContentValidationError:
+            continue
         projected.append(
             MappingProxyType({"title": row["title"], "slug": row["slug"]})
+        )
+    return tuple(projected)
+
+
+def _related_resources(db, content_id, now, owner_kind):
+    relation_table, owner_column = {
+        "service": ("service_resources", "service_content_item_id"),
+        "scenario": ("scenario_resources", "scenario_content_item_id"),
+        "industry": ("industry_resources", "industry_content_item_id"),
+    }[owner_kind]
+    clause, arguments = _public_item_where(now)
+    rows = db.execute(
+        "SELECT ci.id FROM " + relation_table + " relation "
+        "JOIN content_items ci ON ci.content_group_id=relation.resource_content_group_id "
+        f"WHERE relation.{owner_column}=? AND ci.entry_type='resource' AND {clause} "
+        "ORDER BY relation.sort_order,ci.id",
+        (content_id, *arguments),
+    ).fetchall()
+    projected = []
+    for row in rows:
+        try:
+            draft = publishing_repository.validate_resource_public_completeness(
+                db, row["id"], now
+            )
+        except (ContentValidationError, TypeError, ValueError):
+            continue
+        projected.append(
+            MappingProxyType({"title": draft.title, "slug": draft.slug})
         )
     return tuple(projected)
 
@@ -620,7 +648,7 @@ def _service_projection(db, item, redirect, now, authority: ServiceAuthority | N
             if scenario.title is not None and scenario.slug is not None
         ),
         "cases": _service_related_items(db, item["id"], now, "case"),
-        "resources": _service_related_items(db, item["id"], now, "resource"),
+        "resources": _related_resources(db, item["id"], now, "service"),
     })
 
 
@@ -662,7 +690,9 @@ def _public_risks(authority):
     return tuple(risks)
 
 
-def _scenario_projection(db, item, redirect, authority: ScenarioAuthority | None = None):
+def _scenario_projection(
+    db, item, redirect, now, authority: ScenarioAuthority | None = None
+):
     """Return a public scenario only when every required public section is real."""
     if not _valid_public_item_text(item):
         return None
@@ -747,6 +777,7 @@ def _scenario_projection(db, item, redirect, authority: ScenarioAuthority | None
         "risks": risks,
         "timeline": timeline,
         "budget": budget,
+        "resources": _related_resources(db, item["id"], now, "scenario"),
     })
 
 
@@ -800,34 +831,41 @@ def _industry_projection(db, item, redirect, now):
         "seo_title": item["seo_title"], "seo_description": item["seo_description"], "blocks": blocks,
         "pains": pains, "departments": departments, "company_sizes": company_sizes,
         "scenarios": page.items, "services": services,
+        "resources": _related_resources(db, item["id"], now, "industry"),
     })
 
 
 def public_industry(slug: str, now) -> Mapping[str, Any] | None:
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         item, redirect = _resolution(db, "industry", slug, now)
         return _industry_projection(db, item, redirect, now) if item is not None else None
     finally:
+        db.rollback()
         db.close()
 
 
 def public_scenarios(filters: ScenarioFilters, page: PageRequest, now) -> Page[ScenarioCard]:
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         return _public_scenarios(db, filters, page, now)
     finally:
+        db.rollback()
         db.close()
 
 
 def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) -> Mapping[str, Any] | None:
     db = models.get_db()
     try:
+        db.execute("BEGIN")
         item, redirect = _resolution(db, "scenario", slug, now)
         if item is None:
             return None
-        return _scenario_projection(db, item, redirect, authority)
+        return _scenario_projection(db, item, redirect, now, authority)
     finally:
+        db.rollback()
         db.close()
 
 

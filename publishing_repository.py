@@ -10,7 +10,13 @@ import sqlite3
 from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import format_shanghai
 from content_json import ContentJsonError, decode_database_json
-from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
+from content_contracts import (
+    CaseMetric,
+    ContentBlock,
+    ContentContractError,
+    ContentDraft,
+    ContentRelation,
+)
 from content_validation import (
     CASE_BASIS_TYPES,
     CASE_VERIFICATION,
@@ -386,22 +392,25 @@ def load_content_draft(db, content_id):
             (content_id,),
         )
     )
-    return ContentDraft(
-        entry_type=item["entry_type"],
-        slug=item["slug"],
-        title=item["title"],
-        summary=item["summary"],
-        seo_title=item["seo_title"],
-        seo_description=item["seo_description"],
-        content_group_id=item["content_group_id"],
-        share_image_media_id=item["share_image_media_id"],
-        publish_at=item["publish_at"],
-        extension=extension,
-        blocks=blocks,
-        relations=tuple(relations),
-        maturity_codes=maturity,
-        metrics=metrics,
-    )
+    try:
+        return ContentDraft(
+            entry_type=item["entry_type"],
+            slug=item["slug"],
+            title=item["title"],
+            summary=item["summary"],
+            seo_title=item["seo_title"],
+            seo_description=item["seo_description"],
+            content_group_id=item["content_group_id"],
+            share_image_media_id=item["share_image_media_id"],
+            publish_at=item["publish_at"],
+            extension=extension,
+            blocks=blocks,
+            relations=tuple(relations),
+            maturity_codes=maturity,
+            metrics=metrics,
+        )
+    except ContentContractError as error:
+        raise ContentValidationError("extension_invalid") from error
 
 
 def _load_validated_publication_draft(db, content_id):

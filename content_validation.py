@@ -35,6 +35,7 @@ RELATION_OWNERS = {
     "service_resource": "service",
 }
 MAX_CASE_METRICS = 20
+MAX_PUBLIC_URL_LENGTH = 2048
 SETTINGS_KEYS = {
     "heading": frozenset({"level"}),
     "rich_text": frozenset(),
@@ -159,14 +160,25 @@ def _valid_timestamp(value):
 
 
 def _normalize_https_url(value):
+    if type(value) is not str or len(value) > MAX_PUBLIC_URL_LENGTH:
+        raise ContentValidationError("source_url_invalid")
     normalized, error = normalize_source_url(value)
-    if error or not normalized or urlsplit(normalized).scheme != "https":
+    if (
+        error
+        or not normalized
+        or len(normalized) > MAX_PUBLIC_URL_LENGTH
+        or urlsplit(normalized).scheme != "https"
+    ):
         raise ContentValidationError("source_url_invalid")
     return normalized
 
 
 def _safe_cta(value):
-    if not isinstance(value, str) or not value:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > MAX_PUBLIC_URL_LENGTH
+    ):
         return False
     if (
         "\\" in value
@@ -177,7 +189,7 @@ def _safe_cta(value):
     if value.startswith("/") and not value.startswith("//"):
         return True
     normalized, error = normalize_source_url(value)
-    if error or not normalized:
+    if error or not normalized or len(normalized) > MAX_PUBLIC_URL_LENGTH:
         return False
     return urlsplit(normalized).scheme == "https"
 
@@ -188,7 +200,12 @@ def _normalize_cta(value):
     if value.startswith("/"):
         return value
     normalized, error = normalize_source_url(value)
-    if error or not normalized or urlsplit(normalized).scheme != "https":
+    if (
+        error
+        or not normalized
+        or len(normalized) > MAX_PUBLIC_URL_LENGTH
+        or urlsplit(normalized).scheme != "https"
+    ):
         raise ContentValidationError("extension_invalid")
     return normalized
 
@@ -229,6 +246,13 @@ def _validate_block(block, index):
         raise ContentValidationError("block_settings_too_deep")
     if frozenset(settings) != SETTINGS_KEYS[block.block_type]:
         raise ContentValidationError("block_settings_invalid")
+    if block.block_type == "cta" and not (
+        is_exact_nonblank_text(settings["label"])
+        and type(settings["style"]) is str
+        and settings["style"] in {"primary", "secondary", "text"}
+        and _safe_cta(settings["url"])
+    ):
+        raise ContentValidationError("block_settings_invalid")
     if len(json.dumps(settings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 2_000:
         raise ContentValidationError("block_settings_too_large")
     if block.block_type == "heading" and (
@@ -254,13 +278,6 @@ def _validate_block(block, index):
         raise ContentValidationError("block_settings_invalid")
     if block.block_type == "download" and not (
         is_exact_nonblank_text(settings["label"])
-    ):
-        raise ContentValidationError("block_settings_invalid")
-    if block.block_type == "cta" and not (
-        is_exact_nonblank_text(settings["label"])
-        and type(settings["style"]) is str
-        and settings["style"] in {"primary", "secondary", "text"}
-        and _safe_cta(settings["url"])
     ):
         raise ContentValidationError("block_settings_invalid")
     if not _valid_id(block.media_asset_id):
