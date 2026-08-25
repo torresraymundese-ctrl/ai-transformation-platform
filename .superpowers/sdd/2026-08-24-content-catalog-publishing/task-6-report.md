@@ -1774,3 +1774,99 @@ production server, Nginx, or real database was used. The historical full
 suite remains **UNKNOWN**; the historical PyPI-network violation remains
 **CONFIRMED**; and the frozen `data_process_foundation` product-data
 limitation remains unchanged.
+
+## Fix1l — reject persisted blank block titles before publication side effects
+
+Fix1l began from clean tracked baseline
+`e19458825d507ed61895fb05ba2d0354da946cea`. It was limited to one statically
+verified P1 in the publication boundary. No Task 7 work, full suite, network
+access, dependency installation, production server, Nginx, real database,
+ledger update, or task-card update was performed.
+
+### Root cause and TDD evidence
+
+`load_content_draft` preserves a legacy persisted block title such as
+`'   '`, while `_validate_block` normalizes that optional title to `None`.
+`validate_for_publication` returned the normalized draft, but both immediate
+and scheduled publication ignored that return value and did not rewrite the
+children. The candidate could therefore become the healthy current revision's
+replacement even though the public `_public_block` boundary correctly rejects
+the still-persisted blank title and makes the new public page unavailable.
+
+Before production edits, three real SQLite/service/public-route regression
+chains were added and run with the assigned interpreter, process-scoped
+`PYTHONPATH` pointing at the checked-in offline `local-deps` overlay,
+`-p no:cacheprovider`, and unique basetemp
+`pytest-task6-fix1l-red-block-title-001`:
+
+```text
+tests/test_public_catalog.py::test_immediate_publish_rejects_persisted_blank_block_title_and_keeps_current_public
+tests/test_public_catalog.py::test_schedule_rejects_persisted_blank_block_title_without_state_or_audit
+tests/test_public_catalog.py::test_due_blank_block_title_failure_keeps_current_public_and_isolates_healthy_peer
+3 failed in 3.12s
+tool exit_code=1
+```
+
+The immediate and schedule chains both failed with `DID NOT RAISE
+ContentValidationError`. The due chain published both the malformed candidate
+and its healthy peer instead of isolating the malformed candidate as
+`validation_failed`. These were expected behavioral failures, not fixture or
+collection errors.
+
+The minimal implementation now loads the raw draft, validates it, and compares
+only each corresponding raw and validated block title. Any title changed by
+validation raises stable `ContentValidationError('block_title_invalid')`
+before media, relation, archive, publication, or audit side effects. It does
+not compare whole aggregates, write normalized children during publication,
+or broaden body/top-level trimming, ordering, or save behavior. Formal saves
+continue to persist a new blank optional title as `None`, while meaningful
+titles retain their original value.
+
+The same three tests then returned GREEN with unique basetemp
+`pytest-task6-fix1l-green-block-title-002`:
+
+```text
+3 passed in 1.93s
+tool exit_code=0
+```
+
+The chains prove that immediate publication keeps the healthy current revision
+published and publicly available, leaves the candidate draft and lock
+unchanged, and writes no `content_published` audit; scheduling leaves no
+`publish_at` or `content_scheduled` audit; and due publication reports exactly
+the malformed candidate as `validation_failed`, publishes the healthy peer,
+keeps the old public page at HTTP 200, writes exactly one `content_due_failed`,
+and writes no `content_published` for the malformed candidate.
+
+### Frozen responsibility and static verification
+
+After the focused GREEN, production code and tests were frozen. The required
+responsibility set was started exactly once, using the assigned interpreter,
+the process-scoped offline overlay, `-p no:cacheprovider`, and unique basetemp
+`pytest-task6-fix1l-responsibility-final-003`:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp '.superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-fix1l-responsibility-final-003'
+```
+
+```text
+583 passed in 245.40s (0:04:05)
+tool exit_code=0
+```
+
+`py_compile` over `publishing_repository.py` and
+`tests/test_public_catalog.py` exited 0. `git diff --check` exited 0. Direct-SQL
+guards over `blueprints/public_catalog.py` and `blueprints/admin/catalog.py`
+both returned no matches (`rg` exit 1, interpreted as PASS). The tracked status
+before this report append contained only the two expected frozen files.
+
+Fix1l changed only:
+
+- `publishing_repository.py`
+- `tests/test_public_catalog.py`
+- this report
+
+The historical full-suite outcome remains **UNKNOWN** and was not rerun. The
+historical PyPI-network violation remains **CONFIRMED**, and the frozen
+`data_process_foundation` product-data limitation remains unchanged.

@@ -585,6 +585,102 @@ def _assert_unpublished_revision(db, current_id, revision_id, *, lock_version=No
     ).fetchone()[0] == 0
 
 
+def _inject_blank_block_title(db, revision_id):
+    cursor = db.execute(
+        "UPDATE content_blocks SET title='   ' WHERE id=(SELECT id FROM content_blocks "
+        "WHERE content_item_id=? ORDER BY sort_order,id LIMIT 1)",
+        (revision_id,),
+    )
+    assert cursor.rowcount == 1
+    db.commit()
+
+
+def test_immediate_publish_rejects_persisted_blank_block_title_and_keeps_current_public(
+    client, db
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _inject_blank_block_title(db, revision_id)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(
+            revision_id, lock_version, actor="test-admin", now=NOW_DATETIME
+        )
+
+    assert error.value.code == "block_title_invalid"
+    _assert_unpublished_revision(
+        db, current["id"], revision_id, lock_version=lock_version
+    )
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+def test_schedule_rejects_persisted_blank_block_title_without_state_or_audit(
+    client, db
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    _inject_blank_block_title(db, revision_id)
+
+    with pytest.raises(ContentValidationError) as error:
+        schedule_content(
+            revision_id,
+            lock_version,
+            NOW_DATETIME + timedelta(hours=1),
+            actor="test-admin",
+            now=NOW_DATETIME,
+        )
+
+    assert error.value.code == "block_title_invalid"
+    _assert_unpublished_revision(
+        db, current["id"], revision_id, lock_version=lock_version
+    )
+    assert db.execute(
+        "SELECT publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_scheduled'", (revision_id,)
+    ).fetchone()[0] == 0
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
+def test_due_blank_block_title_failure_keeps_current_public_and_isolates_healthy_peer(
+    client, db
+):
+    current, revision_id, lock_version = _saved_scenario_revision(db)
+    due = NOW_DATETIME + timedelta(hours=1)
+    schedule_content(
+        revision_id, lock_version, due, actor="test-admin", now=NOW_DATETIME
+    )
+    _inject_blank_block_title(db, revision_id)
+    healthy = db.execute(
+        "SELECT ci.id FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id WHERE s.code='retail_ai_service' "
+        "AND ci.status='published'"
+    ).fetchone()
+    healthy_revision = copy_revision(
+        healthy["id"], actor="test-admin", now=NOW_DATETIME
+    )
+    schedule_content(
+        healthy_revision, 1, due, actor="test-admin", now=NOW_DATETIME
+    )
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert result.published_ids == (healthy_revision,)
+    assert result.failures == ((revision_id, "validation_failed"),)
+    _assert_unpublished_revision(db, current["id"], revision_id, lock_version=4)
+    assert db.execute(
+        "SELECT publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()[0] is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? "
+        "AND event_code='content_due_failed'", (revision_id,)
+    ).fetchone()[0] == 1
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (healthy_revision,)
+    ).fetchone()[0] == "published"
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+
+
 def _corrupt_one_scenario_text_source(db, scenario_id, revision_id, source, value):
     """Keep a valid peer value and corrupt one required public text source."""
     if source == "industry":
