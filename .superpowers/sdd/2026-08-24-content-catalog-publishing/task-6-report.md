@@ -1727,3 +1727,50 @@ optional titles now normalize to `None` rather than remaining raw. Historical
 limits remain unchanged: the original full-suite result is **UNKNOWN** and was
 not rerun; the PyPI-network violation is **CONFIRMED**; and the frozen
 `data_process_foundation` product-data limitation remains unchanged.
+
+## Fix1k controller verification
+
+The controller independently verified frozen Fix1k implementation commit
+`43e85320edf1e24de88b7474efd699fdc7878b94`. All pytest commands used the
+assigned Python `3.12.13` interpreter, process-scoped offline `local-deps`
+overlay (`idna 3.19`, imported `pypdf 6.10.0`),
+`-p no:cacheprovider`, and unique basetemps. Each agent confirmed the same
+HEAD and a clean tracked tree before and after its read-only run.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_public_catalog.py tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_app_factory_and_migrations.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1k-focused-001
+```
+
+Result: `580 passed in 305.31s (0:05:05)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pagination.py tests\test_public_catalog.py tests\test_analytics.py tests\test_smoke.py tests\test_validation_and_errors.py tests\test_app_factory_and_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1k-public-partition-001
+```
+
+Result: `404 passed in 257.96s (0:04:17)`, pytest `exit_code=0`.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
+..\..\.venv\Scripts\python.exe -m pytest tests\test_catalog_content_admin.py tests\test_content_validation.py tests\test_content_publishing.py tests\test_content_seed.py tests\test_content_migrations.py tests\test_security_gaps.py tests\test_media_service.py tests\test_media_http.py tests\test_v2_migrations.py -q -p no:cacheprovider --basetemp .superpowers\sdd\2026-08-24-content-catalog-publishing\pytest-task6-controller-fix1k-related-partition-001
+```
+
+Result: `336 passed in 170.41s (0:02:50)`, pytest `exit_code=0`.
+
+The focused probe resolved `pypdf.__file__` to the offline
+`local-deps\pypdf\__init__.py`, proving the imported module was 6.10.0 rather
+than the assigned venv's separate distribution metadata. For transparency,
+the public-partition agent's first auxiliary version probe had a PowerShell
+quoting truncation and exited 1; the pytest command was unaffected, and an
+ASCII-safe probe under the same process-scoped `PYTHONPATH` then exited 0 and
+reported the versions and module path above.
+
+Controller `py_compile` over all seven changed Python files,
+`git diff --check` for both `a42fdbd..43e8532` and
+`1c359a7..43e8532`, no-direct-SQL scans for both catalog Blueprints, and the
+tracked status check all passed. No full suite, network access, installation,
+production server, Nginx, or real database was used. The historical full
+suite remains **UNKNOWN**; the historical PyPI-network violation remains
+**CONFIRMED**; and the frozen `data_process_foundation` product-data
+limitation remains unchanged.
