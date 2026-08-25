@@ -19,7 +19,7 @@ PUBLIC_PATHS = [
 
 ADMIN_PATHS = [
     "/admin",
-    "/admin/articles",
+    "/admin/resources",
     "/admin/cases",
     "/admin/assessments",
     "/admin/announcements",

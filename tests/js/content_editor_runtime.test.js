@@ -319,3 +319,34 @@ test('bound relation type changes synchronize legal targets and block empty choi
   noResource.addRelation.click();
   assert.equal(noResource.relationContainer.children.length, 0);
 });
+
+test('resource authorship choice reveals and enables only the applicable field group', () => {
+  const choice = new FakeElement('select');
+  choice.append(option('1', '本站原创'), option('0', '外部来源'));
+  choice.value = '1';
+  const original = new FakeElement('fieldset');
+  const originalTime = new FakeElement('input');
+  originalTime.dataset.authorshipControl = '1';
+  original.append(originalTime);
+  const sourced = new FakeElement('fieldset');
+  const sourceName = new FakeElement('input');
+  const sourceUrl = new FakeElement('input');
+  sourceName.dataset.authorshipControl = '1';
+  sourceUrl.dataset.authorshipControl = '1';
+  sourced.append(sourceName, sourceUrl);
+
+  editor.synchronizeAuthorshipFields(choice, original, sourced);
+  assert.equal(original.hidden, false);
+  assert.equal(originalTime.disabled, false);
+  assert.equal(sourced.hidden, true);
+  assert.equal(sourceName.disabled, true);
+  assert.equal(sourceUrl.disabled, true);
+
+  choice.value = '0';
+  editor.synchronizeAuthorshipFields(choice, original, sourced);
+  assert.equal(original.hidden, false);
+  assert.equal(originalTime.disabled, false);
+  assert.equal(sourced.hidden, false);
+  assert.equal(sourceName.disabled, false);
+  assert.equal(sourceUrl.disabled, false);
+});

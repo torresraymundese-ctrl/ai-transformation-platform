@@ -1,5 +1,55 @@
 import models
 from bs4 import BeautifulSoup
+
+
+def _announcement_form(**overrides):
+    form = {
+        "csrf_token": "test-csrf-token",
+        "action": "save",
+        "slug": "security-announcement",
+        "title": "合法后台提交",
+        "summary": "固定有效期安全公告。",
+        "seo_title": "合法后台提交",
+        "seo_description": "固定有效期安全公告摘要。",
+        "share_image_media_id": "",
+        "valid_from": "2026-08-25T09:00",
+        "valid_until": "2026-08-26T09:00",
+        "cta_url": "",
+        "blocks-0-type": "rich_text",
+        "blocks-0-title": "正文",
+        "blocks-0-body": "<p>测试内容</p>",
+        "blocks-0-media_id": "",
+    }
+    form.update(overrides)
+    return form
+
+
+def _sourced_resource_form(**overrides):
+    form = {
+        "csrf_token": "test-csrf-token",
+        "action": "save",
+        "slug": "security-resource",
+        "title": "来源检查安全资源",
+        "summary": "来源检查必须携带当前会话 CSRF 令牌。",
+        "seo_title": "来源检查安全资源",
+        "seo_description": "来源检查安全资源摘要。",
+        "share_image_media_id": "",
+        "resource_type": "guide",
+        "is_original": "0",
+        "source_name": "安全来源",
+        "source_url": "https://example.com/security-resource",
+        "original_published_at": "2026-08-25T09:00",
+        "copyright_notice": "经授权转载，版权归原作者所有。",
+        "attachment_media_id": "",
+        "blocks-0-type": "rich_text",
+        "blocks-0-title": "正文",
+        "blocks-0-body": "<p>测试内容</p>",
+        "blocks-0-media_id": "",
+    }
+    form.update(overrides)
+    return form
+
+
 def test_assessment_rejects_empty_payload(client):
     """An empty object must not create an unusable lead record."""
     response = client.post("/api/assessment", json={})
@@ -71,14 +121,11 @@ def test_article_does_not_render_untrusted_script(client):
 
 def test_admin_write_rejects_missing_csrf_token(admin_client):
     """An authenticated browser session must not make admin writes CSRF-vulnerable."""
+    form = _announcement_form(title="CSRF 安全测试")
+    form.pop("csrf_token")
     response = admin_client.post(
-        "/admin/announcement/new",
-        data={
-            "title": "CSRF 安全测试",
-            "content_html": "测试内容",
-            "is_pinned": "0",
-            "status": "draft",
-        },
+        "/admin/announcements/new",
+        data=form,
     )
 
     assert response.status_code in {400, 403}
@@ -87,14 +134,8 @@ def test_admin_write_rejects_missing_csrf_token(admin_client):
 def test_admin_write_accepts_matching_csrf_token(admin_client):
     """A legitimate admin form submission with the session token must still work."""
     response = admin_client.post(
-        "/admin/announcement/new",
-        data={
-            "csrf_token": "test-csrf-token",
-            "title": "合法后台提交",
-            "content_html": "<p>测试内容</p>",
-            "is_pinned": "0",
-            "status": "draft",
-        },
+        "/admin/announcements/new",
+        data=_announcement_form(),
     )
 
     assert response.status_code == 302
@@ -102,7 +143,8 @@ def test_admin_write_accepts_matching_csrf_token(admin_client):
     db = models.get_db()
     try:
         record = db.execute(
-            "SELECT title FROM announcements ORDER BY id DESC LIMIT 1"
+            "SELECT title FROM content_items WHERE entry_type='announcement' "
+            "ORDER BY id DESC LIMIT 1"
         ).fetchone()
     finally:
         db.close()
@@ -128,20 +170,30 @@ def test_announcement_does_not_render_untrusted_script(client):
     assert "公告正文".encode("utf-8") in response.data
 
 
-def test_admin_scrape_control_submits_csrf_token(admin_client):
-    """The article-list scrape action must supply the current session CSRF token."""
-    response = admin_client.get("/admin/articles")
+def test_admin_source_check_control_submits_csrf_token(admin_client):
+    """The reviewed-resource source check must carry the current session token."""
+    created = admin_client.post(
+        "/admin/resources/new", data=_sourced_resource_form()
+    )
+    assert created.status_code == 302
+
+    response = admin_client.get(created.headers["Location"])
 
     assert response.status_code == 200
-    assert b"X-CSRF-Token" in response.data
-    assert b"test-csrf-token" in response.data
+    form = BeautifulSoup(response.data, "html.parser").select_one(
+        'form[action$="/source-check"]'
+    )
+    assert form is not None
+    token = form.select_one('input[name="csrf_token"]')
+    assert token is not None
+    assert token["value"] == "test-csrf-token"
 
 
 def test_admin_post_forms_render_matching_csrf_tokens(admin_client):
     """Every rendered admin POST form must carry the session CSRF token."""
     for path in (
-        "/admin/article/new",
-        "/admin/announcement/new",
+        "/admin/resources/new",
+        "/admin/announcements/new",
         "/admin/assets/code/new",
         "/admin/assets/departments/new",
         "/admin/assets/unit-a/new",

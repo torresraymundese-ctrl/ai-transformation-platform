@@ -272,6 +272,21 @@
     return legalTargets;
   }
 
+  function synchronizeAuthorshipFields(choice, originalFields, sourcedFields) {
+    if (!choice || !originalFields || !sourcedFields) {
+      throw new TypeError('resource authorship controls are required');
+    }
+    const sourced = choice.value === '0';
+    originalFields.hidden = false;
+    sourcedFields.hidden = !sourced;
+    for (const control of originalFields.querySelectorAll('[data-authorship-control]')) {
+      control.disabled = false;
+    }
+    for (const control of sourcedFields.querySelectorAll('[data-authorship-control]')) {
+      control.disabled = !sourced;
+    }
+  }
+
   function bind(documentObject) {
     if (!documentObject || typeof documentObject.querySelector !== 'function') {
       return;
@@ -309,6 +324,16 @@
       renumberBlocks(container);
     });
     renumberBlocks(container);
+
+    const authorship = documentObject.querySelector('[data-resource-authorship]');
+    const originalFields = documentObject.querySelector('[data-original-fields]');
+    const sourcedFields = documentObject.querySelector('[data-sourced-fields]');
+    if (authorship && originalFields && sourcedFields) {
+      authorship.addEventListener('change', function () {
+        synchronizeAuthorshipFields(authorship, originalFields, sourcedFields);
+      });
+      synchronizeAuthorshipFields(authorship, originalFields, sourcedFields);
+    }
 
     const relationContainer = documentObject.querySelector('[data-content-relations]');
     const addRelation = documentObject.querySelector('[data-add-relation]');
@@ -376,5 +401,6 @@
     renumberBlocks,
     renumberRelations,
     reorder,
+    synchronizeAuthorshipFields,
   });
 });

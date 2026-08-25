@@ -6,6 +6,7 @@ import catalog_content_repository as catalog
 import case_repository as cases
 from content_clock import shanghai_now
 from pagination import parse_pagination
+import resource_repository as resources
 
 
 bp = Blueprint("public_catalog", __name__)
@@ -13,6 +14,11 @@ bp = Blueprint("public_catalog", __name__)
 
 def _canonical(path):
     return f"{current_app.config['PUBLIC_BASE_URL']}{path}"
+
+
+def _content_now():
+    provider = current_app.config.get("CONTENT_NOW_PROVIDER")
+    return provider() if callable(provider) else shanghai_now()
 
 
 @bp.get("/industries")
@@ -92,4 +98,47 @@ def case_detail(slug):
         "case_detail.html",
         case=case,
         canonical=_canonical(f"/cases/{case.slug}"),
+    )
+
+
+@bp.get("/resources")
+def resources_page():
+    filters = resources.parse_resource_filters(request.args)
+    page = resources.list_published_resources(
+        filters, parse_pagination(request.args), now=_content_now()
+    )
+    return render_template(
+        "resources.html",
+        page=page,
+        filters=filters,
+        resource_types=resources.RESOURCE_TYPE_LABELS,
+        canonical=_canonical("/resources"),
+    )
+
+
+@bp.get("/resources/<slug>")
+def resource_detail(slug):
+    resource = resources.get_published_resource(slug, now=_content_now())
+    if resource is None:
+        abort(404)
+    if resource.redirect:
+        return redirect(f"/resources/{resource.slug}", code=301)
+    return render_template(
+        "resource_detail.html",
+        resource=resource,
+        canonical=_canonical(f"/resources/{resource.slug}"),
+    )
+
+
+@bp.get("/announcements/<slug>")
+def announcement_detail(slug):
+    announcement = resources.get_current_announcement(slug, now=_content_now())
+    if announcement is None:
+        abort(404)
+    if announcement.redirect:
+        return redirect(f"/announcements/{announcement.slug}", code=301)
+    return render_template(
+        "announcement_detail.html",
+        announcement=announcement,
+        canonical=_canonical(f"/announcements/{announcement.slug}"),
     )

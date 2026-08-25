@@ -449,13 +449,15 @@ def _validate_publication_media(db, draft):
     if (
         draft.entry_type == "resource"
         and draft.extension.get("attachment_media_id") is not None
-        and db.execute(
-            "SELECT 1 FROM media_assets WHERE id=? AND status='ready'",
+    ):
+        attachment = db.execute(
+            "SELECT detected_mime FROM media_assets WHERE id=? AND status='ready'",
             (draft.extension["attachment_media_id"],),
         ).fetchone()
-        is None
-    ):
-        raise ContentValidationError("media_not_ready")
+        if attachment is None:
+            raise ContentValidationError("media_not_ready")
+        if attachment["detected_mime"] not in ATTACHMENT_MIMES:
+            raise ContentValidationError("attachment_mime_invalid")
 
 
 def _validate_required_source(draft, now):
@@ -498,6 +500,38 @@ def _validate_case_completeness(draft, now):
         raise ContentValidationError("case_verification_incomplete")
 
 
+def _validate_resource_completeness(draft, now):
+    extension = draft.extension
+    if (
+        extension.get("resource_type")
+        not in {"article", "guide", "report", "template", "policy"}
+        or extension.get("is_original") not in {0, 1}
+        or not is_exact_nonblank_text(extension.get("copyright_notice"), maximum=500)
+        or not extension.get("original_published_at")
+        or extension["original_published_at"] > format_shanghai(now)
+    ):
+        raise ContentValidationError("resource_public_incomplete")
+    if extension["is_original"] == 1:
+        if any(
+            extension.get(key) is not None
+            for key in (
+                "source_name", "source_url", "source_url_sha256",
+                "source_check_code", "source_checked_at",
+                "source_check_expires_at", "source_check_url_sha256",
+            )
+        ):
+            raise ContentValidationError("resource_public_incomplete")
+    elif not is_exact_nonblank_text(extension.get("source_name"), maximum=200):
+        raise ContentValidationError("resource_public_incomplete")
+
+
+def _validate_announcement_completeness(draft):
+    valid_from = draft.extension.get("valid_from")
+    valid_until = draft.extension.get("valid_until")
+    if not valid_from or not valid_until or valid_from >= valid_until:
+        raise ContentValidationError("announcement_public_incomplete")
+
+
 def validate_case_public_completeness(db, content_id, now):
     """Validate one persisted case for public display without opening a transaction."""
     draft = _load_validated_publication_draft(db, content_id)
@@ -506,6 +540,27 @@ def validate_case_public_completeness(db, content_id, now):
     _validate_publication_media(db, draft)
     _validate_required_source(draft, now)
     _validate_case_completeness(draft, now)
+    return draft
+
+
+def validate_resource_public_completeness(db, content_id, now):
+    """Validate one persisted resource for public display."""
+    draft = _load_validated_publication_draft(db, content_id)
+    if draft.entry_type != "resource":
+        raise ContentValidationError("resource_public_incomplete")
+    _validate_publication_media(db, draft)
+    _validate_required_source(draft, now)
+    _validate_resource_completeness(draft, now)
+    return draft
+
+
+def validate_announcement_public_completeness(db, content_id, now):
+    """Validate one persisted announcement independently of its current interval."""
+    draft = _load_validated_publication_draft(db, content_id)
+    if draft.entry_type != "announcement":
+        raise ContentValidationError("announcement_public_incomplete")
+    _validate_publication_media(db, draft)
+    _validate_announcement_completeness(draft)
     return draft
 
 
@@ -531,9 +586,23 @@ def validate_for_publication(db, content_id, now):
                 validate_case_public_completeness(db, target["id"], now)
             except ContentValidationError as error:
                 raise ContentValidationError("relation_target_not_published") from error
+        else:
+            try:
+                if (
+                    target["publish_at"] is not None
+                    and target["publish_at"] > format_shanghai(now)
+                ):
+                    raise ContentValidationError("resource_public_incomplete")
+                validate_resource_public_completeness(db, target["id"], now)
+            except ContentValidationError as error:
+                raise ContentValidationError("relation_target_not_published") from error
     _validate_required_source(draft, now)
     if draft.entry_type == "case":
         _validate_case_completeness(draft, now)
+    if draft.entry_type == "resource":
+        _validate_resource_completeness(draft, now)
+    if draft.entry_type == "announcement":
+        _validate_announcement_completeness(draft)
     if draft.entry_type == "industry":
         _validate_industry_publication(db, content_id, draft, now)
     if draft.entry_type == "scenario":

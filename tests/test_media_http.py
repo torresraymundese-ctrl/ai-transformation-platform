@@ -430,7 +430,7 @@ def test_media_url_helpers_keep_images_and_og_images_separate_from_downloads(cli
 
 def test_non_media_requests_keep_one_mebibyte_boundary(admin_client):
     response = admin_client.post(
-        "/admin/announcement/new",
+        "/admin/announcements/new",
         data={
             "csrf_token": "test-csrf-token",
             "title": "oversized",
@@ -499,7 +499,7 @@ def test_early_admin_size_rejections_are_always_private_for_anonymous_and_authen
         b"x" * (1024 * 1024 + 1),
     )
     authenticated = admin_client.post(
-        "/admin/announcement/new",
+        "/admin/announcements/new",
         data={
             "csrf_token": "test-csrf-token",
             "title": "oversized",

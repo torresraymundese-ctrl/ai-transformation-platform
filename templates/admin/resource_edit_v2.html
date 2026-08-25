@@ -1,0 +1,44 @@
+{% extends "admin/base_admin.html" %}
+{% set form = view.form %}
+{% block admin_content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+  <div><h2>V2 资源来源与发布审核</h2>{% if form.id %}<code>resource:{{ form.id }} · revision {{ form.revision_number }}</code>{% endif %}</div>
+  <a class="btn btn-outline" href="{{ url_for('admin.admin_resources_v2') }}">返回资源</a>
+</div>
+{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+{% if view.public_revision %}<section class="card" style="padding:16px;margin-bottom:16px"><h3>当前公开修订 #{{ view.public_revision.revision_number }}</h3><p>{{ view.public_revision.title }}</p></section>{% endif %}
+{% if form.id and form.status != 'draft' %}
+<section class="card" style="padding:20px"><h3>不可变修订</h3><p>{{ form.title }}</p><p>{{ form.summary }}</p>
+  <form method="POST" action="{{ url_for('admin.admin_resource_copy_v2', content_id=form.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="content_id" value="{{ form.id }}"><input type="hidden" name="expected_lock_version" value="{{ form.lock_version }}"><button class="btn btn-primary">创建修订</button></form>
+</section>
+{% else %}
+<form method="POST" class="card" style="padding:20px" data-content-editor>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if form.id %}<input type="hidden" name="content_id" value="{{ form.id }}"><input type="hidden" name="lock_version" value="{{ form.lock_version }}">{% endif %}
+  <div class="form-group"><label>公开路径标识<input name="slug" value="{{ form.slug }}" maxlength="80" required></label></div>
+  <div class="form-group"><label>公开标题<input name="title" value="{{ form.title }}" maxlength="120" required></label></div>
+  <div class="form-group"><label>公开摘要<textarea name="summary" maxlength="300" required>{{ form.summary }}</textarea></label></div>
+  <div class="form-group"><label>SEO 标题<input name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></label></div>
+  <div class="form-group"><label>SEO 摘要<textarea name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></label></div>
+  <div class="form-group"><label>分享图<select name="share_image_media_id"><option value="">不使用</option>{% for media in view.share_image_choices %}<option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>{% endfor %}</select></label></div>
+  <fieldset class="form-group"><legend>资源类型（固定选择）</legend><select name="resource_type" required>{% for value, label in resource_types.items() %}<option value="{{ value }}" {% if form.resource_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></fieldset>
+  <fieldset class="form-group"><legend>来源/原创（必须明确选择）</legend>
+    <select name="is_original" data-resource-authorship required><option value="1" {% if form.is_original == 1 %}selected{% endif %}>本站原创</option><option value="0" {% if form.is_original == 0 %}selected{% endif %}>外部来源</option></select>
+    <div data-original-fields><p>本站原创不得填写或公开外部来源字段。</p></div>
+    <div data-sourced-fields {% if form.is_original == 1 %}hidden{% endif %}>
+      <label>来源名称<input data-authorship-control name="source_name" value="{{ form.source_name }}" maxlength="200" {% if form.is_original == 1 %}disabled{% endif %}></label>
+      <label>HTTPS 原文链接<input data-authorship-control name="source_url" value="{{ form.source_url }}" maxlength="2048" {% if form.is_original == 1 %}disabled{% endif %}></label>
+      {% if form.source_check_code %}<p>来源检查：{{ form.source_check_code }} · {{ form.source_checked_at }} 至 {{ form.source_check_expires_at }}</p>{% endif %}
+    </div>
+  </fieldset>
+  <div class="form-group"><label>原始发布时间<input type="datetime-local" name="original_published_at" value="{{ form.original_published_at.replace(' ', 'T')[:19] }}" step="1" required></label></div>
+  <div class="form-group"><label>版权提示<textarea name="copyright_notice" maxlength="500" required>{{ form.copyright_notice }}</textarea></label></div>
+  <div class="form-group"><label>可选附件<select name="attachment_media_id"><option value="">不使用</option>{% for media in view.attachment_choices %}<option value="{{ media.id }}" {% if form.attachment_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>{% endfor %}</select></label></div>
+  {% include "admin/_content_blocks.html" %}
+  <fieldset class="form-group"><legend>人工审核确认</legend><label><input type="checkbox" name="review_confirmed" value="1">来源、版权和正文已人工复核</label><label><input type="checkbox" name="media_review_confirmed" value="1">媒体与附件已人工复核</label></fieldset>
+  <div style="display:flex;gap:8px"><button class="btn btn-outline" name="action" value="save">保存草稿</button><button class="btn btn-outline" name="action" value="review">发布前检查</button><button class="btn btn-primary" name="action" value="publish">发布</button></div>
+</form>
+{% if form.id and form.is_original == 0 and form.source_url_sha256 %}<form method="POST" action="{{ url_for('admin.admin_resource_source_check_v2', content_id=form.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_lock_version" value="{{ form.lock_version }}"><input type="hidden" name="expected_url_sha256" value="{{ form.source_url_sha256 }}"><button class="btn btn-outline">刷新 HTTPS 来源检查</button></form>{% endif %}
+{% endif %}
+{% if view.public_revision %}<form method="POST" action="{{ url_for('admin.admin_resource_edit_v2', content_id=view.public_revision.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="content_id" value="{{ view.public_revision.id }}"><input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}"><button class="btn btn-outline" name="action" value="archive">归档当前公开修订</button></form>{% endif %}
+{% if not form.id or form.status == 'draft' %}<script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>{% endif %}
+{% endblock %}

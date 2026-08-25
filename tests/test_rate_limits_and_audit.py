@@ -11,6 +11,28 @@ VALID_ASSESSMENT = {
 }
 
 
+def _announcement_form(**overrides):
+    form = {
+        "csrf_token": "test-csrf-token",
+        "action": "save",
+        "slug": "audit-announcement",
+        "title": "审计测试",
+        "summary": "固定有效期公告摘要。",
+        "seo_title": "审计测试公告",
+        "seo_description": "固定有效期公告的审计测试摘要。",
+        "share_image_media_id": "",
+        "valid_from": "2026-08-25T09:00",
+        "valid_until": "2026-08-26T09:00",
+        "cta_url": "",
+        "blocks-0-type": "rich_text",
+        "blocks-0-title": "正文",
+        "blocks-0-body": "<p>不应进入审计详情</p>",
+        "blocks-0-media_id": "",
+    }
+    form.update(overrides)
+    return form
+
+
 def login_csrf(client):
     response = client.get("/admin/login")
     field = BeautifulSoup(response.data, "html.parser").select_one(
@@ -122,14 +144,8 @@ def test_scrape_rate_limit_still_bounds_repeated_retired_ingestion_requests(admi
 def test_successful_admin_write_creates_a_minimal_audit_record(admin_client):
     """A successful content change must be attributable without storing form data."""
     response = admin_client.post(
-        "/admin/announcement/new",
-        data={
-            "csrf_token": "test-csrf-token",
-            "title": "审计测试",
-            "content_html": "<p>不应进入审计详情</p>",
-            "is_pinned": "0",
-            "status": "draft",
-        },
+        "/admin/announcements/new",
+        data=_announcement_form(),
     )
     assert response.status_code == 302
 
@@ -147,7 +163,7 @@ def test_successful_admin_write_creates_a_minimal_audit_record(admin_client):
 
     assert dict(record) == {
         "actor": "test-admin",
-        "action": "admin_announcement_new",
+        "action": "admin_announcement_new_v2",
         "status_code": 302,
     }
     assert "request_body" not in columns
@@ -157,8 +173,8 @@ def test_successful_admin_write_creates_a_minimal_audit_record(admin_client):
 def test_rejected_admin_write_is_recorded_for_investigation(admin_client):
     """A blocked CSRF write must leave an audit trail without mutating content."""
     response = admin_client.post(
-        "/admin/announcement/new",
-        data={"title": "不应写入", "status": "draft"},
+        "/admin/announcements/new",
+        data=_announcement_form(csrf_token=None, title="不应写入"),
     )
     assert response.status_code == 403
 
@@ -168,13 +184,14 @@ def test_rejected_admin_write_is_recorded_for_investigation(admin_client):
             "SELECT action, status_code FROM admin_audit_logs ORDER BY id DESC LIMIT 1"
         ).fetchone()
         count = db.execute(
-            "SELECT COUNT(*) FROM announcements WHERE title=?", ("不应写入",)
+            "SELECT COUNT(*) FROM content_items WHERE entry_type='announcement' AND title=?",
+            ("不应写入",),
         ).fetchone()[0]
     finally:
         db.close()
 
     assert dict(record) == {
-        "action": "admin_announcement_new",
+        "action": "admin_announcement_new_v2",
         "status_code": 403,
     }
     assert count == 0

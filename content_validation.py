@@ -182,6 +182,17 @@ def _safe_cta(value):
     return urlsplit(normalized).scheme == "https"
 
 
+def _normalize_cta(value):
+    if not _safe_cta(value):
+        raise ContentValidationError("extension_invalid")
+    if value.startswith("/"):
+        return value
+    normalized, error = normalize_source_url(value)
+    if error or not normalized or urlsplit(normalized).scheme != "https":
+        raise ContentValidationError("extension_invalid")
+    return normalized
+
+
 def _container_depth(value, depth=0):
     if isinstance(value, dict) or hasattr(value, "items"):
         if not value:
@@ -258,7 +269,11 @@ def _validate_block(block, index):
         raise ContentValidationError("block_media_invalid")
     if type(block.sort_order) is not int or block.sort_order < 0:
         raise ContentValidationError("block_order_invalid")
-    return replace(block, title=title, body_html=body, sort_order=index)
+    if block.block_type == "cta":
+        settings["url"] = _normalize_cta(settings["url"])
+    return replace(
+        block, title=title, body_html=body, settings=settings, sort_order=index
+    )
 
 
 def _validate_extension(draft):
@@ -272,12 +287,20 @@ def _validate_extension(draft):
             raise ContentValidationError("extension_invalid")
     elif entry_type == "announcement":
         allowed = {"valid_from", "valid_until", "cta_url"}
-        if set(extension) != allowed or not all(_valid_timestamp(extension[key]) for key in ("valid_from", "valid_until")):
+        if (
+            set(extension) != allowed
+            or extension["valid_from"] is None
+            or extension["valid_until"] is None
+            or not all(
+                _valid_timestamp(extension[key])
+                for key in ("valid_from", "valid_until")
+            )
+        ):
             raise ContentValidationError("extension_invalid")
-        if extension["valid_from"] and extension["valid_until"] and extension["valid_from"] > extension["valid_until"]:
+        if extension["valid_from"] >= extension["valid_until"]:
             raise ContentValidationError("extension_invalid")
-        if extension["cta_url"] is not None and not _safe_cta(extension["cta_url"]):
-            raise ContentValidationError("extension_invalid")
+        if extension["cta_url"] is not None:
+            extension["cta_url"] = _normalize_cta(extension["cta_url"])
     elif entry_type == "resource":
         allowed = {
             "resource_type", "is_original", "source_name", "source_url", "source_url_sha256",
@@ -295,8 +318,6 @@ def _validate_extension(draft):
             or extension["resource_type"]
             not in {"article", "guide", "report", "template", "policy"}
             or not _valid_flag(extension["is_original"])
-            or not _valid_optional_text(extension["source_name"], 200)
-            or not _valid_optional_text(extension["copyright_notice"], 500)
             or not _valid_id(extension["attachment_media_id"])
             or not _valid_sha256(extension["source_url_sha256"])
             or not _valid_optional_text(extension["source_check_code"], 64)
@@ -306,24 +327,33 @@ def _validate_extension(draft):
         if extension["is_original"] == 0:
             if extension["source_name"] is None:
                 raise ContentValidationError("source_required")
+            if (
+                type(extension["source_name"]) is not str
+                or "\x00" in extension["source_name"]
+                or len(extension["source_name"]) > 200
+            ):
+                raise ContentValidationError("extension_invalid")
+            extension["source_name"] = _require_text(
+                extension["source_name"], 200, "source_required"
+            )
             extension["source_url"] = _normalize_https_url(extension["source_url"])
             import hashlib
 
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
-        elif extension["source_url"] is not None:
-            extension["source_url"] = _normalize_https_url(extension["source_url"])
-            import hashlib
-
-            extension["source_url_sha256"] = hashlib.sha256(
-                extension["source_url"].encode()
-            ).hexdigest()
-        elif extension["source_url_sha256"] is not None:
+        elif any(
+            extension[key] is not None
+            for key in ("source_name", "source_url", "source_url_sha256")
+        ):
             raise ContentValidationError("extension_invalid")
         check = [
             extension["source_check_code"], extension["source_checked_at"],
             extension["source_check_expires_at"], extension["source_check_url_sha256"],
         ]
         if any(value is not None for value in check) and not all(value is not None for value in check):
+            raise ContentValidationError("source_check_invalid")
+        if extension["is_original"] == 1 and any(
+            value is not None for value in check
+        ):
             raise ContentValidationError("source_check_invalid")
         if not all(
             _valid_timestamp(value)
@@ -333,6 +363,11 @@ def _validate_extension(draft):
                 extension["original_published_at"],
             )
         ):
+            raise ContentValidationError("extension_invalid")
+        extension["copyright_notice"] = _require_text(
+            extension["copyright_notice"], 500, "extension_invalid"
+        )
+        if extension["original_published_at"] is None:
             raise ContentValidationError("extension_invalid")
     elif entry_type == "case":
         allowed = {

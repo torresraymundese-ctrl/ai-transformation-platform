@@ -14,7 +14,7 @@
   {% elif block.block_type == 'download' %}
     <p data-content-block="download">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}{% if block.media_asset_id %}<a href="{{ media_download_url(block.media_asset_id) }}">{{ block.settings.label }}</a>{% else %}{{ block.settings.label }}{% endif %}</p>{% if block.body_html %}<div data-content-block-body="download">{{ block.body_html|safe_html }}</div>{% endif %}
   {% elif block.block_type == 'cta' %}
-    <p data-content-block="cta">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}<a class="btn btn-{{ block.settings.style }}" href="{{ block.settings.url }}">{{ block.settings.label }}</a></p>{% if block.body_html %}<div data-content-block-body="cta">{{ block.body_html|safe_html }}</div>{% endif %}
+    <p data-content-block="cta">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}<a class="btn btn-{{ block.settings.style }}" href="{{ block.settings.url }}"{% if block.settings.url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ block.settings.label }}</a></p>{% if block.body_html %}<div data-content-block-body="cta">{{ block.body_html|safe_html }}</div>{% endif %}
   {% endif %}
 {% endfor %}
 {%- endmacro %}

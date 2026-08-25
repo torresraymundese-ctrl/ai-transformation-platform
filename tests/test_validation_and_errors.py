@@ -3,6 +3,32 @@ import logging
 import models
 
 
+def _resource_form(**overrides):
+    form = {
+        "csrf_token": "test-csrf-token",
+        "action": "save",
+        "slug": "validation-resource",
+        "title": "安全测试资源",
+        "summary": "经审核的安全测试摘要。",
+        "seo_title": "安全测试资源",
+        "seo_description": "经审核的安全测试资源摘要。",
+        "share_image_media_id": "",
+        "resource_type": "article",
+        "is_original": "1",
+        "source_name": "",
+        "source_url": "",
+        "original_published_at": "2026-08-20T09:30",
+        "copyright_notice": "安全测试版权说明。",
+        "attachment_media_id": "",
+        "blocks-0-type": "rich_text",
+        "blocks-0-title": "正文",
+        "blocks-0-body": "<p>正文</p>",
+        "blocks-0-media_id": "",
+    }
+    form.update(overrides)
+    return form
+
+
 def test_legacy_javascript_source_url_is_not_rendered_as_a_link(client):
     """Previously stored active-scheme URLs must not become executable links."""
     db = models.get_db()
@@ -24,28 +50,24 @@ def test_legacy_javascript_source_url_is_not_rendered_as_a_link(client):
 
 
 def test_admin_rejects_active_scheme_source_url(admin_client):
-    """Article writes must accept only absolute HTTP(S) source links."""
+    """Reviewed resource writes accept only normalized HTTPS source links."""
     response = admin_client.post(
-        "/admin/article/new",
-        data={
-            "csrf_token": "test-csrf-token",
-            "title": "危险链接文章",
-            "source": "安全测试",
-            "source_url": "javascript:alert(1)",
-            "summary": "摘要",
-            "content_html": "<p>正文</p>",
-            "tags": "安全",
-            "category": "insight",
-            "is_featured": "0",
-            "status": "draft",
-        },
+        "/admin/resources/new",
+        data=_resource_form(
+            slug="dangerous-source-resource",
+            title="危险链接文章",
+            is_original="0",
+            source_name="安全测试",
+            source_url="javascript:alert(1)",
+        ),
     )
 
     assert response.status_code == 400
     db = models.get_db()
     try:
         count = db.execute(
-            "SELECT COUNT(*) FROM articles WHERE title=?", ("危险链接文章",)
+            "SELECT COUNT(*) FROM content_items WHERE entry_type='resource' AND title=?",
+            ("危险链接文章",),
         ).fetchone()[0]
     finally:
         db.close()
@@ -55,40 +77,18 @@ def test_admin_rejects_active_scheme_source_url(admin_client):
 def test_admin_rejects_overlong_article_title(admin_client):
     """Oversized CMS text must be bounded before storage and audit logging."""
     response = admin_client.post(
-        "/admin/article/new",
-        data={
-            "csrf_token": "test-csrf-token",
-            "title": "文" * 201,
-            "source": "安全测试",
-            "source_url": "https://example.invalid/report",
-            "summary": "摘要",
-            "content_html": "<p>正文</p>",
-            "tags": "安全",
-            "category": "insight",
-            "is_featured": "0",
-            "status": "draft",
-        },
+        "/admin/resources/new",
+        data=_resource_form(slug="overlong-resource", title="文" * 121),
     )
 
     assert response.status_code == 400
 
 
 def test_admin_rejects_non_numeric_boolean_field(admin_client):
-    """Malformed numeric form fields must return 400 rather than raising ValueError."""
+    """Malformed authorship flags return 400 rather than raising ValueError."""
     response = admin_client.post(
-        "/admin/article/new",
-        data={
-            "csrf_token": "test-csrf-token",
-            "title": "非法精选值",
-            "source": "安全测试",
-            "source_url": "",
-            "summary": "摘要",
-            "content_html": "<p>正文</p>",
-            "tags": "安全",
-            "category": "insight",
-            "is_featured": "not-a-number",
-            "status": "draft",
-        },
+        "/admin/resources/new",
+        data=_resource_form(slug="invalid-authorship", is_original="not-a-number"),
     )
 
     assert response.status_code == 400
