@@ -13,7 +13,9 @@ import legacy_content_migration
 import media_service
 import models
 import publishing_service
+from content_clock import shanghai_now
 from models import init_db
+from source_url_checker import PinnedHttpTransport
 
 
 def _reject_active_sidecars(database_path):
@@ -91,6 +93,24 @@ def main(argv=None):
         action="store_true",
         help="Record review rows atomically (default is zero-write dry-run)",
     )
+    source_check = subcommands.add_parser(
+        "check-content-sources",
+        help="Preflight reviewed legacy sources and persist generic results",
+    )
+    migrate_legacy = subcommands.add_parser(
+        "migrate-legacy-content",
+        help="Preview or apply approved legacy content decisions",
+    )
+    migrate_legacy.add_argument(
+        "--decisions",
+        required=True,
+        help="Operator-authored strict JSONL decision artifact",
+    )
+    migrate_legacy.add_argument(
+        "--apply",
+        action="store_true",
+        help="Create or explicitly merge drafts (default is read-only preview)",
+    )
     purge = subcommands.add_parser(
         "purge-expired-leads",
         help="Preview or anonymize expired unconverted lead contact data",
@@ -141,6 +161,61 @@ def main(argv=None):
             if db is not None:
                 db.close()
         return 0
+    if args.command == "check-content-sources":
+        db = None
+        try:
+            if not Path(models.DB_PATH).is_file():
+                raise OSError("content database is unavailable")
+            db = models.get_db()
+            result = legacy_content_migration.check_legacy_sources(
+                db,
+                transport=PinnedHttpTransport(),
+                actor="legacy_source_check",
+                now=shanghai_now(),
+            )
+            if result.errors:
+                raise ValueError("source preflight did not complete")
+            for line in legacy_content_migration.check_result_to_lines(result):
+                print(line)
+        except (OSError, sqlite3.Error, ValueError, RuntimeError):
+            print("error=content_source_check_unavailable", file=sys.stderr)
+            return 1
+        finally:
+            if db is not None:
+                db.close()
+        return 0
+    if args.command == "migrate-legacy-content":
+        db = None
+        snapshot = None
+        try:
+            decisions = legacy_content_migration.load_legacy_decisions(args.decisions)
+            if args.apply:
+                if not Path(models.DB_PATH).is_file():
+                    raise OSError("content database is unavailable")
+                db = models.get_db()
+                result = legacy_content_migration.apply_legacy_decisions(
+                    db,
+                    decisions,
+                    actor="legacy_migration",
+                    now=shanghai_now(),
+                )
+            else:
+                db, snapshot = _open_inventory_readonly()
+                result = legacy_content_migration.preview_legacy_decisions(
+                    db, decisions, now=shanghai_now()
+                )
+            output = legacy_content_migration.migration_result_to_jsonl(result)
+            if snapshot is not None:
+                snapshot.validate()
+            if output:
+                print(output)
+            return 0 if not result.errors else 1
+        except (OSError, sqlite3.Error, ValueError, RuntimeError, OverflowError):
+            print("error=legacy_migration_unavailable", file=sys.stderr)
+            return 1
+        finally:
+            if db is not None:
+                db.close()
     if args.command == "purge-expired-leads":
         result = lead_repository.run_retention_purge(apply=args.apply)
         mode = "apply" if args.apply else "dry-run"

@@ -47,6 +47,14 @@ def _review_row(db, source_table, source_id):
     ).fetchone()
 
 
+def test_task10_conversion_api_is_exposed_without_changing_inventory_contract():
+    assert callable(migration.check_legacy_sources)
+    assert callable(migration.load_legacy_decisions)
+    assert callable(migration.preview_legacy_decisions)
+    assert callable(migration.apply_legacy_decisions)
+    assert callable(migration.migration_result_to_jsonl)
+
+
 def test_review_item_is_frozen_and_six_v2_services_have_literal_keep_targets(db):
     items = migration.inventory_legacy_content(db)
     service_items = {

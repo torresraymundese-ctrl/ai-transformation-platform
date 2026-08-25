@@ -7,10 +7,34 @@ import zlib
 import pytest
 
 from content_clock import SHANGHAI
-from source_url_checker import PinnedHttpTransport, _PinnedConnection, check_source_url
+from source_url_checker import (
+    FetchResult,
+    PinnedHttpTransport,
+    _PinnedConnection,
+    check_source_url,
+    source_state_for_check,
+)
 
 
 NOW = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
+
+
+@pytest.mark.parametrize(
+    ("has_source", "ok", "code", "expected"),
+    (
+        (False, False, "source_missing", "missing"),
+        (True, True, "https_ok", "reachable"),
+        (True, False, "invalid_url", "invalid"),
+        (True, False, "scheme_not_allowed", "invalid"),
+        (True, False, "redirect_requires_update", "unreachable"),
+        (True, False, "network_error", "unreachable"),
+    ),
+)
+def test_source_check_maps_only_exact_generic_codes_to_review_states(
+    has_source, ok, code, expected
+):
+    result = FetchResult(ok, code, "", None, None, b"")
+    assert source_state_for_check(result, has_source=has_source) == expected
 
 
 class FakeResponse:

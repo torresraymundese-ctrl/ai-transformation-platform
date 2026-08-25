@@ -21,6 +21,21 @@ MAX_REDIRECTS = 3
 MAX_DNS_ANSWERS = 8
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+INVALID_SOURCE_CODES = frozenset(
+    {
+        "invalid_url",
+        "userinfo_not_allowed",
+        "port_not_allowed",
+        "scheme_not_allowed",
+        "host_not_allowed",
+        "unsafe_address",
+        "dns_answer_limit",
+        "content_type_not_allowed",
+        "content_encoding_not_allowed",
+        "content_encoding_invalid",
+        "response_too_large",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +46,19 @@ class FetchResult:
     status: int | None
     content_type: str | None
     body: bytes
+
+
+def source_state_for_check(result, *, has_source):
+    """Map a bounded source check to the review table's exact public states."""
+    if type(has_source) is not bool:
+        raise ValueError("has_source must be an exact boolean")
+    if not has_source:
+        return "missing"
+    if result.ok and result.code == "https_ok":
+        return "reachable"
+    if result.code in INVALID_SOURCE_CODES:
+        return "invalid"
+    return "unreachable"
 
 
 def _normalized_host(host):
