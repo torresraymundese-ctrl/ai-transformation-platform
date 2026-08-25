@@ -14,6 +14,7 @@ import catalog_content_repository as catalog
 from content_clock import SHANGHAI
 from content_contracts import ContentBlock, ContentDraft
 from content_validation import ContentValidationError, validate_content_draft
+from pagination import PageRequest
 from publishing_service import (
     archive_content,
     copy_revision,
@@ -179,6 +180,52 @@ def _publish_service(db, code):
     return _service_item(db, code, "published")
 
 
+class _InterleavingCursor:
+    def __init__(self, cursor, after_fetch):
+        self._cursor = cursor
+        self._after_fetch = after_fetch
+
+    def _fetched(self, value):
+        callback, self._after_fetch = self._after_fetch, None
+        if callback is not None:
+            callback()
+        return value
+
+    def fetchone(self):
+        return self._fetched(self._cursor.fetchone())
+
+    def fetchall(self):
+        return self._fetched(self._cursor.fetchall())
+
+
+class _InterleavingReadConnection:
+    """Wrap a real SQLite reader and replace content after its first read."""
+
+    def __init__(self, connection, replace_after_first_fetch):
+        self._connection = connection
+        self._replace_after_first_fetch = replace_after_first_fetch
+        self._first_read_wrapped = False
+        self._begin_seen = False
+        self.begin_before_first_read = False
+
+    def execute(self, sql, parameters=()):
+        statement = sql.strip().upper()
+        if statement == "BEGIN":
+            self._begin_seen = True
+        cursor = self._connection.execute(sql, parameters)
+        if statement.startswith("SELECT") and not self._first_read_wrapped:
+            self._first_read_wrapped = True
+            self.begin_before_first_read = self._begin_seen
+            return _InterleavingCursor(cursor, self._replace_after_first_fetch)
+        return cursor
+
+    def rollback(self):
+        return self._connection.rollback()
+
+    def close(self):
+        return self._connection.close()
+
+
 @pytest.fixture()
 def published_services(client, db):
     _publish_scenario_content(db)
@@ -236,7 +283,12 @@ def test_service_list_uses_page_contract_shell_canonical_and_compatibility_redir
 ):
     response = published_services.get("/service-packages")
     document = _page(response)
-    assert {node["data-service-code"] for node in document.select("[data-service-code]")} == set(SERVICE_MATURITY)
+    projection = catalog.public_services(PageRequest(1, 20), NOW)
+    assert tuple(item.code for item in projection.items) == tuple(SERVICE_MATURITY)
+    assert len(document.select("[data-service-card]")) == len(SERVICE_MATURITY)
+    assert document.select("[data-service-code]") == []
+    for code in SERVICE_MATURITY:
+        assert code not in response.get_data(as_text=True)
     assert document.select_one('link[rel="canonical"]')["href"] == "https://test.example/service-packages"
     assert document.select_one('body[data-analytics-page="services"]') is not None
     assert response.headers["Cache-Control"] == "private, no-store"
@@ -264,21 +316,132 @@ def test_every_public_service_detail_has_complete_delivery_structure_and_ctas(
         assert document.select_one('body[data-analytics-page="services"]') is not None
 
 
-def test_six_services_render_exact_deduplicated_ordered_chinese_facets(published_services):
+@pytest.mark.parametrize("surface", ("list", "detail"))
+def test_public_service_reads_one_sqlite_snapshot_during_concurrent_replacement(
+    published_services, db, monkeypatch, surface,
+):
+    current = _service_item(db, "foundation_workshop", "published")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    replacement_title = "并发替换后的 AI 就绪基础工作坊"
+    db.execute(
+        "UPDATE content_items SET title=? WHERE id=?",
+        (replacement_title, revision_id),
+    )
+    service = db.execute(
+        "SELECT min_budget,max_budget FROM services WHERE code='foundation_workshop'"
+    ).fetchone()
+    old_budget = (service["min_budget"], service["max_budget"])
+    new_budget = (service["min_budget"] + 1000, service["max_budget"])
+    db.commit()
+
+    original_get_db = catalog.models.get_db
+
+    def replace_revision_and_authority():
+        writer = original_get_db()
+        try:
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute(
+                "UPDATE services SET min_budget=? WHERE code='foundation_workshop'",
+                (new_budget[0],),
+            )
+            writer.execute(
+                "UPDATE content_items SET status='archived',archived_at=?,"
+                "lock_version=lock_version+1,updated_at=? "
+                "WHERE id=? AND status='published'",
+                (NOW_TEXT, NOW_TEXT, current["id"]),
+            )
+            writer.execute(
+                "UPDATE content_items SET status='published',published_at=?,"
+                "lock_version=lock_version+1,updated_at=? "
+                "WHERE id=? AND status='draft'",
+                (NOW_TEXT, NOW_TEXT, revision_id),
+            )
+            writer.commit()
+        finally:
+            writer.close()
+
+    interleaved = _InterleavingReadConnection(
+        original_get_db(), replace_revision_and_authority
+    )
+    monkeypatch.setattr(catalog.models, "get_db", lambda: interleaved)
+    if surface == "list":
+        page = catalog.public_services(PageRequest(1, 20), NOW)
+        first_projection = next(
+            item for item in page.items if item.code == "foundation_workshop"
+        )
+        first_pair = (first_projection.title, first_projection.budget)
+    else:
+        first_projection = catalog.public_service("foundation-workshop", NOW)
+        assert first_projection is not None
+        first_pair = (first_projection["title"], first_projection["budget"])
+
+    assert interleaved.begin_before_first_read is True
+    assert first_pair == (current["title"], old_budget)
+
+    monkeypatch.setattr(catalog.models, "get_db", original_get_db)
+    if surface == "list":
+        page = catalog.public_services(PageRequest(1, 20), NOW)
+        later_projection = next(
+            item for item in page.items if item.code == "foundation_workshop"
+        )
+        later_pair = (later_projection.title, later_projection.budget)
+    else:
+        later_projection = catalog.public_service("foundation-workshop", NOW)
+        assert later_projection is not None
+        later_pair = (later_projection["title"], later_projection["budget"])
+    assert later_pair == (replacement_title, new_budget)
+
+
+def test_six_services_project_exact_codes_but_render_only_ordered_chinese_facets(
+    published_services,
+):
     maturity_labels = {
         "explore": "探索", "pilot": "试点", "scale": "规模化", "collaborate": "协同",
     }
     for code, expected in SERVICE_FACETS.items():
-        document = _page(published_services.get(f"/service-packages/{code.replace('_', '-')}"))
+        response = published_services.get(f"/service-packages/{code.replace('_', '-')}")
+        document = _page(response)
+        projection = catalog.public_service(code.replace("_", "-"), NOW)
+        assert projection is not None
         for facet in ("industries", "departments", "pains"):
+            assert tuple(
+                (item.code, item.label) for item in projection[facet]
+            ) == expected[facet]
             nodes = document.select(
-                f'[data-service-section="{facet}"] [data-facet-code]'
+                f'[data-service-section="{facet}"] [data-service-facet]'
             )
-            assert tuple((node["data-facet-code"], node.get_text(strip=True)) for node in nodes) == expected[facet]
-        maturity = document.select('[data-service-section="maturity"] [data-maturity-code]')
+            assert tuple(node.get_text(strip=True) for node in nodes) == tuple(
+                label for _, label in expected[facet]
+            )
         assert tuple(
-            (node["data-maturity-code"], node.get_text(strip=True)) for node in maturity
+            (item.code, item.label) for item in projection["maturity"]
         ) == tuple((value, maturity_labels[value]) for value in SERVICE_MATURITY[code])
+        maturity = document.select(
+            '[data-service-section="maturity"] [data-service-maturity]'
+        )
+        assert tuple(
+            node.get_text(strip=True) for node in maturity
+        ) == tuple(maturity_labels[value] for value in SERVICE_MATURITY[code])
+        assert document.select(
+            "[data-service-code],[data-facet-code],[data-maturity-code],"
+            "[data-integration-code],[data-deliverable-code]"
+        ) == []
+        raw_codes = {
+            projection["code"],
+            *(item.code for item in projection["industries"]),
+            *(item.code for item in projection["departments"]),
+            *(item.code for item in projection["pains"]),
+            *(item.code for item in projection["maturity"]),
+            *(item.code for item in projection["integration"]),
+            *(item.code for item in projection["deliverables"]),
+            *(item.code for item in projection["scenarios"]),
+        }
+        html = response.get_data(as_text=True)
+        for raw_code in raw_codes:
+            if "_" in raw_code or ":" in raw_code:
+                assert raw_code not in html
+        assert "_json" not in html.lower()
+        assert '["' not in html
         if not expected["pains"]:
             empty = document.select_one('[data-service-section="pains"] [data-empty-state]')
             assert empty is not None
@@ -301,7 +464,15 @@ def test_service_detail_formats_budget_weeks_fixed_labels_and_no_raw_values(
         assert document.select_one('[data-service-section="budget"]').get_text(" ", strip=True).endswith(budget)
         assert document.select_one('[data-service-section="timeline"]').get_text(" ", strip=True).endswith(weeks)
         assert document.select_one("[data-service-category]").get_text(strip=True) == category
-        assert tuple(node.get_text(strip=True) for node in document.select("[data-integration-code]")) == integration
+        projection = catalog.public_service(code.replace("_", "-"), NOW)
+        assert projection is not None
+        assert tuple(item.code for item in projection["integration"]) == tuple(
+            {"低": "low", "中": "medium", "高": "high"}[label]
+            for label in integration
+        )
+        assert tuple(
+            node.get_text(strip=True) for node in document.select("[data-service-integration]")
+        ) == integration
         visible = document.get_text(" ", strip=True)
         assert code not in visible
         assert "_json" not in visible.lower()
@@ -312,7 +483,12 @@ def test_delivery_authority_fields_and_optional_relations_render_without_placeho
     published_services,
 ):
     document = _page(published_services.get("/service-packages/foundation-workshop"))
-    assert [node.get_text(strip=True) for node in document.select("[data-deliverable-code]")] == [
+    projection = catalog.public_service("foundation-workshop", NOW)
+    assert projection is not None
+    assert tuple(item.code for item in projection["deliverables"]) == tuple(
+        f"foundation_workshop:{index}" for index in range(1, 6)
+    )
+    assert [node.get_text(strip=True) for node in document.select("[data-service-deliverable]")] == [
         "流程现状基线", "数据清单", "场景优先级矩阵", "90 天计划", "工作坊报告",
     ]
     assert "定制软件开发" in document.select_one('[data-service-section="not-included"]').get_text()
@@ -321,6 +497,10 @@ def test_delivery_authority_fields_and_optional_relations_render_without_placeho
     assert document.select('[data-related-kind="case"]') == []
     assert document.select('[data-related-kind="resource"]') == []
     assert document.select('[data-related-kind="scenario"]') == []
+    related = document.select_one('[data-service-section="related-content"]')
+    assert related.has_attr("hidden")
+    assert related.get_text(" ", strip=True) == ""
+    assert "关联内容" not in document.get_text(" ", strip=True)
     assert "最终范围和报价以需求确认结果为准" in document.select_one(
         '[data-service-section="pricing-disclaimer"]'
     ).get_text()
@@ -388,6 +568,29 @@ def test_service_authority_injection_never_falls_back_to_mutable_core_tables(db)
     ) is None
 
 
+def test_malformed_injected_service_authority_fails_closed_without_type_leak(db):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    authority = catalog._service_authority(db, current["service_id"], NOW)
+
+    malformed_authorities = (
+        replace(authority, deliverables=(object(),)),
+        replace(authority, category_code=[]),
+        replace(
+            authority,
+            deliverables=(replace(authority.deliverables[0], code=[]),),
+        ),
+        replace(
+            authority,
+            scenarios=(replace(authority.scenarios[0], integration_code=[]),),
+        ),
+    )
+    for malformed in malformed_authorities:
+        assert catalog.public_service(
+            current["slug"], NOW, authority=malformed
+        ) is None
+
+
 def _corrupt_service_dependency(db, current, draft_id, source):
     service_id = current["service_id"]
     if source == "maturity":
@@ -421,9 +624,62 @@ def _corrupt_service_dependency(db, current, draft_id, source):
             "UPDATE service_deliverables SET title=' ' WHERE id=(SELECT MIN(id) FROM service_deliverables WHERE service_id=?)",
             (service_id,),
         )
+    elif source == "deliverable_code":
+        db.execute(
+            "UPDATE service_deliverables SET code=' ' WHERE id=(SELECT MIN(id) FROM service_deliverables WHERE service_id=?)",
+            (service_id,),
+        )
+    elif source == "deliverable_description":
+        db.execute(
+            "UPDATE service_deliverables SET description=' ' WHERE id=(SELECT MIN(id) FROM service_deliverables WHERE service_id=?)",
+            (service_id,),
+        )
+    elif source == "scenario_code":
+        db.execute(
+            "UPDATE scenarios SET code=' ' WHERE id=("
+            "SELECT MIN(scenario_id) FROM scenario_services WHERE service_id=?)",
+            (service_id,),
+        )
+    elif source == "scenario_integration":
+        db.execute("PRAGMA ignore_check_constraints=ON")
+        db.execute(
+            "UPDATE scenarios SET integration_level='unknown' WHERE id=("
+            "SELECT MIN(scenario_id) FROM scenario_services WHERE service_id=?)",
+            (service_id,),
+        )
+    elif source in {
+        "industry_code", "industry_name", "department_code", "department_name",
+        "pain_code", "pain_name",
+    }:
+        kind, column = source.split("_", 1)
+        table, link_table, target_column, scenario_link = {
+            "industry": ("industries", "industry_branches", "industry_id", "scenario_branches"),
+            "department": ("departments", "scenario_departments", "department_id", "scenario_departments"),
+            "pain": ("pain_points", "scenario_pains", "pain_point_id", "scenario_pains"),
+        }[kind]
+        if kind == "industry":
+            target_sql = (
+                "SELECT branch.industry_id FROM scenario_services service_link "
+                "JOIN scenario_branches scenario_link "
+                "ON scenario_link.scenario_id=service_link.scenario_id "
+                "JOIN industry_branches branch ON branch.id=scenario_link.industry_branch_id "
+                "WHERE service_link.service_id=? ORDER BY branch.id LIMIT 1"
+            )
+        else:
+            target_sql = (
+                f"SELECT scenario_link.{target_column} FROM scenario_services service_link "
+                f"JOIN {scenario_link} scenario_link "
+                "ON scenario_link.scenario_id=service_link.scenario_id "
+                "WHERE service_link.service_id=? ORDER BY scenario_link.rowid LIMIT 1"
+            )
+        db.execute(
+            f"UPDATE {table} SET {column}=' ' WHERE id=({target_sql})",
+            (service_id,),
+        )
     else:
         column, value = {
-            "name": ("public_name", " "), "category": ("category", "unknown"),
+            "service_code": ("code", " "), "name": ("public_name", " "),
+            "category": ("category", "unknown"),
             "budget": ("max_budget", 1), "weeks": ("max_weeks", 1),
             "steps": ("implementation_steps_json", "[]"),
             "prerequisites": ("prerequisites_json", "[]"),
@@ -437,15 +693,22 @@ def _corrupt_service_dependency(db, current, draft_id, source):
 
 
 @pytest.mark.parametrize("source", (
-    "maturity", "related_scenario", "industry", "department", "scenario_name", "deliverables",
-    "deliverable_title", "name", "category", "budget", "weeks", "steps",
+    "related_scenario", "industry", "department", "scenario_name", "deliverables",
+    "deliverable_code", "deliverable_title", "deliverable_description",
+    "service_code", "scenario_code", "scenario_integration",
+    "industry_code", "industry_name", "department_code", "department_name",
+    "pain_code", "pain_name", "name", "category", "budget", "weeks", "steps",
     "prerequisites", "exclusions", "acceptance", "support", "support_text", "disclaimer",
 ))
-def test_formal_service_publish_rejects_each_missing_authority_source_and_keeps_old_online(
+def test_formal_service_publish_rejects_invalid_shared_authority_without_replacing_revision(
     client, db, source,
 ):
     _publish_scenario_content(db)
-    current = _publish_service(db, "foundation_workshop")
+    service_code = (
+        "knowledge_assistant_pilot" if source.startswith("pain_")
+        else "foundation_workshop"
+    )
+    current = _publish_service(db, service_code)
     revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
     _corrupt_service_dependency(db, current, revision_id, source)
 
@@ -461,6 +724,61 @@ def test_formal_service_publish_rejects_each_missing_authority_source_and_keeps_
         "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'",
         (revision_id,),
     ).fetchone()[0] == 0
+    assert client.get(f"/service-packages/{current['slug']}").status_code == 404
+
+
+def test_revision_local_maturity_failure_keeps_old_public_service_online(client, db):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (revision_id,))
+    db.commit()
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW + timedelta(minutes=1))
+
+    assert error.value.code == "service_public_incomplete"
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (current["id"],)
+    ).fetchone()[0] == "published"
+    assert tuple(db.execute(
+        "SELECT status,lock_version,publish_at FROM content_items WHERE id=?",
+        (revision_id,),
+    ).fetchone()) == ("draft", 1, None)
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events "
+        "WHERE content_item_id=? AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 0
+    assert client.get(f"/service-packages/{current['slug']}").status_code == 200
+
+
+def test_due_shared_authority_failure_does_not_replace_revision_or_write_success_audit(
+    client, db,
+):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    due = NOW + timedelta(hours=1)
+    schedule_content(revision_id, 1, due, actor="test-admin", now=NOW)
+    _corrupt_service_dependency(db, current, revision_id, "deliverable_description")
+
+    result = publish_due_content(actor="test-admin", now=due)
+
+    assert result.published_ids == ()
+    assert result.failures == ((revision_id, "validation_failed"),)
+    assert db.execute(
+        "SELECT status FROM content_items WHERE id=?", (current["id"],)
+    ).fetchone()[0] == "published"
+    assert tuple(db.execute(
+        "SELECT status,publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()) == ("draft", None)
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events "
+        "WHERE content_item_id=? AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 0
+    assert client.get(f"/service-packages/{current['slug']}").status_code == 404
 
 
 def test_due_service_validation_failure_keeps_old_revision_and_has_no_success_audit(client, db):
@@ -485,6 +803,7 @@ def test_due_service_validation_failure_keeps_old_revision_and_has_no_success_au
     ))
     assert "content_published" not in events
     assert events[-1] == "content_due_failed"
+    assert client.get(f"/service-packages/{current['slug']}").status_code == 200
 
 
 def _complete_assessment(client):

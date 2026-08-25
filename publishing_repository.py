@@ -19,6 +19,7 @@ from content_validation import (
     validate_content_draft,
 )
 from media_validation import ATTACHMENT_MIMES, IMAGE_MIMES
+from service_authority import load_service_authority
 
 
 EXTENSION_TABLES = {
@@ -60,10 +61,6 @@ SOURCE_CHECK_COLUMNS = (
     "source_check_expires_at",
     "source_check_url_sha256",
 )
-SERVICE_CATEGORY_CODES = frozenset({"foundation", "pilot", "standard", "integration"})
-MATURITY_CODES = frozenset({"explore", "pilot", "scale", "collaborate"})
-
-
 class ContentNotFoundError(LookupError):
     code = "content_not_found"
 
@@ -501,85 +498,14 @@ def _meaningful_html(value):
     )
 
 
-def _valid_related_service_scenario(db, scenario_id):
-    scenario = db.execute(
-        "SELECT status,public_name FROM scenarios WHERE id=?", (scenario_id,)
-    ).fetchone()
-    if (
-        scenario is None
-        or scenario["status"] != "published"
-        or not is_exact_nonblank_text(scenario["public_name"])
-    ):
-        return False
-    industries = db.execute(
-        "SELECT i.name FROM scenario_branches link "
-        "JOIN industry_branches branch ON branch.id=link.industry_branch_id "
-        "JOIN industries i ON i.id=branch.industry_id "
-        "WHERE link.scenario_id=? AND branch.status='published' "
-        "AND i.status='published' ORDER BY i.sort_order,i.id",
-        (scenario_id,),
-    ).fetchall()
-    departments = db.execute(
-        "SELECT d.name FROM scenario_departments link "
-        "JOIN departments d ON d.id=link.department_id "
-        "WHERE link.scenario_id=? AND d.status='published' "
-        "ORDER BY d.sort_order,d.id",
-        (scenario_id,),
-    ).fetchall()
-    return (
-        bool(industries)
-        and bool(departments)
-        and all(is_exact_nonblank_text(row["name"]) for row in industries)
-        and all(is_exact_nonblank_text(row["name"]) for row in departments)
-    )
-
-
 def _validate_service_publication(db, content_id, draft):
     service_id = draft.extension["service_id"]
-    service = db.execute(
-        "SELECT * FROM services WHERE id=?", (service_id,)
-    ).fetchone()
-    if service is None or service["status"] != "published":
-        raise ContentValidationError("service_public_incomplete")
-    structured = tuple(
-        _decode_content_json(service[column])
-        for column in (
-            "implementation_steps_json", "prerequisites_json",
-            "not_included_json", "acceptance_json",
-        )
-    )
+    authority = load_service_authority(db, service_id)
     if (
-        not is_exact_nonblank_text(service["public_name"])
-        or service["category"] not in SERVICE_CATEGORY_CODES
-        or not is_valid_public_budget_range(service["min_budget"], service["max_budget"])
-        or not is_valid_public_week_range(service["min_weeks"], service["max_weeks"])
-        or not all(_nonblank_strings(values) for values in structured)
-        or type(service["support_days"]) is not int
-        or service["support_days"] <= 0
-        or not is_exact_nonblank_text(service["support_description"])
-        or not is_exact_nonblank_text(service["public_disclaimer"])
+        authority is None
         or not draft.maturity_codes
-        or any(code not in MATURITY_CODES for code in draft.maturity_codes)
         or not draft.blocks
         or not any(_meaningful_html(block.body_html) for block in draft.blocks)
-    ):
-        raise ContentValidationError("service_public_incomplete")
-    deliverables = db.execute(
-        "SELECT title FROM service_deliverables WHERE service_id=? "
-        "AND status='published' ORDER BY sort_order,id", (service_id,)
-    ).fetchall()
-    if not deliverables or any(
-        not is_exact_nonblank_text(row["title"]) for row in deliverables
-    ):
-        raise ContentValidationError("service_public_incomplete")
-    scenarios = db.execute(
-        "SELECT scenario.id FROM scenario_services link "
-        "JOIN scenarios scenario ON scenario.id=link.scenario_id "
-        "WHERE link.service_id=? AND scenario.status='published' "
-        "ORDER BY scenario.sort_order,scenario.id", (service_id,),
-    ).fetchall()
-    if not any(
-        _valid_related_service_scenario(db, row["id"]) for row in scenarios
     ):
         raise ContentValidationError("service_public_incomplete")
 

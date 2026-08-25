@@ -7,16 +7,16 @@
 <main class="container" style="padding:48px 0">
   <h1>{{ service.title }}</h1>
   <p>{{ service.summary }}</p>
-  <p><span data-service-category>{{ service.category }}</span>{% for item in service.integration %} · <span data-integration-code="{{ item.code }}">{{ item.label }}</span>{% endfor %}</p>
+  <p><span data-service-category>{{ service.category }}</span>{% for item in service.integration %} · <span data-service-integration>{{ item.label }}</span>{% endfor %}</p>
 
-  <section data-service-section="industries"><h2>适用行业</h2><ul>{% for item in service.industries %}<li data-facet-code="{{ item.code }}">{{ item.label }}</li>{% endfor %}</ul></section>
-  <section data-service-section="departments"><h2>适用部门</h2><ul>{% for item in service.departments %}<li data-facet-code="{{ item.code }}">{{ item.label }}</li>{% endfor %}</ul></section>
-  <section data-service-section="maturity"><h2>适用成熟度</h2><ul>{% for item in service.maturity %}<li data-maturity-code="{{ item.code }}">{{ item.label }}</li>{% endfor %}</ul></section>
-  <section data-service-section="pains"><h2>适用痛点</h2>{% if service.pains %}<ul>{% for item in service.pains %}<li data-facet-code="{{ item.code }}">{{ item.label }}</li>{% endfor %}</ul>{% else %}<p data-empty-state>暂无特定痛点限制</p>{% endif %}</section>
+  <section data-service-section="industries"><h2>适用行业</h2><ul>{% for item in service.industries %}<li data-service-facet>{{ item.label }}</li>{% endfor %}</ul></section>
+  <section data-service-section="departments"><h2>适用部门</h2><ul>{% for item in service.departments %}<li data-service-facet>{{ item.label }}</li>{% endfor %}</ul></section>
+  <section data-service-section="maturity"><h2>适用成熟度</h2><ul>{% for item in service.maturity %}<li data-service-maturity>{{ item.label }}</li>{% endfor %}</ul></section>
+  <section data-service-section="pains"><h2>适用痛点</h2>{% if service.pains %}<ul>{% for item in service.pains %}<li data-service-facet>{{ item.label }}</li>{% endfor %}</ul>{% else %}<p data-empty-state>暂无特定痛点限制</p>{% endif %}</section>
 
   <section data-service-section="scope"><h2>解决范围</h2>{{ render_blocks(service.blocks) }}</section>
   <section data-service-section="not-included"><h2>不包含范围</h2><ul>{% for value in service.not_included %}<li>{{ value }}</li>{% endfor %}</ul></section>
-  <section data-service-section="deliverables"><h2>交付物</h2><ul>{% for item in service.deliverables %}<li data-deliverable-code="{{ item.code }}">{{ item.title }}{% if item.description %}：{{ item.description }}{% endif %}</li>{% endfor %}</ul></section>
+  <section data-service-section="deliverables"><h2>交付物</h2><ul>{% for item in service.deliverables %}<li data-service-deliverable>{{ item.title }}{% if item.description %}：{{ item.description }}{% endif %}</li>{% endfor %}</ul></section>
   <section data-service-section="implementation-steps"><h2>实施步骤</h2><ol>{% for value in service.implementation_steps %}<li>{{ value }}</li>{% endfor %}</ol></section>
   <section data-service-section="prerequisites"><h2>客户配合事项</h2><ul>{% for value in service.prerequisites %}<li>{{ value }}</li>{% endfor %}</ul></section>
   <section data-service-section="timeline"><h2>参考周期</h2><p>{{ service.timeline[0] }}—{{ service.timeline[1] }} 周</p></section>
@@ -24,11 +24,11 @@
   <section data-service-section="acceptance"><h2>验收标准</h2><ul>{% for value in service.acceptance %}<li>{{ value }}</li>{% endfor %}</ul></section>
   <section data-service-section="support"><h2>培训、质保和支持</h2><p>{{ service.support_days }} 天 · {{ service.support_description }}</p></section>
 
-  <section data-service-section="related-content"><h2>关联内容</h2>
+  {% if service.scenarios or service.cases or service.resources %}<section data-service-section="related-content"><h2>关联内容</h2>
     {% if service.scenarios %}<h3>关联场景</h3><ul>{% for item in service.scenarios %}{% if item.title %}<li data-related-kind="scenario">{% if item.slug %}<a href="{{ url_for('public_catalog.scenario_detail', slug=item.slug) }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}</li>{% endif %}{% endfor %}</ul>{% endif %}
     {% if service.cases %}<h3>相关案例</h3><ul>{% for item in service.cases %}<li data-related-kind="case">{{ item.title }}</li>{% endfor %}</ul>{% endif %}
     {% if service.resources %}<h3>相关资源</h3><ul>{% for item in service.resources %}<li data-related-kind="resource">{{ item.title }}</li>{% endfor %}</ul>{% endif %}
-  </section>
+  </section>{% else %}<section data-service-section="related-content" hidden aria-hidden="true"></section>{% endif %}
   <section data-service-section="pricing-disclaimer"><p>{{ service.public_disclaimer }}</p></section>
   <p><a class="btn btn-primary" data-service-cta="primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费 AI 就绪度评估</a> <a class="btn btn-outline" data-service-cta="secondary" href="/cases">查看客户案例</a></p>
 </main>

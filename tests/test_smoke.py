@@ -48,6 +48,15 @@ def test_health_endpoint_returns_expected_contract(client):
     assert response.get_json() == {"status": "ok"}
 
 
+def test_shared_home_navigation_and_footer_stay_on_the_task7_baseline(client):
+    response = client.get("/")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert html.count('href="/services"') == 9
+    assert 'href="/service-packages"' not in html
+
+
 def test_admin_redirects_unauthenticated_requests_to_login(client):
     """Catch accidental removal of the session-backed admin access boundary."""
     response = client.get("/admin")

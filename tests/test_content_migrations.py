@@ -386,6 +386,189 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
             migrations.apply_migrations(db)
 
 
+def test_008_backfills_only_draft_services_and_preserves_non_draft_maturity(
+    tmp_path, monkeypatch
+):
+    migration_dir = tmp_path / "migrations-through-007"
+    migration_dir.mkdir()
+    for path in sorted((PROJECT_ROOT / "migrations").glob("00[1-7]_*.sql")):
+        shutil.copy2(path, migration_dir / path.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", migration_dir)
+    db = sqlite3.connect(tmp_path / "pre-008.db")
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    try:
+        migrations.apply_migrations(db)
+        seed_v2_defaults(db)
+
+        def add_revision(group_id, entry_type, revision, slug):
+            item_id = db.execute(
+                "INSERT INTO content_items "
+                "(content_group_id,entry_type,revision_number,slug,title,summary,"
+                "seo_title,seo_description,status,lock_version,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    group_id, entry_type, revision, slug, "Upgrade title", "Upgrade summary",
+                    "Upgrade SEO", "Upgrade description", "draft", 1,
+                    SHANGHAI_TIME, SHANGHAI_TIME,
+                ),
+            ).lastrowid
+            return item_id
+
+        draft_service_items = {}
+        foundation_group = None
+        for service in db.execute(
+            "SELECT id,code FROM services WHERE code IS NOT NULL ORDER BY sort_order,id"
+        ).fetchall():
+            group_id = db.execute(
+                "INSERT INTO content_groups "
+                "(entry_type,service_id,canonical_slug,created_at,updated_at) "
+                "VALUES ('service',?,?,?,?)",
+                (service["id"], service["code"].replace("_", "-"), SHANGHAI_TIME, SHANGHAI_TIME),
+            ).lastrowid
+            draft_id = add_revision(
+                group_id, "service", 1, service["code"].replace("_", "-")
+            )
+            db.execute(
+                "INSERT INTO service_content (content_item_id,service_id) VALUES (?,?)",
+                (draft_id, service["id"]),
+            )
+            draft_service_items[service["code"]] = draft_id
+            if service["code"] == "foundation_workshop":
+                foundation_group = group_id
+
+        foundation_draft = draft_service_items["foundation_workshop"]
+        db.execute(
+            "UPDATE content_items SET status='published',published_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, foundation_draft),
+        )
+        db.execute(
+            "UPDATE content_items SET status='archived',archived_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, foundation_draft),
+        )
+        published_service = add_revision(
+            foundation_group, "service", 2, "foundation-workshop"
+        )
+        db.execute(
+            "INSERT INTO service_content (content_item_id,service_id) "
+            "SELECT ?,service_id FROM content_groups WHERE id=?",
+            (published_service, foundation_group),
+        )
+        db.execute(
+            "UPDATE content_items SET status='published',published_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, published_service),
+        )
+        current_draft = add_revision(
+            foundation_group, "service", 3, "foundation-workshop-v3"
+        )
+        db.execute(
+            "INSERT INTO service_content (content_item_id,service_id) "
+            "SELECT ?,service_id FROM content_groups WHERE id=?",
+            (current_draft, foundation_group),
+        )
+        draft_service_items["foundation_workshop"] = current_draft
+
+        scenario = db.execute(
+            "SELECT id,code FROM scenarios WHERE code='mfg_knowledge_assistant'"
+        ).fetchone()
+        scenario_group = db.execute(
+            "INSERT INTO content_groups "
+            "(entry_type,scenario_id,canonical_slug,created_at,updated_at) "
+            "VALUES ('scenario',?,?,?,?)",
+            (scenario["id"], "upgrade-scenario", SHANGHAI_TIME, SHANGHAI_TIME),
+        ).lastrowid
+        archived_scenario = add_revision(
+            scenario_group, "scenario", 1, "upgrade-scenario"
+        )
+        db.execute(
+            "INSERT INTO scenario_content (content_item_id,scenario_id) VALUES (?,?)",
+            (archived_scenario, scenario["id"]),
+        )
+        db.execute(
+            "INSERT INTO content_maturity_levels "
+            "(content_item_id,maturity_code,sort_order) VALUES (?,'pilot',0)",
+            (archived_scenario,),
+        )
+        db.execute(
+            "UPDATE content_items SET status='published',published_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, archived_scenario),
+        )
+        db.execute(
+            "UPDATE content_items SET status='archived',archived_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, archived_scenario),
+        )
+        published_scenario = add_revision(
+            scenario_group, "scenario", 2, "upgrade-scenario"
+        )
+        db.execute(
+            "INSERT INTO scenario_content (content_item_id,scenario_id) VALUES (?,?)",
+            (published_scenario, scenario["id"]),
+        )
+        db.execute(
+            "INSERT INTO content_maturity_levels "
+            "(content_item_id,maturity_code,sort_order) VALUES (?,'scale',0)",
+            (published_scenario,),
+        )
+        db.execute(
+            "UPDATE content_items SET status='published',published_at=?,updated_at=? WHERE id=?",
+            (SHANGHAI_TIME, SHANGHAI_TIME, published_scenario),
+        )
+        db.commit()
+
+        non_draft_before = tuple(
+            tuple(row) for row in db.execute(
+                "SELECT maturity.content_item_id,maturity.maturity_code,maturity.sort_order "
+                "FROM content_maturity_levels maturity "
+                "JOIN content_items item ON item.id=maturity.content_item_id "
+                "WHERE item.status<>'draft' ORDER BY maturity.content_item_id,maturity.maturity_code"
+            )
+        )
+        protect_before = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='protect_content_maturity_insert'"
+        ).fetchone()[0]
+
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+        migrations.apply_migrations(db)
+
+        non_draft_after = tuple(
+            tuple(row) for row in db.execute(
+                "SELECT maturity.content_item_id,maturity.maturity_code,maturity.sort_order "
+                "FROM content_maturity_levels maturity "
+                "JOIN content_items item ON item.id=maturity.content_item_id "
+                "WHERE item.status<>'draft' ORDER BY maturity.content_item_id,maturity.maturity_code"
+            )
+        )
+        protect_after = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='protect_content_maturity_insert'"
+        ).fetchone()[0]
+        expected = {
+            "foundation_workshop": ("explore",),
+            "knowledge_assistant_pilot": ("explore", "pilot", "scale"),
+            "customer_growth_pilot": ("explore", "pilot", "scale"),
+            "workflow_automation": ("explore", "pilot", "scale"),
+            "data_insight": ("pilot", "scale", "collaborate"),
+            "industry_integration": ("pilot", "scale", "collaborate"),
+        }
+        actual = {
+            code: tuple(
+                row[0] for row in db.execute(
+                    "SELECT maturity_code FROM content_maturity_levels "
+                    "WHERE content_item_id=? ORDER BY sort_order,maturity_code",
+                    (item_id,),
+                )
+            )
+            for code, item_id in draft_service_items.items()
+        }
+
+        assert non_draft_after == non_draft_before
+        assert protect_after == protect_before
+        assert actual == expected
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("entry_type", ("industry", "service"))
 def test_scenario_input_rows_reject_non_scenario_draft_owners(db, entry_type):
     content_id = insert_item(

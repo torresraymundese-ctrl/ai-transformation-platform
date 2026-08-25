@@ -1,6 +1,5 @@
 DROP TRIGGER validate_content_maturity_insert;
 DROP TRIGGER validate_content_maturity_update;
-DROP TRIGGER protect_content_maturity_insert;
 
 CREATE TRIGGER validate_content_maturity_insert
 BEFORE INSERT ON content_maturity_levels
@@ -50,11 +49,5 @@ JOIN services service ON service.code = mapping.service_code
 JOIN content_groups group_row ON group_row.service_id = service.id
     AND group_row.entry_type = 'service'
 JOIN content_items ci ON ci.content_group_id = group_row.id
-    AND ci.entry_type = 'service';
-
-CREATE TRIGGER protect_content_maturity_insert
-BEFORE INSERT ON content_maturity_levels
-WHEN EXISTS (
-    SELECT 1 FROM content_items WHERE id = NEW.content_item_id AND status <> 'draft'
-)
-BEGIN SELECT RAISE(ABORT, 'non-draft content children are immutable'); END;
+    AND ci.entry_type = 'service'
+    AND ci.status = 'draft';

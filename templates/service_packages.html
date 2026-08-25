@@ -9,7 +9,7 @@
   <p>从基础准备、试点验证到标准与集成交付，按实际需求选择。</p>
   <div class="card-grid">
     {% for service in page.items %}
-    <article class="card" data-service-code="{{ service.code }}">
+    <article class="card" data-service-card>
       <p>{{ service.category }}</p>
       <h2><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></h2>
       <p>{{ service.summary }}</p>
