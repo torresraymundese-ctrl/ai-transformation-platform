@@ -1040,7 +1040,7 @@ def test_appointment_event_failure_rolls_back_the_appointment(
 
 def test_public_pages_expose_safe_analytics_data_and_external_click_markers(client):
     home = client.get("/")
-    services = client.get("/services")
+    services = client.get("/service-packages")
     assessment = client.get("/assessment")
     cases = client.get("/cases")
     insights = client.get("/insights")

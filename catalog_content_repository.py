@@ -159,6 +159,14 @@ MATURITY_LABELS = {
     "scale": "规模化",
     "collaborate": "协同",
 }
+SERVICE_CATEGORY_LABELS = {
+    "foundation": "基础准备",
+    "pilot": "试点验证",
+    "standard": "标准交付",
+    "integration": "集成交付",
+}
+INTEGRATION_LABELS = {"low": "低", "medium": "中", "high": "高"}
+INTEGRATION_ORDER = ("low", "medium", "high")
 
 
 @dataclass(frozen=True)
@@ -196,6 +204,64 @@ class ScenarioAuthority:
     max_weeks: int
     risk_codes: tuple[str, ...]
     fallback_only: bool
+
+
+@dataclass(frozen=True)
+class ServiceFacet:
+    code: str
+    label: str
+
+
+@dataclass(frozen=True)
+class ServiceDeliverable:
+    code: str
+    title: str
+    description: str | None
+
+
+@dataclass(frozen=True)
+class ServiceScenario:
+    code: str
+    title: str | None
+    slug: str | None
+    integration_code: str
+
+
+@dataclass(frozen=True)
+class ServiceAuthority:
+    """Frozen service/report controls; 5B may replace only this provider."""
+    service_id: int
+    code: str
+    category_code: str
+    public_name: str
+    min_budget: int | float
+    max_budget: int | float
+    min_weeks: int
+    max_weeks: int
+    implementation_steps: tuple[str, ...]
+    prerequisites: tuple[str, ...]
+    not_included: tuple[str, ...]
+    acceptance: tuple[str, ...]
+    support_days: int
+    support_description: str
+    public_disclaimer: str
+    deliverables: tuple[ServiceDeliverable, ...]
+    scenarios: tuple[ServiceScenario, ...]
+    industries: tuple[ServiceFacet, ...]
+    departments: tuple[ServiceFacet, ...]
+    pains: tuple[ServiceFacet, ...]
+    integration_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ServiceCard:
+    code: str
+    slug: str
+    title: str
+    summary: str
+    category: str
+    budget: tuple[int | float, int | float]
+    timeline: tuple[int, int]
 
 
 def _public_item_where(now):
@@ -482,6 +548,228 @@ def _valid_services(services):
     return True
 
 
+def _deduplicated_facets(rows):
+    facets = []
+    seen = set()
+    for row in rows:
+        if row["code"] in seen:
+            continue
+        seen.add(row["code"])
+        facets.append(ServiceFacet(row["code"], row["name"]))
+    return tuple(facets)
+
+
+def _service_facets(db, scenario_ids, kind):
+    if not scenario_ids:
+        return ()
+    placeholders = ",".join("?" for _ in scenario_ids)
+    if kind == "industries":
+        sql = (
+            "SELECT i.code,i.name,i.sort_order,i.id FROM scenario_branches link "
+            "JOIN industry_branches branch ON branch.id=link.industry_branch_id "
+            "JOIN industries i ON i.id=branch.industry_id "
+            f"WHERE link.scenario_id IN ({placeholders}) AND branch.status='published' "
+            "AND i.status='published' ORDER BY i.sort_order,i.id"
+        )
+    elif kind == "departments":
+        sql = (
+            "SELECT d.code,d.name,d.sort_order,d.id FROM scenario_departments link "
+            "JOIN departments d ON d.id=link.department_id "
+            f"WHERE link.scenario_id IN ({placeholders}) AND d.status='published' "
+            "ORDER BY d.sort_order,d.id"
+        )
+    else:
+        sql = (
+            "SELECT p.code,p.name,p.sort_order,p.id FROM scenario_pains link "
+            "JOIN pain_points p ON p.id=link.pain_point_id "
+            f"WHERE link.scenario_id IN ({placeholders}) AND p.status='published' "
+            "ORDER BY p.sort_order,p.id"
+        )
+    return _deduplicated_facets(db.execute(sql, scenario_ids).fetchall())
+
+
+def _published_scenario_identity(db, scenario_id, now):
+    clause, arguments = _public_item_where(now)
+    item = db.execute(
+        "SELECT ci.* FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        f"WHERE g.scenario_id=? AND ci.entry_type='scenario' AND {clause} "
+        "ORDER BY ci.id LIMIT 1",
+        (scenario_id, *arguments),
+    ).fetchone()
+    if item is None:
+        return None
+    return _scenario_projection(db, item, False)
+
+
+def _service_authority(db, service_id, now):
+    row = db.execute(
+        "SELECT * FROM services WHERE id=? AND status='published'", (service_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    implementation_steps = _exact_nonblank_json_list(row["implementation_steps_json"])
+    prerequisites = _exact_nonblank_json_list(row["prerequisites_json"])
+    not_included = _exact_nonblank_json_list(row["not_included_json"])
+    acceptance = _exact_nonblank_json_list(row["acceptance_json"])
+    if None in (implementation_steps, prerequisites, not_included, acceptance):
+        return None
+    scenario_rows = db.execute(
+        "SELECT scenario.id,scenario.code,scenario.integration_level "
+        "FROM scenario_services link JOIN scenarios scenario ON scenario.id=link.scenario_id "
+        "WHERE link.service_id=? AND scenario.status='published' "
+        "ORDER BY scenario.sort_order,scenario.id", (service_id,),
+    ).fetchall()
+    valid_scenarios = tuple(
+        scenario for scenario in scenario_rows
+        if publishing_repository._valid_related_service_scenario(db, scenario["id"])
+    )
+    scenario_ids = tuple(scenario["id"] for scenario in valid_scenarios)
+    scenarios = []
+    for scenario in valid_scenarios:
+        identity = _published_scenario_identity(db, scenario["id"], now)
+        scenarios.append(ServiceScenario(
+            scenario["code"],
+            identity["title"] if identity is not None else None,
+            identity["slug"] if identity is not None else None,
+            scenario["integration_level"],
+        ))
+    deliverables = tuple(
+        ServiceDeliverable(item["code"], item["title"], item["description"])
+        for item in db.execute(
+            "SELECT code,title,description FROM service_deliverables "
+            "WHERE service_id=? AND status='published' ORDER BY sort_order,id",
+            (service_id,),
+        )
+    )
+    integration_values = {scenario.integration_code for scenario in scenarios}
+    return ServiceAuthority(
+        service_id=row["id"], code=row["code"], category_code=row["category"],
+        public_name=row["public_name"], min_budget=row["min_budget"], max_budget=row["max_budget"],
+        min_weeks=row["min_weeks"], max_weeks=row["max_weeks"],
+        implementation_steps=implementation_steps, prerequisites=prerequisites,
+        not_included=not_included, acceptance=acceptance,
+        support_days=row["support_days"], support_description=row["support_description"],
+        public_disclaimer=row["public_disclaimer"], deliverables=deliverables,
+        scenarios=tuple(scenarios), industries=_service_facets(db, scenario_ids, "industries"),
+        departments=_service_facets(db, scenario_ids, "departments"),
+        pains=_service_facets(db, scenario_ids, "pains"),
+        integration_codes=tuple(code for code in INTEGRATION_ORDER if code in integration_values),
+    )
+
+
+def _valid_service_authority(authority):
+    return bool(
+        type(authority) is ServiceAuthority
+        and type(authority.service_id) is int and authority.service_id > 0
+        and is_exact_nonblank_text(authority.code)
+        and authority.category_code in SERVICE_CATEGORY_LABELS
+        and is_exact_nonblank_text(authority.public_name)
+        and is_valid_public_budget_range(authority.min_budget, authority.max_budget)
+        and is_valid_public_week_range(authority.min_weeks, authority.max_weeks)
+        and _nonblank_values(authority.implementation_steps)
+        and _nonblank_values(authority.prerequisites)
+        and _nonblank_values(authority.not_included)
+        and _nonblank_values(authority.acceptance)
+        and type(authority.support_days) is int and authority.support_days > 0
+        and is_exact_nonblank_text(authority.support_description)
+        and is_exact_nonblank_text(authority.public_disclaimer)
+        and authority.deliverables
+        and all(
+            is_exact_nonblank_text(item.code) and is_exact_nonblank_text(item.title)
+            and (item.description is None or is_exact_nonblank_text(item.description))
+            for item in authority.deliverables
+        )
+        and authority.scenarios
+        and all(
+            is_exact_nonblank_text(item.code) and item.integration_code in INTEGRATION_LABELS
+            and (item.title is None or is_exact_nonblank_text(item.title))
+            and (item.slug is None or is_exact_nonblank_text(item.slug))
+            for item in authority.scenarios
+        )
+        and authority.industries and authority.departments
+        and all(
+            is_exact_nonblank_text(item.code) and is_exact_nonblank_text(item.label)
+            for values in (authority.industries, authority.departments, authority.pains)
+            for item in values
+        )
+        and authority.integration_codes
+        and all(code in INTEGRATION_LABELS for code in authority.integration_codes)
+    )
+
+
+def _service_related_items(db, content_id, now, kind):
+    relation_table, owner_column, target_column = {
+        "case": ("service_cases", "service_content_item_id", "case_content_group_id"),
+        "resource": ("service_resources", "service_content_item_id", "resource_content_group_id"),
+    }[kind]
+    clause, arguments = _public_item_where(now)
+    rows = db.execute(
+        "SELECT ci.title,ci.slug FROM " + relation_table + " relation "
+        "JOIN content_items ci ON ci.content_group_id=relation." + target_column + " "
+        f"WHERE relation.{owner_column}=? AND ci.entry_type=? AND {clause} "
+        "ORDER BY relation.sort_order,ci.id",
+        (content_id, kind, *arguments),
+    ).fetchall()
+    return tuple(MappingProxyType(dict(row)) for row in rows)
+
+
+def _service_projection(db, item, redirect, now, authority: ServiceAuthority | None = None):
+    if not _valid_public_item_text(item):
+        return None
+    group = db.execute(
+        "SELECT service_id FROM content_groups WHERE id=?", (item["content_group_id"],)
+    ).fetchone()
+    if group is None or group["service_id"] is None:
+        return None
+    if authority is not None and authority.service_id != group["service_id"]:
+        return None
+    authority = authority if authority is not None else _service_authority(db, group["service_id"], now)
+    if not _valid_service_authority(authority):
+        return None
+    blocks = _blocks(db, item["id"])
+    maturity_codes = _names(
+        db,
+        "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
+        "ORDER BY CASE maturity_code WHEN 'explore' THEN 1 WHEN 'pilot' THEN 2 "
+        "WHEN 'scale' THEN 3 WHEN 'collaborate' THEN 4 ELSE 5 END,maturity_code",
+        (item["id"],),
+    )
+    if (
+        not _meaningful_blocks(blocks)
+        or not maturity_codes
+        or len(set(maturity_codes)) != len(maturity_codes)
+        or any(code not in MATURITY_LABELS for code in maturity_codes)
+    ):
+        return None
+    return MappingProxyType({
+        "code": authority.code, "slug": item["slug"], "redirect": redirect,
+        "title": item["title"], "summary": item["summary"],
+        "seo_title": item["seo_title"], "seo_description": item["seo_description"],
+        "blocks": blocks, "category": SERVICE_CATEGORY_LABELS[authority.category_code],
+        "integration": tuple(
+            ServiceFacet(code, INTEGRATION_LABELS[code]) for code in authority.integration_codes
+        ),
+        "industries": authority.industries, "departments": authority.departments,
+        "pains": authority.pains,
+        "maturity": tuple(ServiceFacet(code, MATURITY_LABELS[code]) for code in maturity_codes),
+        "implementation_steps": authority.implementation_steps,
+        "prerequisites": authority.prerequisites, "not_included": authority.not_included,
+        "acceptance": authority.acceptance, "deliverables": authority.deliverables,
+        "timeline": (authority.min_weeks, authority.max_weeks),
+        "budget": (authority.min_budget, authority.max_budget),
+        "support_days": authority.support_days,
+        "support_description": authority.support_description,
+        "public_disclaimer": authority.public_disclaimer,
+        "scenarios": tuple(
+            scenario for scenario in authority.scenarios
+            if scenario.title is not None and scenario.slug is not None
+        ),
+        "cases": _service_related_items(db, item["id"], now, "case"),
+        "resources": _service_related_items(db, item["id"], now, "resource"),
+    })
+
+
 def _scenario_authority(db, scenario_id):
     row = db.execute("SELECT * FROM scenarios WHERE id=? AND status='published'", (scenario_id,)).fetchone()
     if row is None:
@@ -685,6 +973,55 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         if item is None:
             return None
         return _scenario_projection(db, item, redirect, authority)
+    finally:
+        db.close()
+
+
+def public_services(page_request: PageRequest, now) -> Page[ServiceCard]:
+    db = models.get_db()
+    try:
+        clause, arguments = _public_item_where(now)
+        rows = db.execute(
+            "SELECT ci.* FROM services service "
+            "JOIN content_groups g ON g.service_id=service.id "
+            "JOIN content_items ci ON ci.content_group_id=g.id "
+            f"WHERE service.status='published' AND ci.entry_type='service' AND {clause} "
+            "ORDER BY service.sort_order,service.id",
+            arguments,
+        ).fetchall()
+        cards = []
+        for row in rows:
+            service = _service_projection(db, row, False, now)
+            if service is None:
+                continue
+            cards.append(ServiceCard(
+                code=service["code"], slug=service["slug"], title=service["title"],
+                summary=service["summary"], category=service["category"],
+                budget=service["budget"], timeline=service["timeline"],
+            ))
+        total = len(cards)
+        if total == 0:
+            return Page((), 1, page_request.per_page, 0, 0)
+        total_pages = (total + page_request.per_page - 1) // page_request.per_page
+        page_number = page_request.page if page_request.page <= total_pages else 1
+        first = (page_number - 1) * page_request.per_page
+        return Page(
+            tuple(cards[first:first + page_request.per_page]),
+            page_number, page_request.per_page, total, total_pages,
+        )
+    finally:
+        db.close()
+
+
+def public_service(
+    slug: str, now, authority: ServiceAuthority | None = None
+) -> Mapping[str, Any] | None:
+    db = models.get_db()
+    try:
+        item, redirect = _resolution(db, "service", slug, now)
+        if item is None:
+            return None
+        return _service_projection(db, item, redirect, now, authority)
     finally:
         db.close()
 

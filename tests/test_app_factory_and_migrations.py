@@ -105,6 +105,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "005_v2_appointments_analytics",
         "006_content_catalog",
         "007_scenario_public_inputs",
+        "008_service_content_maturity",
     ]
     assert sentinel == "keep-me"
 
@@ -150,11 +151,11 @@ def test_base_design_system_and_behaviors_are_external_static_assets(client):
     assert b"Scroll animations + Sticky CTA" not in response.data
 
 
-def test_page_specific_css_block_still_renders_after_base_extraction(client):
+def test_legacy_services_path_redirects_to_the_canonical_catalog(client):
     response = client.get("/services")
 
-    assert response.status_code == 200
-    assert b".service-hero" in response.data
+    assert response.status_code == 301
+    assert response.headers["Location"] == "/service-packages"
 
 
 def test_shared_shells_are_composed_from_named_template_components():

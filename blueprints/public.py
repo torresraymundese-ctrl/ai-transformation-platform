@@ -1,6 +1,6 @@
 """Public website routes."""
 
-from flask import Blueprint, abort, render_template, request
+from flask import Blueprint, abort, redirect, render_template, request
 
 import content_repository
 from validation import ValidationError, text as valid_text
@@ -36,13 +36,7 @@ def index():
 
 @bp.route("/services")
 def services_page():
-    services = content_repository.services_by_tier()
-    return render_template(
-        "services.html",
-        starter=services["starter"],
-        accelerate=services["accelerate"],
-        flagship=services["flagship"],
-    )
+    return redirect("/service-packages", code=301)
 
 
 @bp.route("/cases")

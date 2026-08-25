@@ -1,0 +1,557 @@
+"""Published service packages preserve frozen V2 delivery authority."""
+
+from dataclasses import replace
+from datetime import datetime, timedelta
+import hashlib
+import json
+import sqlite3
+import uuid
+
+from bs4 import BeautifulSoup
+import pytest
+
+import catalog_content_repository as catalog
+from content_clock import SHANGHAI
+from content_contracts import ContentBlock, ContentDraft
+from content_validation import ContentValidationError, validate_content_draft
+from publishing_service import (
+    archive_content,
+    copy_revision,
+    publish_content,
+    publish_due_content,
+    schedule_content,
+)
+
+
+NOW = datetime(2026, 8, 24, 10, 0, 0, tzinfo=SHANGHAI)
+NOW_TEXT = "2026-08-24 10:00:00"
+SERVICE_REQUIRED_SECTIONS = {
+    "industries", "departments", "maturity", "pains", "scope",
+    "not-included", "deliverables", "implementation-steps",
+    "prerequisites", "timeline", "budget", "acceptance", "support",
+    "related-content", "pricing-disclaimer",
+}
+SERVICE_MATURITY = {
+    "foundation_workshop": ("explore",),
+    "knowledge_assistant_pilot": ("explore", "pilot", "scale"),
+    "customer_growth_pilot": ("explore", "pilot", "scale"),
+    "workflow_automation": ("explore", "pilot", "scale"),
+    "data_insight": ("pilot", "scale", "collaborate"),
+    "industry_integration": ("pilot", "scale", "collaborate"),
+}
+SERVICE_FACETS = {
+    "foundation_workshop": {
+        "industries": (
+            ("manufacturing", "制造业"), ("retail", "零售电商"),
+            ("professional_knowledge", "知识型专业服务"),
+            ("software_creative", "软件与创意服务"),
+        ),
+        "departments": (
+            ("production", "生产"), ("merchandising", "商品运营"),
+            ("delivery", "项目交付"), ("product_delivery", "产品与交付"),
+            ("quality", "质量"), ("store_operations", "门店运营"),
+            ("knowledge_research", "知识研究"), ("design_content", "设计与内容"),
+            ("equipment", "设备"), ("supply_chain", "供应链"),
+            ("client_growth", "客户增长"), ("engineering", "工程研发"),
+            ("marketing", "市场营销"), ("contracts_risk", "合同与风险"),
+            ("marketing_sales", "市场与销售"), ("sales_service", "销售与服务"),
+            ("customer_service", "客户服务"), ("operations", "运营管理"),
+            ("customer_success", "客户成功"), ("finance_hr", "财务与人力"),
+            ("people", "人才管理"),
+        ),
+        "pains": (),
+    },
+    "knowledge_assistant_pilot": {
+        "industries": (
+            ("manufacturing", "制造业"),
+            ("professional_knowledge", "知识型专业服务"),
+            ("software_creative", "软件与创意服务"),
+        ),
+        "departments": (
+            ("production", "生产"), ("delivery", "项目交付"),
+            ("knowledge_research", "知识研究"), ("equipment", "设备"),
+            ("engineering", "工程研发"), ("customer_success", "客户成功"),
+            ("finance_hr", "财务与人力"), ("people", "人才管理"),
+        ),
+        "pains": (
+            ("knowledge_search", "知识与资料检索"), ("document_search", "文档检索"),
+            ("equipment_maintenance", "设备维护"), ("client_service", "客户服务"),
+            ("customer_support", "客户支持"), ("knowledge_docs", "知识文档"),
+            ("office_documents", "办公文档处理"), ("talent_knowledge", "人才与知识管理"),
+        ),
+    },
+    "customer_growth_pilot": {
+        "industries": (("retail", "零售电商"), ("software_creative", "软件与创意服务")),
+        "departments": (
+            ("merchandising", "商品运营"), ("store_operations", "门店运营"),
+            ("design_content", "设计与内容"), ("marketing", "市场营销"),
+            ("marketing_sales", "市场与销售"), ("customer_service", "客户服务"),
+        ),
+        "pains": (
+            ("customer_service", "客户服务"), ("marketing_content", "营销内容"),
+            ("content_creation", "内容创作"), ("member_operations", "会员运营"),
+            ("pricing_selection", "选品与定价"), ("marketing_sales", "市场与销售"),
+        ),
+    },
+    "workflow_automation": {
+        "industries": (("professional_knowledge", "知识型专业服务"),),
+        "departments": (
+            ("delivery", "项目交付"), ("contracts_risk", "合同与风险"),
+            ("operations", "运营管理"),
+        ),
+        "pains": (
+            ("proposal_drafting", "方案撰写"), ("project_delivery", "项目交付"),
+            ("contract_review", "合同审查"), ("billing_reconciliation", "账单与对账"),
+        ),
+    },
+    "data_insight": {
+        "industries": (("manufacturing", "制造业"), ("retail", "零售电商")),
+        "departments": (
+            ("production", "生产"), ("merchandising", "商品运营"),
+            ("store_operations", "门店运营"), ("supply_chain", "供应链"),
+        ),
+        "pains": (
+            ("production_reporting", "生产报表"),
+            ("inventory_replenishment", "库存补货"), ("scheduling", "生产排程"),
+            ("sales_analysis", "销售分析"), ("inventory_supply", "库存与供应"),
+            ("supply_reconciliation", "供应链对账"),
+        ),
+    },
+    "industry_integration": {
+        "industries": (
+            ("manufacturing", "制造业"),
+            ("professional_knowledge", "知识型专业服务"),
+            ("software_creative", "软件与创意服务"),
+        ),
+        "departments": (
+            ("production", "生产"), ("delivery", "项目交付"),
+            ("product_delivery", "产品与交付"), ("quality", "质量"),
+            ("engineering", "工程研发"), ("operations", "运营管理"),
+        ),
+        "pains": (
+            ("requirements", "需求管理"), ("quality_inspection", "质量检测"),
+            ("project_delivery", "项目交付"), ("quality_review", "质量审查"),
+            ("operations_analysis", "运营分析"),
+        ),
+    },
+}
+
+
+def _service_draft(*, maturity_codes=("explore",)):
+    return ContentDraft(
+        entry_type="service", slug="schema-service", title="服务架构验证",
+        summary="验证服务修订的成熟度关系在持久化前完整受控。",
+        seo_title="服务架构验证", seo_description="验证服务包成熟度只允许四个固定阶段且不能为空。",
+        extension={"service_id": 1},
+        blocks=(ContentBlock("rich_text", body_html="<p>服务说明</p>"),),
+        maturity_codes=maturity_codes,
+    )
+
+
+def _page(response):
+    assert response.status_code == 200
+    return BeautifulSoup(response.data, "html.parser")
+
+
+def _publish_scenario_content(db):
+    db.execute(
+        "UPDATE content_items SET status='published',published_at=? "
+        "WHERE entry_type='scenario' AND status='draft'",
+        (NOW_TEXT,),
+    )
+    db.commit()
+
+
+def _service_item(db, code, status):
+    return db.execute(
+        "SELECT ci.*,g.service_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN services s ON s.id=g.service_id "
+        "WHERE ci.entry_type='service' AND s.code=? AND ci.status=?",
+        (code, status),
+    ).fetchone()
+
+
+def _publish_service(db, code):
+    item = _service_item(db, code, "draft")
+    assert item is not None
+    publish_content(item["id"], item["lock_version"], actor="test-admin", now=NOW)
+    return _service_item(db, code, "published")
+
+
+@pytest.fixture()
+def published_services(client, db):
+    _publish_scenario_content(db)
+    for code in SERVICE_MATURITY:
+        _publish_service(db, code)
+    return client
+
+
+def test_008_migration_allows_exact_service_owner_and_seed_is_explicit(db):
+    versions = tuple(row[0] for row in db.execute(
+        "SELECT version FROM schema_migrations ORDER BY version"
+    ))
+    assert versions[-1] == "008_service_content_maturity"
+
+    actual = {}
+    for code in SERVICE_MATURITY:
+        item = _service_item(db, code, "draft")
+        actual[code] = tuple(row[0] for row in db.execute(
+            "SELECT maturity_code FROM content_maturity_levels "
+            "WHERE content_item_id=? ORDER BY sort_order,maturity_code", (item["id"],)
+        ))
+    assert actual == SERVICE_MATURITY
+
+    service = _service_item(db, "foundation_workshop", "draft")
+    db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (service["id"],))
+    db.execute(
+        "INSERT INTO content_maturity_levels (content_item_id,maturity_code,sort_order) "
+        "VALUES (?,?,?)", (service["id"], "explore", 0),
+    )
+    industry_id = db.execute(
+        "SELECT ci.id FROM content_items ci WHERE ci.entry_type='industry' "
+        "AND ci.status='draft' ORDER BY ci.id LIMIT 1"
+    ).fetchone()[0]
+    with pytest.raises(sqlite3.IntegrityError, match="maturity level owner"):
+        db.execute(
+            "INSERT INTO content_maturity_levels (content_item_id,maturity_code,sort_order) "
+            "VALUES (?,?,?)", (industry_id, "explore", 0),
+        )
+
+
+def test_validation_requires_nonempty_exact_service_maturity():
+    validated = validate_content_draft(
+        _service_draft(maturity_codes=("explore", "pilot", "scale", "collaborate"))
+    )
+    assert validated.maturity_codes == ("explore", "pilot", "scale", "collaborate")
+
+    for maturity_codes in ((), ("explore", "explore"), ("optimize",)):
+        with pytest.raises(ContentValidationError) as error:
+            validate_content_draft(_service_draft(maturity_codes=maturity_codes))
+        assert error.value.code == "maturity_invalid"
+
+
+def test_service_list_uses_page_contract_shell_canonical_and_compatibility_redirect(
+    published_services,
+):
+    response = published_services.get("/service-packages")
+    document = _page(response)
+    assert {node["data-service-code"] for node in document.select("[data-service-code]")} == set(SERVICE_MATURITY)
+    assert document.select_one('link[rel="canonical"]')["href"] == "https://test.example/service-packages"
+    assert document.select_one('body[data-analytics-page="services"]') is not None
+    assert response.headers["Cache-Control"] == "private, no-store"
+    compatibility = published_services.get("/services")
+    assert compatibility.status_code == 301
+    assert compatibility.headers["Location"].endswith("/service-packages")
+
+
+def test_every_public_service_detail_has_complete_delivery_structure_and_ctas(
+    published_services,
+):
+    for code in SERVICE_MATURITY:
+        slug = code.replace("_", "-")
+        response = published_services.get(f"/service-packages/{slug}")
+        document = _page(response)
+        assert SERVICE_REQUIRED_SECTIONS <= {
+            node["data-service-section"] for node in document.select("[data-service-section]")
+        }
+        assert document.select_one('link[rel="canonical"]')["href"] == (
+            f"https://test.example/service-packages/{slug}"
+        )
+        assert document.select_one('[data-service-cta="primary"][href="/assessment"]') is not None
+        assert document.select_one('[data-service-cta="secondary"][href="/cases"]') is not None
+        assert response.headers["Cache-Control"] == "private, no-store"
+        assert document.select_one('body[data-analytics-page="services"]') is not None
+
+
+def test_six_services_render_exact_deduplicated_ordered_chinese_facets(published_services):
+    maturity_labels = {
+        "explore": "探索", "pilot": "试点", "scale": "规模化", "collaborate": "协同",
+    }
+    for code, expected in SERVICE_FACETS.items():
+        document = _page(published_services.get(f"/service-packages/{code.replace('_', '-')}"))
+        for facet in ("industries", "departments", "pains"):
+            nodes = document.select(
+                f'[data-service-section="{facet}"] [data-facet-code]'
+            )
+            assert tuple((node["data-facet-code"], node.get_text(strip=True)) for node in nodes) == expected[facet]
+        maturity = document.select('[data-service-section="maturity"] [data-maturity-code]')
+        assert tuple(
+            (node["data-maturity-code"], node.get_text(strip=True)) for node in maturity
+        ) == tuple((value, maturity_labels[value]) for value in SERVICE_MATURITY[code])
+        if not expected["pains"]:
+            empty = document.select_one('[data-service-section="pains"] [data-empty-state]')
+            assert empty is not None
+            assert empty.get_text(strip=True) == "暂无特定痛点限制"
+
+
+def test_service_detail_formats_budget_weeks_fixed_labels_and_no_raw_values(
+    published_services,
+):
+    expected = {
+        "foundation_workshop": ("20,000—50,000 元", "2—4 周", "基础准备", ("低",)),
+        "knowledge_assistant_pilot": ("50,000—100,000 元", "4—8 周", "试点验证", ("低", "中")),
+        "customer_growth_pilot": ("80,000—150,000 元", "4—10 周", "试点验证", ("低", "中")),
+        "workflow_automation": ("100,000—200,000 元", "6—12 周", "标准交付", ("低", "中")),
+        "data_insight": ("100,000—250,000 元", "8—16 周", "标准交付", ("中", "高")),
+        "industry_integration": ("200,000—500,000 元", "12—24 周", "集成交付", ("高",)),
+    }
+    for code, (budget, weeks, category, integration) in expected.items():
+        document = _page(published_services.get(f"/service-packages/{code.replace('_', '-')}"))
+        assert document.select_one('[data-service-section="budget"]').get_text(" ", strip=True).endswith(budget)
+        assert document.select_one('[data-service-section="timeline"]').get_text(" ", strip=True).endswith(weeks)
+        assert document.select_one("[data-service-category]").get_text(strip=True) == category
+        assert tuple(node.get_text(strip=True) for node in document.select("[data-integration-code]")) == integration
+        visible = document.get_text(" ", strip=True)
+        assert code not in visible
+        assert "_json" not in visible.lower()
+        assert "[\"" not in visible
+
+
+def test_delivery_authority_fields_and_optional_relations_render_without_placeholders(
+    published_services,
+):
+    document = _page(published_services.get("/service-packages/foundation-workshop"))
+    assert [node.get_text(strip=True) for node in document.select("[data-deliverable-code]")] == [
+        "流程现状基线", "数据清单", "场景优先级矩阵", "90 天计划", "工作坊报告",
+    ]
+    assert "定制软件开发" in document.select_one('[data-service-section="not-included"]').get_text()
+    assert "负责人书面确认" in document.select_one('[data-service-section="acceptance"]').get_text()
+    assert "15 天" in document.select_one('[data-service-section="support"]').get_text()
+    assert document.select('[data-related-kind="case"]') == []
+    assert document.select('[data-related-kind="resource"]') == []
+    assert document.select('[data-related-kind="scenario"]') == []
+    assert "最终范围和报价以需求确认结果为准" in document.select_one(
+        '[data-service-section="pricing-disclaimer"]'
+    ).get_text()
+
+
+def test_service_hides_related_scenario_when_scenario_page_is_incomplete(
+    client, db,
+):
+    current = _publish_service(db, "foundation_workshop")
+
+    document = _page(client.get(f"/service-packages/{current['slug']}"))
+    related = document.select('[data-related-kind="scenario"]')
+    assert related == []
+    assert "关联场景" not in document.get_text(" ", strip=True)
+    assert "data_process_foundation" not in document.get_text(" ", strip=True)
+    assert client.get("/scenarios/data-process-foundation").status_code == 404
+
+
+def test_draft_future_archived_and_missing_service_details_are_private_404(client, db):
+    draft = _service_item(db, "knowledge_assistant_pilot", "draft")
+    assert client.get(f"/service-packages/{draft['slug']}").status_code == 404
+    future = _service_item(db, "customer_growth_pilot", "draft")
+    db.execute(
+        "UPDATE content_items SET status='published',published_at=?,publish_at=? WHERE id=?",
+        (NOW_TEXT, "2030-01-01 00:00:00", future["id"]),
+    )
+    db.commit()
+    assert client.get(f"/service-packages/{future['slug']}").status_code == 404
+    assert client.get("/service-packages/not-a-service").status_code == 404
+    _publish_scenario_content(db)
+    published = _publish_service(db, "foundation_workshop")
+    assert client.get(f"/service-packages/{published['slug']}").status_code == 200
+    archive_content(published["id"], published["lock_version"], actor="test-admin", now=NOW)
+    assert client.get(f"/service-packages/{published['slug']}").status_code == 404
+
+
+def test_service_authority_injection_never_falls_back_to_mutable_core_tables(db):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    authority = catalog._service_authority(db, current["service_id"], NOW)
+    injected = replace(
+        authority,
+        min_budget=12345,
+        max_budget=67890,
+        scenarios=(
+            replace(
+                authority.scenarios[0],
+                title="快照权威场景",
+                slug="snapshot-authority-scenario",
+            ),
+        ),
+    )
+    db.execute("DELETE FROM scenario_services WHERE service_id=?", (current["service_id"],))
+    db.execute(
+        "UPDATE services SET min_budget=1,max_budget=1 WHERE id=?", (current["service_id"],)
+    )
+    db.commit()
+
+    projection = catalog.public_service(current["slug"], NOW, authority=injected)
+    assert projection is not None
+    assert projection["budget"] == (12345, 67890)
+    assert projection["scenarios"] == injected.scenarios
+    assert catalog.public_service(
+        current["slug"], NOW, authority=replace(injected, industries=())
+    ) is None
+
+
+def _corrupt_service_dependency(db, current, draft_id, source):
+    service_id = current["service_id"]
+    if source == "maturity":
+        db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (draft_id,))
+    elif source == "related_scenario":
+        db.execute("DELETE FROM scenario_services WHERE service_id=?", (service_id,))
+    elif source == "industry":
+        db.execute(
+            "UPDATE industry_branches SET status='archived' WHERE id IN ("
+            "SELECT sb.industry_branch_id FROM scenario_services ss "
+            "JOIN scenario_branches sb ON sb.scenario_id=ss.scenario_id WHERE ss.service_id=?)",
+            (service_id,),
+        )
+    elif source == "department":
+        db.execute(
+            "UPDATE departments SET status='archived' WHERE id IN ("
+            "SELECT sd.department_id FROM scenario_services ss "
+            "JOIN scenario_departments sd ON sd.scenario_id=ss.scenario_id WHERE ss.service_id=?)",
+            (service_id,),
+        )
+    elif source == "scenario_name":
+        db.execute(
+            "UPDATE scenarios SET public_name=' ' WHERE id IN ("
+            "SELECT scenario_id FROM scenario_services WHERE service_id=?)",
+            (service_id,),
+        )
+    elif source == "deliverables":
+        db.execute("UPDATE service_deliverables SET status='archived' WHERE service_id=?", (service_id,))
+    elif source == "deliverable_title":
+        db.execute(
+            "UPDATE service_deliverables SET title=' ' WHERE id=(SELECT MIN(id) FROM service_deliverables WHERE service_id=?)",
+            (service_id,),
+        )
+    else:
+        column, value = {
+            "name": ("public_name", " "), "category": ("category", "unknown"),
+            "budget": ("max_budget", 1), "weeks": ("max_weeks", 1),
+            "steps": ("implementation_steps_json", "[]"),
+            "prerequisites": ("prerequisites_json", "[]"),
+            "exclusions": ("not_included_json", "[]"),
+            "acceptance": ("acceptance_json", "[]"),
+            "support": ("support_days", 0), "support_text": ("support_description", " "),
+            "disclaimer": ("public_disclaimer", " "),
+        }[source]
+        db.execute(f"UPDATE services SET {column}=? WHERE id=?", (value, service_id))
+    db.commit()
+
+
+@pytest.mark.parametrize("source", (
+    "maturity", "related_scenario", "industry", "department", "scenario_name", "deliverables",
+    "deliverable_title", "name", "category", "budget", "weeks", "steps",
+    "prerequisites", "exclusions", "acceptance", "support", "support_text", "disclaimer",
+))
+def test_formal_service_publish_rejects_each_missing_authority_source_and_keeps_old_online(
+    client, db, source,
+):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    _corrupt_service_dependency(db, current, revision_id, source)
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(revision_id, 1, actor="test-admin", now=NOW + timedelta(minutes=1))
+    assert error.value.code == "service_public_incomplete"
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+    revision = db.execute(
+        "SELECT status,lock_version,publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()
+    assert tuple(revision) == ("draft", 1, None)
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'",
+        (revision_id,),
+    ).fetchone()[0] == 0
+
+
+def test_due_service_validation_failure_keeps_old_revision_and_has_no_success_audit(client, db):
+    _publish_scenario_content(db)
+    current = _publish_service(db, "foundation_workshop")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    due = NOW + timedelta(hours=1)
+    schedule_content(revision_id, 1, due, actor="test-admin", now=NOW)
+    db.execute("DELETE FROM content_maturity_levels WHERE content_item_id=?", (revision_id,))
+    db.commit()
+
+    result = publish_due_content(actor="test-admin", now=due)
+    assert result.published_ids == ()
+    assert result.failures == ((revision_id, "validation_failed"),)
+    assert db.execute("SELECT status FROM content_items WHERE id=?", (current["id"],)).fetchone()[0] == "published"
+    revision = db.execute(
+        "SELECT status,publish_at FROM content_items WHERE id=?", (revision_id,)
+    ).fetchone()
+    assert tuple(revision) == ("draft", None)
+    events = tuple(row[0] for row in db.execute(
+        "SELECT event_code FROM content_audit_events WHERE content_item_id=? ORDER BY id", (revision_id,)
+    ))
+    assert "content_published" not in events
+    assert events[-1] == "content_due_failed"
+
+
+def _complete_assessment(client):
+    client.application.config.update({
+        "PRIVACY_PROCESSOR_NAME": "测试处理者",
+        "PRIVACY_CONTACT": "privacy@example.invalid",
+        "PRIVACY_POLICY_URL": "https://example.invalid/privacy",
+    })
+    config = client.get("/api/v2/assessment/config/manufacturing").get_json()
+    response = client.post(
+        "/api/v2/assessment/complete",
+        json={
+            "submission_key": str(uuid.uuid4()),
+            "assessment": {
+                "schema_version": "2.0",
+                "profile": {
+                    "branch_code": "manufacturing", "subbranch_code": "discrete_manufacturing",
+                    "department_code": "production", "company_size_code": "50_200",
+                    "pain_codes": ["production_reporting"],
+                },
+                "answers": {code: "level_3" for code in (
+                    "business_value_frequency", "business_value_scope", "process_documentation",
+                    "process_stability", "data_availability", "data_quality", "systems_foundation",
+                    "systems_automation", "organization_owner", "organization_adoption",
+                    "delivery_budget", "delivery_timeline",
+                )},
+                "roi_choices": {
+                    "headcount": "6_20", "monthly_hours": "20_80",
+                    "monthly_cost": "8000_15000", "loss_factor": "normal",
+                    "budget": "50000_200000",
+                },
+            },
+            "contact": {
+                "company_name": "示例企业", "contact_name": "张先生", "phone": "13800138000",
+                "email": "private@example.invalid", "wechat": "private-wechat",
+            },
+            "consent": {"accepted": True, "policy_version": "2026-08-19"},
+            "attribution": {"source": "website_assessment"},
+        },
+        headers={"X-CSRF-Token": config["csrf_token"]},
+    )
+    assert response.status_code == 200
+    return response.get_json()["assessment_id"]
+
+
+def test_healthy_narrative_revision_replaces_public_service_without_changing_report_snapshot(
+    published_services, db,
+):
+    assessment_id = _complete_assessment(published_services)
+    raw_before = db.execute(
+        "SELECT report_snapshot_json FROM assessments WHERE id=?", (assessment_id,)
+    ).fetchone()[0]
+    digest_before = hashlib.sha256(raw_before.encode("utf-8")).hexdigest()
+    current = _service_item(db, "foundation_workshop", "published")
+    revision_id = copy_revision(current["id"], actor="test-admin", now=NOW)
+    db.execute(
+        "UPDATE content_items SET title=?,summary=? WHERE id=?",
+        ("更新后的 AI 就绪基础工作坊", "只更新叙事文案，不改动报告所需的服务权威字段。", revision_id),
+    )
+    db.commit()
+
+    result = publish_content(revision_id, 1, actor="test-admin", now=NOW + timedelta(minutes=1))
+    raw_after = db.execute(
+        "SELECT report_snapshot_json FROM assessments WHERE id=?", (assessment_id,)
+    ).fetchone()[0]
+    assert result.archived_id == current["id"]
+    assert hashlib.sha256(raw_after.encode("utf-8")).hexdigest() == digest_before
+    document = _page(published_services.get("/service-packages/foundation-workshop"))
+    assert document.h1.get_text(strip=True) == "更新后的 AI 就绪基础工作坊"
+    assert "20,000—50,000 元" in document.get_text(" ", strip=True)

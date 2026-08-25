@@ -191,6 +191,26 @@ def test_content_limits_fail_with_stable_codes(field, value, code):
     assert error.value.code == code
 
 
+def test_service_maturity_is_explicit_nonempty_and_owner_scoped():
+    service = _draft(
+        entry_type="service",
+        extension={"service_id": 1},
+        maturity_codes=("explore", "pilot", "scale"),
+    )
+
+    assert validate_content_draft(service).maturity_codes == (
+        "explore",
+        "pilot",
+        "scale",
+    )
+    with pytest.raises(ContentValidationError, match="maturity_invalid"):
+        validate_content_draft(replace(service, maturity_codes=()))
+    with pytest.raises(ContentValidationError, match="maturity_invalid"):
+        validate_content_draft(
+            _draft(entry_type="industry", extension={"industry_id": 1}, maturity_codes=("explore",))
+        )
+
+
 def _external_resource(**extension_changes):
     extension = {
         "resource_type": "report",

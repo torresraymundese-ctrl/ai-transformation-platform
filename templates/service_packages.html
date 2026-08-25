@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "components/ui.html" import pagination %}
+{% block title %}服务包目录{% endblock %}
+{% block analytics_page %}services{% endblock %}
+{% block head %}<meta name="description" content="浏览已发布的企业 AI 转型服务包、交付周期和参考预算。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
+{% block content %}
+<main class="container" style="padding:48px 0">
+  <h1>企业 AI 转型服务包</h1>
+  <p>从基础准备、试点验证到标准与集成交付，按实际需求选择。</p>
+  <div class="card-grid">
+    {% for service in page.items %}
+    <article class="card" data-service-code="{{ service.code }}">
+      <p>{{ service.category }}</p>
+      <h2><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></h2>
+      <p>{{ service.summary }}</p>
+      <p>{{ service.timeline[0] }}—{{ service.timeline[1] }} 周 · {{ '{:,.0f}'.format(service.budget[0]) }}—{{ '{:,.0f}'.format(service.budget[1]) }} 元</p>
+    </article>
+    {% endfor %}
+  </div>
+  {% if not page.items %}<p>暂无已发布服务包。</p>{% endif %}
+  {{ pagination(page.page, page.total_pages, 'public_catalog.service_packages', {'per_page': page.per_page}) }}
+  <p><a class="btn btn-primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费评估</a></p>
+</main>
+{% endblock %}

@@ -462,10 +462,14 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
             raise ContentValidationError("relation_duplicate")
         seen_relations.add(key)
         relations.append(replace(relation, sort_order=index))
-    if draft.entry_type == "scenario":
-        if len(set(draft.maturity_codes)) != len(draft.maturity_codes) or any(
+    if draft.entry_type in {"scenario", "service"}:
+        if (
+            (draft.entry_type == "service" and not draft.maturity_codes)
+            or len(set(draft.maturity_codes)) != len(draft.maturity_codes)
+            or any(
             type(code) is not str or code not in MATURITY_CODES
             for code in draft.maturity_codes
+            )
         ):
             raise ContentValidationError("maturity_invalid")
     elif draft.maturity_codes:

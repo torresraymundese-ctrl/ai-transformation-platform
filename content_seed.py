@@ -150,10 +150,10 @@ def _validated_entries(db, payload):
             if entry.get("slug") != code.replace("_", "-"):
                 raise ContentSeedError(f"{kind} slug is invalid")
             maturity_codes = entry.get("maturity_codes", [])
-            if kind == "scenario" and not maturity_codes:
-                raise ContentSeedError("scenario maturity choices are required")
-            if kind != "scenario" and maturity_codes:
-                raise ContentSeedError("maturity choices are scenario-only")
+            if kind in {"scenario", "service"} and not maturity_codes:
+                raise ContentSeedError(f"{kind} maturity choices are required")
+            if kind not in {"scenario", "service"} and maturity_codes:
+                raise ContentSeedError("maturity choices require scenario or service content")
             prepared.append((kind, identity_column, core_row, entry))
     return tuple(prepared)
 

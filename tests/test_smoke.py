@@ -8,7 +8,7 @@ import models
 PUBLIC_PATHS = [
     "/",
     "/health",
-    "/services",
+    "/service-packages",
     "/cases",
     "/assessment",
     "/insights",

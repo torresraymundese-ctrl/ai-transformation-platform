@@ -1068,7 +1068,10 @@ def test_all_six_relation_types_survive_revision_copy(db):
         publish_content(candidate_content, 1, actor="admin", now=NOW)
     identities = {
         "scenario": [row[0] for row in db.execute("SELECT id FROM scenarios WHERE status='published' ORDER BY id LIMIT 2")],
-        "service": [row[0] for row in db.execute("SELECT id FROM services WHERE status='published' ORDER BY id LIMIT 2")],
+        "service": [row[0] for row in db.execute(
+            "SELECT id FROM services WHERE status='published' AND code IS NOT NULL "
+            "ORDER BY sort_order,id LIMIT 2"
+        )],
         "industry": [row["industry_id"] for row in industry_candidates],
     }
     relation_types = (
@@ -1089,9 +1092,11 @@ def test_all_six_relation_types_survive_revision_copy(db):
             seo_description="验证结构化案例与资源关联的完整修订复制。",
             extension={f"{owner_type}_id": core_id},
             relations=(ContentRelation(relation_type, target_group),),
-            blocks=(ContentBlock("rich_text", body_html="<p>行业公开概述。</p>"),)
-            if owner_type == "industry" else (),
-            maturity_codes=("explore",) if owner_type == "scenario" else (),
+            blocks=(ContentBlock("rich_text", body_html="<p>公开关联概述。</p>"),)
+            if owner_type in {"industry", "service"} else (),
+            maturity_codes=("explore",)
+            if owner_type in {"scenario", "service"}
+            else (),
         )
         original = (
             _create_complete_scenario_draft(db, draft)

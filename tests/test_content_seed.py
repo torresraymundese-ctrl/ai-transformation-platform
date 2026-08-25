@@ -27,6 +27,14 @@ EXPECTED_TITLES = {
         "流程自动化交付包", "数据洞察交付包", "行业场景集成交付包",
     },
 }
+EXPECTED_SERVICE_MATURITY = {
+    "foundation_workshop": ["explore"],
+    "knowledge_assistant_pilot": ["explore", "pilot", "scale"],
+    "customer_growth_pilot": ["explore", "pilot", "scale"],
+    "workflow_automation": ["explore", "pilot", "scale"],
+    "data_insight": ["pilot", "scale", "collaborate"],
+    "industry_integration": ["pilot", "scale", "collaborate"],
+}
 
 
 def _catalog_rows(db):
@@ -53,6 +61,10 @@ def test_checked_in_seed_has_exact_frozen_codes_slugs_titles_and_neutral_copy(db
         }
         assert {row["title"] for row in entries} == EXPECTED_TITLES[kind]
         assert all(row["title"].strip() and row["summary"].strip() for row in entries)
+
+    assert {
+        row["code"]: row["maturity_codes"] for row in seed["services"]
+    } == EXPECTED_SERVICE_MATURITY
 
     serialized = json.dumps(seed, ensure_ascii=False)
     for forbidden in ("客户案例", "客户数量", "成功率", "节省", "保证", "承诺", "法律意见"):

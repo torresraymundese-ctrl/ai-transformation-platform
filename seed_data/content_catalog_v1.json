@@ -141,37 +141,43 @@
       "code": "foundation_workshop", "group": "service:foundation_workshop", "slug": "foundation-workshop",
       "title": "AI 就绪基础工作坊", "summary": "用于梳理流程基线、数据清单、场景优先级和阶段计划的工作坊。",
       "seo_title": "AI 就绪基础工作坊", "seo_description": "了解基础工作坊的适用范围、协作准备和交付结构。",
-      "body_html": "<p>具体范围、参与人员和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体范围、参与人员和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["explore"]
     },
     {
       "code": "knowledge_assistant_pilot", "group": "service:knowledge_assistant_pilot", "slug": "knowledge-assistant-pilot",
       "title": "企业知识助手试点", "summary": "用于验证资料权限、检索问答、评测集和管理员操作的试点服务。",
       "seo_title": "企业知识助手试点", "seo_description": "了解知识助手试点的范围、准备条件和交付结构。",
-      "body_html": "<p>具体资料范围、评测方法和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体资料范围、评测方法和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["explore", "pilot", "scale"]
     },
     {
       "code": "customer_growth_pilot", "group": "service:customer_growth_pilot", "slug": "customer-growth-pilot",
       "title": "客户增长助手试点", "summary": "用于验证服务或营销流程、审核话术、事件记录和用户操作的试点服务。",
       "seo_title": "客户增长助手试点", "seo_description": "了解客户增长助手试点的范围、准备条件和交付结构。",
-      "body_html": "<p>具体流程、文案审批和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体流程、文案审批和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["explore", "pilot", "scale"]
     },
     {
       "code": "workflow_automation", "group": "service:workflow_automation", "slug": "workflow-automation",
       "title": "流程自动化交付包", "summary": "用于配置稳定流程、异常队列、执行记录、人工兜底和验收用例的交付服务。",
       "seo_title": "流程自动化交付包", "seo_description": "了解流程自动化的适用范围、准备条件和交付结构。",
-      "body_html": "<p>具体流程、接口、例外处理和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体流程、接口、例外处理和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["explore", "pilot", "scale"]
     },
     {
       "code": "data_insight", "group": "service:data_insight", "slug": "data-insight",
       "title": "数据洞察交付包", "summary": "用于确认指标字典、数据映射、看板、预警规则和对账方法的交付服务。",
       "seo_title": "数据洞察交付包", "seo_description": "了解数据洞察的适用范围、准备条件和交付结构。",
-      "body_html": "<p>具体指标、数据源、对账方法和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体指标、数据源、对账方法和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["pilot", "scale", "collaborate"]
     },
     {
       "code": "industry_integration", "group": "service:industry_integration", "slug": "industry-integration",
       "title": "行业场景集成交付包", "summary": "用于确认方案架构、约定接口、场景配置、安全检查和验收安排的交付服务。",
       "seo_title": "行业场景集成交付包", "seo_description": "了解行业场景集成的适用范围、准备条件和交付结构。",
-      "body_html": "<p>具体架构、接口、测试环境和交付安排以需求确认结果为准。</p>"
+      "body_html": "<p>具体架构、接口、测试环境和交付安排以需求确认结果为准。</p>",
+      "maturity_codes": ["pilot", "scale", "collaborate"]
     }
   ]
 }

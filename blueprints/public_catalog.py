@@ -1,4 +1,4 @@
-"""HTTP-only public adapters for published industry and scenario content."""
+"""HTTP-only public adapters for the published core content catalog."""
 
 from flask import Blueprint, abort, current_app, redirect, render_template, request
 
@@ -50,3 +50,25 @@ def scenario_detail(slug):
     if scenario["redirect"]:
         return redirect(f"/scenarios/{scenario['slug']}", code=301)
     return render_template("scenario_detail.html", scenario=scenario, canonical=_canonical(f"/scenarios/{scenario['slug']}"))
+
+
+@bp.get("/service-packages")
+def service_packages():
+    page = catalog.public_services(parse_pagination(request.args), shanghai_now())
+    return render_template(
+        "service_packages.html", page=page,
+        canonical=_canonical("/service-packages"),
+    )
+
+
+@bp.get("/service-packages/<slug>")
+def service_package_detail(slug):
+    service = catalog.public_service(slug, shanghai_now())
+    if service is None:
+        abort(404)
+    if service["redirect"]:
+        return redirect(f"/service-packages/{service['slug']}", code=301)
+    return render_template(
+        "service_package_detail.html", service=service,
+        canonical=_canonical(f"/service-packages/{service['slug']}"),
+    )

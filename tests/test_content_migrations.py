@@ -375,7 +375,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "007_scenario_public_inputs"
+        )][-1] == "008_service_content_maturity"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
@@ -1124,7 +1124,7 @@ def test_blocks_maturity_resource_types_and_relation_targets_are_constrained(db)
         )
 
 
-def test_maturity_levels_require_a_scenario_owner_on_insert(db):
+def test_maturity_levels_require_a_scenario_or_service_owner_on_insert(db):
     announcement_group = insert_group(db, slug="wrong-maturity-owner")
     announcement_item = insert_item(
         db, announcement_group, slug="wrong-maturity-owner"
@@ -1138,7 +1138,7 @@ def test_maturity_levels_require_a_scenario_owner_on_insert(db):
         )
 
 
-def test_maturity_levels_reject_updating_owner_away_from_scenario(db):
+def test_maturity_levels_reject_updating_owner_away_from_scenario_or_service(db):
     scenario_group = insert_group(db, entry_type="scenario", slug="maturity-scenario")
     scenario_item = insert_item(
         db, scenario_group, entry_type="scenario", slug="maturity-scenario"
