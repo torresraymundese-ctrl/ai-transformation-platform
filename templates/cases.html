@@ -1,22 +1,24 @@
 {% extends "base.html" %}
+{% from "components/content_card.html" import content_card %}
+{% from "components/public_catalog.html" import empty_state, page_header %}
 {% from "components/ui.html" import pagination %}
 {% block title %}已验证案例{% endblock %}
 {% block analytics_page %}cases{% endblock %}
 {% block head %}<meta name="description" content="浏览经真实性、授权、隐私与指标证据审核的企业 AI 实施案例。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
+{% block main_attributes %} class="public-page public-cases"{% endblock %}
 {% block content %}
-<div class="container" style="padding:48px 0">
-  <h1>已验证案例</h1>
-  <p>仅展示已完成真实性、隐私与指标证据审核的 V2 案例。</p>
-  <div class="card-grid">
+{{ page_header("已验证案例", "仅展示已完成真实性、隐私与指标证据审核的 V2 案例。") }}
+<section class="public-list">
+  <div class="public-container">
+  <div class="catalog-grid">
   {% for case in page.items %}
-    <article class="card" data-case-card>
-      <p>{{ case.verification_label }}</p>
-      <h2><a href="{{ url_for('public_catalog.case_detail', slug=case.slug) }}">{{ case.title }}</a></h2>
-      <p>{{ case.summary }}</p>
-    </article>
+    <div data-case-card>
+      {{ content_card(case, url_for('public_catalog.case_detail', slug=case.slug), case.verification_label) }}
+    </div>
   {% endfor %}
   </div>
-  {% if not page.items %}<p data-empty-state>暂无已验证案例。</p>{% endif %}
+  {% if not page.items %}{{ empty_state("暂无已验证案例。") }}{% endif %}
   {{ pagination(page.page, page.total_pages, 'public_catalog.cases_page', {'per_page': page.per_page}) }}
-</div>
+  </div>
+</section>
 {% endblock %}

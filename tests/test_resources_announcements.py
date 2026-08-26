@@ -398,6 +398,17 @@ def test_v2_routes_have_single_owners_and_remove_legacy_admin_writers(
     assert 'href="/admin/articles"' not in dashboard
 
 
+def test_resource_empty_states_keep_the_filtered_reset_route(client):
+    """A filtered empty list must offer the canonical resource-directory reset."""
+    unfiltered = BeautifulSoup(client.get("/resources").data, "html.parser")
+    filtered = BeautifulSoup(client.get("/resources?type=article").data, "html.parser")
+
+    assert unfiltered.select_one('[data-empty-state].ui-empty-state') is not None
+    assert unfiltered.select_one('[data-empty-state] a[href="/resources"]') is None
+    assert filtered.select_one('[data-empty-state].ui-empty-state') is not None
+    assert filtered.select_one('[data-empty-state] a[href="/resources"]') is not None
+
+
 def test_resource_editor_is_choice_first_and_has_exact_schema(admin_client):
     response = admin_client.get("/admin/resources/new")
     assert response.status_code == 200

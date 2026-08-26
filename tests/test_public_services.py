@@ -834,6 +834,7 @@ def test_service_list_empty_and_archived_lifecycle_remains_available(client, db)
     empty = _page(client.get("/service-packages"))
     assert empty.select("[data-service-card]") == []
     assert "暂无已发布服务包" in empty.get_text(" ", strip=True)
+    assert empty.select_one('[data-empty-state].ui-empty-state') is not None
 
     _publish_scenario_content(db)
     published = _publish_service(db, "foundation_workshop")
@@ -849,6 +850,7 @@ def test_service_list_empty_and_archived_lifecycle_remains_available(client, db)
     archived = _page(client.get("/service-packages"))
     assert archived.select("[data-service-card]") == []
     assert "暂无已发布服务包" in archived.get_text(" ", strip=True)
+    assert archived.select_one('[data-empty-state].ui-empty-state') is not None
     assert client.get(
         f"/service-packages/{published['slug']}"
     ).status_code == 404

@@ -93,3 +93,35 @@ def test_navigation_brand_text_overrides_the_legacy_span_color(client):
     assert ".nav-logo .nav-brand-text" in css
     assert "color: var(--ui-ink-950)" in css
     assert ".nav-brand-text strong { color: var(--ui-blue-600); }" in css
+
+
+@pytest.mark.parametrize(
+    "path, page_class",
+    (
+        ("/industries", "public-industries"),
+        ("/scenarios", "public-scenarios"),
+        ("/service-packages", "public-services"),
+        ("/cases", "public-cases"),
+        ("/resources", "public-resources"),
+    ),
+)
+def test_catalog_lists_share_semantic_page_structure(client, path, page_class):
+    """Missing the shared list structure would make this catalog contract fail."""
+    page = _page(client.get(path))
+    main = page.select_one(f"main#main-content.{page_class}")
+
+    assert main is not None
+    assert len(main.select(":scope > .public-page-header h1")) == 1
+    assert main.select_one(".catalog-grid") is not None
+
+
+def test_scenario_filters_keep_accessible_labels_and_selected_values(client):
+    """Dropping a label, selected filter, or reset action would make filtering opaque."""
+    page = _page(client.get("/scenarios?industry=manufacturing&maturity=pilot"))
+    form = page.select_one('form.public-filter[aria-label="筛选场景"]')
+
+    assert form is not None
+    assert form.select_one('label[for="industry"]') is not None
+    assert form.select_one('#industry[value="manufacturing"]') is not None
+    assert form.select_one('#maturity option[selected][value="pilot"]') is not None
+    assert form.select_one('a[href="/scenarios"]') is not None

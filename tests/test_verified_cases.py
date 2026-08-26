@@ -136,6 +136,9 @@ def test_case_cutover_has_single_v2_owner_and_an_honest_empty_state(
     response = client.get("/cases")
     assert response.status_code == 200
     assert "暂无已验证案例" in response.get_data(as_text=True)
+    assert BeautifulSoup(response.data, "html.parser").select_one(
+        '[data-empty-state].ui-empty-state'
+    ) is not None
     assert "某中型制造企业 RAG 知识库落地" not in response.get_data(as_text=True)
     assert "24 个真实" not in response.get_data(as_text=True)
 

@@ -1,0 +1,15 @@
+{% macro page_header(title, summary, eyebrow='') -%}
+<header class="public-page-header">
+  {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
+  <h1>{{ title }}</h1>
+  <p>{{ summary }}</p>
+</header>
+{%- endmacro %}
+
+{% macro empty_state(message, reset_href='') -%}
+<div class="ui-empty-state" data-empty-state>
+  <h2>暂时没有符合条件的内容</h2>
+  <p>{{ message }}</p>
+  {% if reset_href %}<a class="btn btn-outline" href="{{ reset_href }}">清除筛选</a>{% endif %}
+</div>
+{%- endmacro %}

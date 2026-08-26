@@ -1,7 +1,12 @@
-{% macro content_card(item, href, eyebrow='') -%}
-<article class="card content-card">
-  {% if eyebrow %}<p class="content-card-eyebrow">{{ eyebrow }}</p>{% endif %}
-  <h3><a href="{{ href }}">{{ item.title }}</a></h3>
+{% macro content_card(item, href, eyebrow='', heading_level=2) -%}
+<article class="catalog-card">
+  {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
+  {% if heading_level == 3 %}
+    <h3><a class="catalog-card-link" href="{{ href }}">{{ item.title }}</a></h3>
+  {% else %}
+    <h2><a class="catalog-card-link" href="{{ href }}">{{ item.title }}</a></h2>
+  {% endif %}
   <p>{{ item.summary }}</p>
+  <span class="catalog-card-action" aria-hidden="true">查看详情</span>
 </article>
 {%- endmacro %}

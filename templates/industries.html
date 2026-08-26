@@ -1,9 +1,23 @@
 {% extends "base.html" %}
+{% from "components/content_card.html" import content_card %}
+{% from "components/public_catalog.html" import empty_state, page_header %}
 {% block title %}行业 AI 应用方向{% endblock %}
 {% block analytics_page %}industries{% endblock %}
 {% block head %}<meta name="description" content="了解各行业 AI 场景的适用环节、准备条件和实施边界。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
+{% block main_attributes %} class="public-page public-industries"{% endblock %}
 {% block content %}
-<div class="container" style="padding:48px 0"><h1>行业 AI 应用方向</h1><div class="card-grid">
-{% for industry in industries %}<article class="card" data-industry-code="{{ industry.code }}"><h2><a href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}">{{ industry.title }}</a></h2><p>{{ industry.summary }}</p><a class="btn btn-secondary" href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}" aria-label="查看{{ industry.title }}行业详情">查看详情</a></article>{% endfor %}
-</div><p><a class="btn btn-primary" href="/assessment">免费评估</a></p></div>
+{{ page_header("行业 AI 应用方向", "了解各行业 AI 场景的适用环节、准备条件和实施边界。") }}
+<section class="public-list">
+  <div class="public-container">
+    <div class="catalog-grid">
+      {% for industry in industries %}
+      <div data-industry-code="{{ industry.code }}">
+        {{ content_card(industry, url_for('public_catalog.industry_detail', slug=industry.slug)) }}
+      </div>
+      {% endfor %}
+    </div>
+    {% if not industries %}{{ empty_state("暂无已发布行业方向。") }}{% endif %}
+    <p><a class="btn btn-primary" href="/assessment">免费评估</a></p>
+  </div>
+</section>
 {% endblock %}
