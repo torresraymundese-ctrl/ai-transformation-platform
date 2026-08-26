@@ -2,13 +2,14 @@
 {% from "components/content_card.html" import content_card %}
 {% block title %}企业 AI 转型平台 - 经审核的场景、服务与内容{% endblock %}
 {% block analytics_page %}home{% endblock %}
+{% block main_attributes %} class="public-page public-home"{% endblock %}
 {% block head %}
 <meta name="description" content="从已发布的行业方案、AI 场景、服务包、已验证案例和审核资源中选择企业 AI 转型路径。">
 <link rel="canonical" href="{{ canonical }}">
 {% endblock %}
 
 {% block content %}
-<main id="main-content" class="public-page public-home">
+<div>
   <section class="hero">
     <div class="hero-inner">
       <h1>企业 AI 转型，从可验证的业务场景开始</h1>
@@ -98,5 +99,5 @@
       <a href="/assessment" class="btn btn-primary">开始免费评估</a>
     </div>
   </section>
-</main>
+</div>
 {% endblock %}

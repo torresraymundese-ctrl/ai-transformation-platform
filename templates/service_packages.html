@@ -4,7 +4,7 @@
 {% block analytics_page %}services{% endblock %}
 {% block head %}<meta name="description" content="浏览已发布的企业 AI 转型服务包、交付周期和参考预算。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<main class="container" style="padding:48px 0">
+<div class="container" style="padding:48px 0">
   <h1>企业 AI 转型服务包</h1>
   <p>从基础准备、试点验证到标准与集成交付，按实际需求选择。</p>
   <div class="card-grid">
@@ -20,5 +20,5 @@
   {% if not page.items %}<p>暂无已发布服务包。</p>{% endif %}
   {{ pagination(page.page, page.total_pages, 'public_catalog.service_packages', {'per_page': page.per_page}) }}
   <p><a class="btn btn-primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费评估</a></p>
-</main>
+</div>
 {% endblock %}

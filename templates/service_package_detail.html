@@ -4,7 +4,7 @@
 {% block analytics_page %}services{% endblock %}
 {% block head %}<meta name="description" content="{{ service.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<main class="container" style="padding:48px 0">
+<div class="container" style="padding:48px 0">
   <h1>{{ service.title }}</h1>
   <p>{{ service.summary }}</p>
   <p><span data-service-category>{{ service.category }}</span>{% for item in service.integration %} · <span data-service-integration>{{ item.label }}</span>{% endfor %}</p>
@@ -31,5 +31,5 @@
   </section>{% else %}<section data-service-section="related-content" hidden aria-hidden="true"></section>{% endif %}
   <section data-service-section="pricing-disclaimer"><p>{{ service.public_disclaimer }}</p></section>
   <p><a class="btn btn-primary" data-service-cta="primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费 AI 就绪度评估</a> <a class="btn btn-outline" data-service-cta="secondary" href="/cases">查看客户案例</a></p>
-</main>
+</div>
 {% endblock %}

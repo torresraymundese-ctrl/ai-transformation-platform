@@ -23,7 +23,9 @@
 <a class="skip-link" href="#main-content">跳到主要内容</a>
 {% include "components/navigation.html" %}
 
+<main id="main-content" tabindex="-1"{% block main_attributes %}{% endblock %}>
 {% block content %}{% endblock %}
+</main>
 
 {% include "components/footer.html" %}
 

@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup
+import pytest
 
 
 def _page(response):
@@ -22,6 +23,25 @@ def test_home_has_skip_link_and_single_named_main(client):
     assert page.select_one('a.skip-link[href="#main-content"]') is not None
     mains = page.select("main#main-content")
     assert len(mains) == 1
+
+
+@pytest.mark.parametrize("path", ("/", "/about", "/industries"))
+def test_skip_link_targets_a_unique_focusable_main_on_public_pages(client, path):
+    page = _page(client.get(path))
+    target = page.select("main#main-content")
+    assert len(target) == 1
+    assert target[0].get("tabindex") == "-1"
+
+
+def test_shared_focus_rules_make_the_skip_link_and_focus_visible(client):
+    response = client.get("/static/css/ui-components.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert ".skip-link:focus" in css
+    assert "transform: translateY(0)" in css
+    assert ":focus-visible" in css
+    assert "box-shadow: var(--ui-focus)" in css
 
 
 def test_design_tokens_are_served_with_approved_values(client):

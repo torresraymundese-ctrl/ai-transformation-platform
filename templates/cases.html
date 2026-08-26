@@ -4,7 +4,7 @@
 {% block analytics_page %}cases{% endblock %}
 {% block head %}<meta name="description" content="浏览经真实性、授权、隐私与指标证据审核的企业 AI 实施案例。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<main class="container" style="padding:48px 0">
+<div class="container" style="padding:48px 0">
   <h1>已验证案例</h1>
   <p>仅展示已完成真实性、隐私与指标证据审核的 V2 案例。</p>
   <div class="card-grid">
@@ -18,5 +18,5 @@
   </div>
   {% if not page.items %}<p data-empty-state>暂无已验证案例。</p>{% endif %}
   {{ pagination(page.page, page.total_pages, 'public_catalog.cases_page', {'per_page': page.per_page}) }}
-</main>
+</div>
 {% endblock %}
