@@ -7,6 +7,9 @@
 {% block robots_meta %}{% if request.path.startswith('/assessment/report/') %}<meta name="robots" content="noindex,nofollow">{% endif %}{% endblock %}
 {% if base_canonical %}<link rel="canonical" href="{{ base_canonical }}">{% endif %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/design-tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ui-components.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/public-pages.css') }}">
 <style>{% block extra_css %}{% endblock %}</style>
 {% block head %}{% endblock %}
 </head>
@@ -17,6 +20,7 @@
   data-analytics-page="{% block analytics_page %}site{% endblock %}"
 >
 
+<a class="skip-link" href="#main-content">跳到主要内容</a>
 {% include "components/navigation.html" %}
 
 {% block content %}{% endblock %}

@@ -1,0 +1,33 @@
+.skip-link {
+  position: fixed;
+  top: var(--ui-space-2);
+  left: var(--ui-space-2);
+  z-index: 1000;
+  padding: var(--ui-space-2) var(--ui-space-3);
+  transform: translateY(-160%);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-ink-950);
+  color: var(--ui-surface-000);
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+:focus-visible {
+  outline: 0;
+  box-shadow: var(--ui-focus);
+}
+
+.btn,
+button,
+select,
+textarea,
+input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+summary {
+  min-height: 2.75rem;
+}
+
+.ui-empty-state {
+  padding: var(--ui-space-6);
+  border-top: 1px solid var(--ui-line-200);
+  text-align: center;
+}

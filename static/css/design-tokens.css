@@ -1,0 +1,36 @@
+:root {
+  --ui-navy-950: #061b46;
+  --ui-blue-600: #0f5fef;
+  --ui-blue-700: #0b49bf;
+  --ui-teal-700: #007c91;
+  --ui-amber-700: #9a5b00;
+  --ui-ink-950: #15213a;
+  --ui-ink-650: #536176;
+  --ui-line-200: #dde4ee;
+  --ui-surface-050: #f6f8fb;
+  --ui-surface-000: #ffffff;
+  --ui-space-1: 0.5rem;
+  --ui-space-2: 0.75rem;
+  --ui-space-3: 1rem;
+  --ui-space-4: 1.5rem;
+  --ui-space-5: 2rem;
+  --ui-space-6: 3rem;
+  --ui-space-7: 4rem;
+  --ui-space-8: 5rem;
+  --ui-radius-control: 0.5rem;
+  --ui-radius-panel: 0.75rem;
+  --ui-container: 75rem;
+  --ui-reading: 52rem;
+  --ui-focus: 0 0 0 3px rgba(15, 95, 239, 0.42);
+  --ui-motion-fast: 160ms;
+  --ui-motion-standard: 220ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
