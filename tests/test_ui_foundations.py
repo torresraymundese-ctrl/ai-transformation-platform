@@ -95,6 +95,17 @@ def test_navigation_brand_text_overrides_the_legacy_span_color(client):
     assert ".nav-brand-text strong { color: var(--ui-blue-600); }" in css
 
 
+def test_decision_detail_css_keeps_the_summary_before_content_on_narrow_screens(client):
+    """Catch a narrow decision layout that leaves the summary after the main content."""
+    response = client.get("/static/css/public-pages.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert ".decision-layout { grid-template-columns: 1fr; }" in css
+    assert ".decision-summary { position: static; grid-row: 1; }" in css
+    assert ".decision-main { grid-row: 2; }" in css
+
+
 @pytest.mark.parametrize(
     "path, page_class",
     (

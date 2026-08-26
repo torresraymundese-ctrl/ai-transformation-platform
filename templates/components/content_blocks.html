@@ -1,20 +1,20 @@
 {% macro render(blocks) -%}
 {% for block in blocks %}
   {% if block.block_type == 'heading' %}
-    {% if block.title and block.title.strip() %}{% if block.settings.level == 2 %}<h2 data-content-block="heading">{{ block.title }}</h2>{% elif block.settings.level == 3 %}<h3 data-content-block="heading">{{ block.title }}</h3>{% else %}<h4 data-content-block="heading">{{ block.title }}</h4>{% endif %}{% endif %}
+    {% if block.title and block.title.strip() %}{% if block.settings.level == 2 %}<h2 data-content-block="heading" class="content-block-heading">{{ block.title }}</h2>{% elif block.settings.level == 3 %}<h3 data-content-block="heading" class="content-block-heading">{{ block.title }}</h3>{% else %}<h4 data-content-block="heading" class="content-block-heading">{{ block.title }}</h4>{% endif %}{% endif %}
     {% if block.body_html %}<div data-content-block-body="heading">{{ block.body_html|safe_html }}</div>{% endif %}
   {% elif block.block_type == 'rich_text' %}
-    <div data-content-block="rich_text">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}{{ block.body_html|safe_html }}</div>
+    <div data-content-block="rich_text" class="content-block content-block-rich-text">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}{{ block.body_html|safe_html }}</div>
   {% elif block.block_type == 'image_text' %}
-    <figure data-content-block="image_text" class="image-text image-text-{{ block.settings.alignment }}">{% if block.media_asset_id %}<img src="{{ media_image_url(block.media_asset_id) }}" alt="{{ block.settings.alt_text }}">{% endif %}{% if block.title and block.title.strip() %}<figcaption>{{ block.title }}</figcaption>{% endif %}{{ block.body_html|safe_html }}</figure>
+    <figure data-content-block="image_text" class="content-block content-block-image-text image-text image-text-{{ block.settings.alignment }}">{% if block.media_asset_id %}<img src="{{ media_image_url(block.media_asset_id) }}" alt="{{ block.settings.alt_text }}">{% endif %}{% if block.title and block.title.strip() %}<figcaption>{{ block.title }}</figcaption>{% endif %}{{ block.body_html|safe_html }}</figure>
   {% elif block.block_type == 'metric' %}
-    <div data-content-block="metric">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}<strong>{{ block.settings.value }}</strong><span>{{ block.settings.unit }}</span>{% if block.body_html %}<div data-content-block-body="metric">{{ block.body_html|safe_html }}</div>{% endif %}</div>
+    <div data-content-block="metric" class="content-block content-block-metric">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}<strong>{{ block.settings.value }}</strong><span>{{ block.settings.unit }}</span>{% if block.body_html %}<div data-content-block-body="metric">{{ block.body_html|safe_html }}</div>{% endif %}</div>
   {% elif block.block_type == 'steps' %}
-    <section data-content-block="steps">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}{% if block.body_html %}<div data-content-block-body="steps">{{ block.body_html|safe_html }}</div>{% endif %}<ol>{% for item in block.settings['items'] %}<li>{{ item }}</li>{% endfor %}</ol></section>
+    <section data-content-block="steps" class="content-block content-block-steps">{% if block.title and block.title.strip() %}<h3>{{ block.title }}</h3>{% endif %}{% if block.body_html %}<div data-content-block-body="steps">{{ block.body_html|safe_html }}</div>{% endif %}<ol>{% for item in block.settings['items'] %}<li>{{ item }}</li>{% endfor %}</ol></section>
   {% elif block.block_type == 'download' %}
-    <p data-content-block="download">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}{% if block.media_asset_id %}<a href="{{ media_download_url(block.media_asset_id) }}">{{ block.settings.label }}</a>{% else %}{{ block.settings.label }}{% endif %}</p>{% if block.body_html %}<div data-content-block-body="download">{{ block.body_html|safe_html }}</div>{% endif %}
+    <p data-content-block="download" class="content-block content-block-download">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}{% if block.media_asset_id %}<a href="{{ media_download_url(block.media_asset_id) }}">{{ block.settings.label }}</a>{% else %}{{ block.settings.label }}{% endif %}</p>{% if block.body_html %}<div data-content-block-body="download">{{ block.body_html|safe_html }}</div>{% endif %}
   {% elif block.block_type == 'cta' %}
-    <p data-content-block="cta">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}<a class="btn btn-{{ block.settings.style }}" href="{{ block.settings.url }}"{% if block.settings.url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ block.settings.label }}</a></p>{% if block.body_html %}<div data-content-block-body="cta">{{ block.body_html|safe_html }}</div>{% endif %}
+    <p data-content-block="cta" class="content-block content-block-cta">{% if block.title and block.title.strip() %}<strong>{{ block.title }}</strong>{% endif %}<a class="btn btn-{{ block.settings.style }}" href="{{ block.settings.url }}"{% if block.settings.url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>{{ block.settings.label }}</a></p>{% if block.body_html %}<div data-content-block-body="cta">{{ block.body_html|safe_html }}</div>{% endif %}
   {% endif %}
 {% endfor %}
 {%- endmacro %}

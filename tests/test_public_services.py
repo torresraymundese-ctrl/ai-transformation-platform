@@ -393,6 +393,20 @@ def test_every_public_service_detail_has_complete_delivery_structure_and_ctas(
         assert document.select_one('[data-service-cta="secondary"][href="/cases"]') is not None
         assert response.headers["Cache-Control"] == "private, no-store"
         assert document.select_one('body[data-analytics-page="services"]') is not None
+        assert document.select_one("main#main-content.decision-detail") is not None
+        assert len(document.select("main#main-content")) == 1
+        assert document.select_one(".detail-hero h1") is not None
+        assert document.select_one(".decision-main") is not None
+        summary = document.select_one(
+            'aside.decision-summary[aria-labelledby="decision-summary-title"]'
+        )
+        assert summary is not None
+        assert "适用行业" in summary.get_text(" ", strip=True)
+        assert "相关部门" in summary.get_text(" ", strip=True)
+        assert "周期" in summary.get_text(" ", strip=True)
+        assert "预算" in summary.get_text(" ", strip=True)
+        assert summary.select_one('a[href="/assessment"]') is not None
+        assert summary.select_one('a[href="/service-packages"]') is not None
 
 
 @pytest.mark.parametrize("surface", ("list", "detail"))

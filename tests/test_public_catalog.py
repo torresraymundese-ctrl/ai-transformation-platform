@@ -56,6 +56,48 @@ def page(response):
     return BeautifulSoup(response.data, "html.parser")
 
 
+def _assert_decision_shell(document):
+    """Catch detail pages that drop the shared decision layout or assessment action."""
+    assert document.select_one("main#main-content.decision-detail") is not None
+    assert len(document.select("main#main-content")) == 1
+    assert document.select_one(".detail-hero h1") is not None
+    assert document.select_one(".decision-main") is not None
+    assert document.select_one(
+        'aside.decision-summary[aria-labelledby="decision-summary-title"]'
+    ) is not None
+    assert document.select_one('.decision-summary a[href="/assessment"]') is not None
+
+
+def test_industry_detail_uses_real_decision_summary_and_return_link(published_catalog):
+    """Catch an industry detail that loses its published decision context or list return."""
+    document = page(published_catalog.get("/industries/manufacturing"))
+
+    _assert_decision_shell(document)
+    summary = document.select_one(".decision-summary").get_text(" ", strip=True)
+    assert "适用部门" in summary
+    assert "优先场景" in summary
+    assert "周期" in summary
+    assert "预算" in summary
+    assert "评估后确认" in summary
+    assert document.select_one('.decision-summary a[href="/industries"]') is not None
+
+
+def test_scenario_detail_uses_real_decision_summary(published_catalog):
+    """Catch a scenario detail that substitutes unsupported decision claims for published fields."""
+    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+
+    _assert_decision_shell(document)
+    summary = document.select_one(".decision-summary").get_text(" ", strip=True)
+    assert "适用行业" in summary
+    assert "相关部门" in summary
+    assert "周期" in summary
+    assert "预算" in summary
+    assert "评估后确认" in summary or "周" in summary
+    assert "已评估" not in summary
+    assert "已覆盖" not in summary
+    assert document.select_one('.decision-summary a[href="/scenarios"]') is not None
+
+
 def test_public_catalog_lists_use_the_shared_shell_and_private_analytics(published_catalog):
     industries = page(published_catalog.get("/industries"))
     scenarios = page(published_catalog.get("/scenarios"))
@@ -433,6 +475,19 @@ def test_formally_published_governed_block_types_render_through_safe_public_http
     assert {node["data-content-block"] for node in document.select("[data-content-block]")} >= {
         "heading", "rich_text", "image_text", "metric", "steps", "download", "cta"
     }
+    expected = {
+        "heading": ".content-block-heading",
+        "rich_text": ".content-block-rich-text",
+        "image_text": ".content-block-image-text",
+        "metric": ".content-block-metric",
+        "steps": ".content-block-steps",
+        "download": ".content-block-download",
+        "cta": ".content-block-cta",
+    }
+    for block_type, selector in expected.items():
+        assert document.select_one(
+            f'[data-content-block="{block_type}"]{selector}'
+        ) is not None
     for marker in (
         "REVIEW-HEADING", "REVIEW-HEADING-BODY", "REVIEW-RICH-TITLE", "REVIEW-RICH",
         "REVIEW-IMAGE", "REVIEW-IMAGE-BODY", "REVIEW-METRIC-TITLE", "REVIEW-METRIC",

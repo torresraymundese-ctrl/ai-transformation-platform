@@ -1,0 +1,24 @@
+{% macro breadcrumb(back_href, back_label, current_label) -%}
+<nav class="detail-breadcrumb" aria-label="面包屑">
+  <a href="{{ back_href }}">{{ back_label }}</a>
+  <span aria-hidden="true">/</span>
+  <span aria-current="page">{{ current_label }}</span>
+</nav>
+{%- endmacro %}
+
+{% macro detail_hero(title, summary, eyebrow='') -%}
+<header class="detail-hero">
+  <div class="public-container">
+    {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
+    <h1>{{ title }}</h1>
+    <p>{{ summary }}</p>
+  </div>
+</header>
+{%- endmacro %}
+
+{% macro decision_item(label, value) -%}
+<div class="decision-item">
+  <dt>{{ label }}</dt>
+  <dd>{{ value }}</dd>
+</div>
+{%- endmacro %}
