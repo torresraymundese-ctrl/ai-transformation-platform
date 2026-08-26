@@ -40,7 +40,7 @@ summary {
 
 .nav-logo img { width: 2rem; height: 2.5rem; }
 
-.nav-brand-text { color: var(--ui-ink-950); white-space: nowrap; }
+.nav-logo .nav-brand-text { color: var(--ui-ink-950); white-space: nowrap; }
 
 .nav-brand-text strong { color: var(--ui-blue-600); }
 

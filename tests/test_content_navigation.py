@@ -537,7 +537,7 @@ def _assert_rendered_link_matrix(surface, document):
         parsed = urlsplit(href)
         if href.startswith("/") and not href.startswith("//"):
             continue
-        if href.startswith("#"):
+        if href == "#main-content":
             continue
         if parsed.scheme in {"mailto", "tel"}:
             assert href in TRUSTED_RENDERED_CONTACTS, (surface, href)
@@ -555,6 +555,16 @@ def _assert_rendered_link_matrix(surface, document):
 def test_rendered_link_matrix_accepts_same_document_fragment(client):
     document = _rendered_html(client, "/")
     _assert_rendered_link_matrix("public.home", document)
+
+
+@pytest.mark.parametrize(
+    "href",
+    ("#javascript:alert(1)", "#https://attacker.example", "#"),
+)
+def test_rendered_link_matrix_rejects_unapproved_fragments(href):
+    document = BeautifulSoup(f'<a href="{href}">unsafe</a>', "html.parser")
+    with pytest.raises(AssertionError):
+        _assert_rendered_link_matrix("fragment-test", document)
 
 
 def test_rendered_server_links_follow_the_url_context_matrix(

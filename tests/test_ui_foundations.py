@@ -83,3 +83,13 @@ def test_footer_has_no_inline_layout_styles(client):
     footer = page.select_one("footer.footer")
     assert footer is not None
     assert not footer.select("[style]")
+
+
+def test_navigation_brand_text_overrides_the_legacy_span_color(client):
+    response = client.get("/static/css/ui-components.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert ".nav-logo .nav-brand-text" in css
+    assert "color: var(--ui-ink-950)" in css
+    assert ".nav-brand-text strong { color: var(--ui-blue-600); }" in css
