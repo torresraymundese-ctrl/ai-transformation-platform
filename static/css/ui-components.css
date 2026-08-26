@@ -31,3 +31,31 @@ summary {
   border-top: 1px solid var(--ui-line-200);
   text-align: center;
 }
+
+.nav { background: rgba(255, 255, 255, 0.96); }
+
+.nav-inner { min-height: 4.5rem; height: auto; }
+
+.nav-logo { min-height: 2.75rem; }
+
+.nav-logo img { width: 2rem; height: 2.5rem; }
+
+.nav-brand-text { color: var(--ui-ink-950); white-space: nowrap; }
+
+.nav-brand-text strong { color: var(--ui-blue-600); }
+
+.nav-links a.active { box-shadow: inset 0 -3px 0 var(--ui-blue-600); }
+
+.nav-cta { min-height: 2.75rem; display: inline-flex; align-items: center; }
+
+.footer-company-summary { max-width: 32rem; line-height: 1.8; }
+
+.footer-contact { line-height: 1.8; }
+
+.sticky-cta { min-height: 4.5rem; }
+
+@media (max-width: 767px) {
+  .nav-brand-text { font-size: 1rem; }
+  .mobile-navigation-panel { max-width: calc(100vw - 2rem); }
+  .sticky-cta { align-items: stretch; }
+}

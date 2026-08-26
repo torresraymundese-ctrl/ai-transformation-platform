@@ -75,6 +75,26 @@
     return { track: track };
   }
 
+  function initializeMobileNavigation(pageDocument) {
+    const details = pageDocument && typeof pageDocument.querySelector === "function"
+      ? pageDocument.querySelector("details[data-mobile-navigation]")
+      : null;
+    if (!details) return null;
+    const summary = details.querySelector("summary");
+    pageDocument.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" || !details.open) return;
+      details.open = false;
+      if (summary && typeof summary.focus === "function") summary.focus();
+    });
+    details.addEventListener("click", function (event) {
+      const link = event.target && typeof event.target.closest === "function"
+        ? event.target.closest("a[href]")
+        : null;
+      if (link) details.open = false;
+    });
+    return details;
+  }
+
   function toggleFaq(toggle) {
     const answer = toggle && toggle.nextElementSibling;
     const arrow = toggle && toggle.querySelector(".faq-arrow");
@@ -88,6 +108,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       initializeConversionAnalytics: initializeConversionAnalytics,
+      initializeMobileNavigation: initializeMobileNavigation,
       sendAnalyticsEvent: sendAnalyticsEvent,
       toggleFaq: toggleFaq,
     };
@@ -98,6 +119,7 @@
     document,
     typeof window.fetch === "function" ? window.fetch.bind(window) : null
   );
+  initializeMobileNavigation(document);
 
   document.addEventListener("click", function (event) {
     const toggle = event.target && typeof event.target.closest === "function"

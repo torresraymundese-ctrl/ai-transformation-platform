@@ -1,8 +1,8 @@
 <nav class="nav">
   <div class="nav-inner">
-    <a href="/" class="nav-logo">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" onerror="this.style.display='none'">
-      企业<span>AI转型</span>平台
+    <a href="/" class="nav-logo" aria-label="企业 AI 转型平台首页">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="">
+      <span class="nav-brand-text">企业 <strong>AI转型</strong> 平台</span>
     </a>
     <div class="nav-links" data-primary-navigation>
       <a href="/industries" class="{% if request.path.startswith('/industries') %}active{% endif %}">行业方案</a>
@@ -13,7 +13,7 @@
     </div>
     <a href="/assessment" class="nav-cta" data-primary-cta>免费评估</a>
     <details class="mobile-navigation" data-mobile-navigation>
-      <summary aria-label="打开导航菜单">菜单</summary>
+      <summary>菜单</summary>
       <div class="mobile-navigation-panel">
         <a href="/industries">行业方案</a>
         <a href="/scenarios">AI 场景</a>

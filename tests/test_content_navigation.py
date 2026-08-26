@@ -537,6 +537,8 @@ def _assert_rendered_link_matrix(surface, document):
         parsed = urlsplit(href)
         if href.startswith("/") and not href.startswith("//"):
             continue
+        if href.startswith("#"):
+            continue
         if parsed.scheme in {"mailto", "tel"}:
             assert href in TRUSTED_RENDERED_CONTACTS, (surface, href)
             assert parsed.scheme == "tel", (surface, href)
@@ -548,6 +550,11 @@ def _assert_rendered_link_matrix(surface, document):
         if link.get("target") == "_blank" and parsed.scheme in {"http", "https"}:
             rel = {value.lower() for value in link.get("rel", [])}
             assert {"noopener", "noreferrer"} <= rel, (surface, href)
+
+
+def test_rendered_link_matrix_accepts_same_document_fragment(client):
+    document = _rendered_html(client, "/")
+    _assert_rendered_link_matrix("public.home", document)
 
 
 def test_rendered_server_links_follow_the_url_context_matrix(

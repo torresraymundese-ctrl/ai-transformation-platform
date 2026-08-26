@@ -60,3 +60,26 @@ def test_design_tokens_are_served_with_approved_values(client):
     ):
         assert token in css.lower()
     assert "prefers-reduced-motion: reduce" in css
+
+
+def test_shared_shell_uses_real_brand_and_truthful_conversion_copy(client):
+    page = _page(client.get("/"))
+    logo = page.select_one('.nav-logo img[src="/static/logo.png"]')
+    assert logo is not None
+    assert logo.get("alt") == ""
+    assert page.select_one('.nav-logo[aria-label="企业 AI 转型平台首页"]') is not None
+    assert page.select_one(".nav-brand-text").get_text(" ", strip=True) == "企业 AI转型 平台"
+    assert page.select_one('[data-primary-cta][href="/assessment"]') is not None
+    sticky = page.select_one("#stickyCta")
+    assert sticky is not None
+    text = sticky.get_text(" ", strip=True)
+    assert "完成 AI 就绪度评估" in text
+    assert "5 分钟" not in text
+    assert "🚀" not in text
+
+
+def test_footer_has_no_inline_layout_styles(client):
+    page = _page(client.get("/"))
+    footer = page.select_one("footer.footer")
+    assert footer is not None
+    assert not footer.select("[style]")
