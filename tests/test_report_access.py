@@ -726,6 +726,37 @@ def test_html_report_renders_every_required_snapshot_section(
         assert private_value not in response.get_data(as_text=True)
 
 
+def test_authorized_html_report_uses_one_focusable_shared_main(
+    completed_assessment, client
+):
+    response = client.get(f"/assessment/report/{completed_assessment}")
+    page = BeautifulSoup(response.data, "html.parser")
+
+    assert response.status_code == 200
+    assert len(page.select("main#main-content")) == 1
+    assert page.select_one("main#main-content.report-page") is not None
+    assert page.select_one('main#main-content[tabindex="-1"]') is not None
+    assert not page.select("main main")
+
+
+def test_pdf_report_keeps_one_standalone_report_main(
+    completed_assessment, client, monkeypatch
+):
+    captured = {}
+
+    def render(html, base_url):
+        captured["html"] = html
+        return b"%PDF-test"
+
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    response = client.get(f"/assessment/report/{completed_assessment}/pdf")
+    page = BeautifulSoup(captured["html"], "html.parser")
+
+    assert response.status_code == 200
+    assert len(page.select("main.report-page")) == 1
+    assert not page.select("main main")
+
+
 def test_pdf_uses_the_same_snapshot_and_a_trusted_local_base_url(
     completed_assessment, client, monkeypatch
 ):

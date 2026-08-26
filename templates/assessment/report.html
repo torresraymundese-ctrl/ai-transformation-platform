@@ -10,6 +10,7 @@
 {% endblock %}
 
 {% block body_class %}report-body{% endblock %}
+{% block main_attributes %} class="report-page" data-snapshot-sha256="{{ snapshot_digest }}"{% endblock %}
 
 {% block content %}
 {% include "assessment/_report_content.html" %}
