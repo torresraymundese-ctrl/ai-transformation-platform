@@ -2,5 +2,14 @@
 {% from "components/content_blocks.html" import render as render_blocks %}
 {% block title %}{{ announcement.seo_title }}{% endblock %}
 {% block analytics_page %}announcements{% endblock %}
+{% block main_attributes %} class="public-page editorial-detail public-announcement-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ announcement.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block content %}<div class="container" style="padding:48px 0"><h1>{{ announcement.title }}</h1><p>{{ announcement.summary }}</p><p>有效期：{{ announcement.valid_from }} 至 {{ announcement.valid_until }}</p><section aria-label="公告正文">{{ render_blocks(announcement.blocks) }}</section>{% if announcement.cta_url %}<p><a class="btn btn-primary" data-announcement-cta href="{{ announcement.cta_url }}"{% if announcement.cta_url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>查看相关信息</a></p>{% endif %}</div>{% endblock %}
+{% block content %}
+<div class="public-container public-reading">
+  <h1>{{ announcement.title }}</h1>
+  <p>{{ announcement.summary }}</p>
+  <dl class="editorial-meta"><div><dt>有效期</dt><dd data-announcement-validity>{{ announcement.valid_from }} 至 {{ announcement.valid_until }}</dd></div></dl>
+  <section aria-label="公告正文">{{ render_blocks(announcement.blocks) }}</section>
+  {% if announcement.cta_url %}<p><a class="btn btn-primary" data-announcement-cta href="{{ announcement.cta_url }}"{% if announcement.cta_url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>查看相关信息</a></p>{% endif %}
+</div>
+{% endblock %}

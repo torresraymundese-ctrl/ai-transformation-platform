@@ -301,6 +301,11 @@ def test_authorized_case_publishes_metrics_and_never_leaks_private_evidence(
     assert detail.status_code == 200
     listing_text = listing.get_data(as_text=True)
     detail_text = detail.get_data(as_text=True)
+    detail_document = BeautifulSoup(detail.data, "html.parser")
+    assert detail_document.select_one("main#main-content.editorial-detail") is not None
+    assert detail_document.select_one(".editorial-meta") is not None
+    assert detail_document.select_one("[data-case-verification]") is not None
+    assert detail_document.select_one("[data-case-metric]") is not None
     assert "经授权匿名案例" in listing_text
     assert "经授权匿名案例" in detail_text
     assert "报表处理时间" in detail_text

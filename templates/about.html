@@ -1,23 +1,27 @@
 {% extends "base.html" %}
 {% block analytics_page %}about{% endblock %}
-{% import "components/ui.html" as ui %}
 {% block title %}关于我们 - 企业AI转型平台{% endblock %}
+{% block main_attributes %} class="public-page about-page"{% endblock %}
 {% block content %}
-<section class="page-hero"><h1>关于我们</h1><p>帮企业低成本、私有化、可落地完成 AI 转型</p></section>
-<section class="section"><div class="section-inner" style="max-width:800px;">
-  {% call ui.card(style="margin-bottom:24px;") %}<h2 style="margin-bottom:16px;">公司信息</h2>
-    <p style="line-height:1.9;"><strong>苏州苏采易购信息技术有限公司</strong>，专注于企业 AI 转型一站式服务。我们提供从<strong>数据治理</strong>、<strong>本地大模型部署</strong>到<strong>RAG 知识库</strong>、<strong>AI 智能体</strong>的完整解决方案，帮企业以低成本、私有化、可落地的方式完成 AI 转型。</p>
-    <p style="margin-top:12px;">海外站点：<strong>OpenBridge Inc.</strong>，总部位于加拿大温哥华，汇聚多位人工智能领域的权威专家，为北美及全球企业提供 AI 战略咨询服务。</p>{% endcall %}
-  {% call ui.card(style="margin-bottom:24px;") %}<h2 style="margin-bottom:16px;">核心原则</h2>
-    <div style="display:grid;gap:16px;">
+<section class="public-section">
+  <div class="public-container public-reading">
+    <header class="about-header"><h1>关于我们</h1><p>帮企业低成本、私有化、可落地完成 AI 转型</p></header>
+    <section class="about-section"><h2>公司信息</h2>
+      <p><strong>苏州苏采易购信息技术有限公司</strong>，专注于企业 AI 转型一站式服务。我们提供从<strong>数据治理</strong>、<strong>本地大模型部署</strong>到<strong>RAG 知识库</strong>、<strong>AI 智能体</strong>的完整解决方案，帮企业以低成本、私有化、可落地的方式完成 AI 转型。</p>
+      <p>海外站点：<strong>OpenBridge Inc.</strong>，总部位于加拿大温哥华，汇聚多位人工智能领域的权威专家，为北美及全球企业提供 AI 战略咨询服务。</p>
+    </section>
+    <section class="about-section"><h2>核心原则</h2>
+    <div class="about-principles">
       <div><strong>私有安全：</strong>数据不出内网，大模型本地部署，满足金融/医疗等强监管行业合规要求。</div>
       <div><strong>务实落地：</strong>不做不落地的战略报告，只做可交付、可运行的系统。</div>
       <div><strong>渐进式转型：</strong>从 RAG 知识库开始（90% 企业的最佳起点），逐步扩展到 Agent 和全流程自动化。</div>
       <div><strong>技术开放：</strong>优先推荐开源方案（Qwen/DeepSeek/ChromaDB/Milvus），降低企业长期依赖风险。</div>
-    </div>{% endcall %}
-  {% call ui.card() %}<h2 style="margin-bottom:16px;">联系与合作</h2>
-    <p style="line-height:1.9;">我们正在寻找第一批合作客户和行业伙伴。</p>
-    <p style="margin-top:8px;"><strong>全国服务热线：400-180-3358</strong></p>
-    <p style="margin-top:12px;"><a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估 →</a></p>{% endcall %}
-</div></section>
+    </div></section>
+    <section class="about-section"><h2>联系与合作</h2>
+      <p>我们正在寻找第一批合作客户和行业伙伴。</p>
+      <p><strong>全国服务热线：400-180-3358</strong></p>
+      <p><a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估</a></p>
+    </section>
+  </div>
+</section>
 {% endblock %}

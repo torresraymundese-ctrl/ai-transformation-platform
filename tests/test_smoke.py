@@ -70,6 +70,17 @@ def test_legacy_insights_path_is_a_query_dropping_redirect(client):
     assert response.headers["Location"] == "/resources"
 
 
+def test_missing_public_page_keeps_its_404_status_and_text_only_recovery(client):
+    """A styled error page must not turn a missing route into a successful response."""
+    response = client.get("/missing-page")
+    page = BeautifulSoup(response.data, "html.parser")
+
+    assert response.status_code == 404
+    assert page.select_one("main#main-content.ui-status-page") is not None
+    assert "⚠️" not in page.get_text(" ", strip=True)
+    assert page.select_one('main a[href="/"]').get_text(" ", strip=True) == "返回首页"
+
+
 def test_admin_redirects_unauthenticated_requests_to_login(client):
     """Catch accidental removal of the session-backed admin access boundary."""
     response = client.get("/admin")

@@ -2,9 +2,20 @@
 {% from "components/content_blocks.html" import render as render_blocks %}
 {% block title %}{{ resource.seo_title }}{% endblock %}
 {% block analytics_page %}resources{% endblock %}
+{% block main_attributes %} class="public-page editorial-detail public-resource-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ resource.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block content %}<div class="container" style="padding:48px 0"><p><a href="{{ url_for('public_catalog.resources_page') }}">返回资源中心</a></p><h1>{{ resource.title }}</h1><p>{{ resource.summary }}</p><p>{{ resource.resource_type_label }} · 原始发布时间 {{ resource.original_published_at }}</p>
-{% if resource.is_original %}<p data-resource-authorship>本站原创</p>{% else %}<p data-resource-authorship>来源：{{ resource.source_name }} · <a data-resource-source href="{{ resource.source_url }}" target="_blank" rel="noopener noreferrer">查看 HTTPS 原文</a></p>{% endif %}
-<p data-resource-copyright>版权提示：{{ resource.copyright_notice }}</p>
-{% if resource.attachment_media_id %}<p><a data-resource-attachment href="{{ media_download_url(resource.attachment_media_id) }}">下载审核附件</a></p>{% endif %}
-<section aria-label="资源正文">{{ render_blocks(resource.blocks) }}</section></div>{% endblock %}
+{% block content %}
+<div class="public-container public-reading">
+  <p><a href="{{ url_for('public_catalog.resources_page') }}">返回资源中心</a></p>
+  <h1>{{ resource.title }}</h1>
+  <p>{{ resource.summary }}</p>
+  <dl class="editorial-meta">
+    <div><dt>资源类型</dt><dd>{{ resource.resource_type_label }}</dd></div>
+    <div><dt>原始发布时间</dt><dd>{{ resource.original_published_at }}</dd></div>
+    {% if resource.is_original %}<div><dt>作者信息</dt><dd data-resource-authorship>本站原创</dd></div>{% else %}<div><dt>来源</dt><dd data-resource-authorship>{{ resource.source_name }} · <a data-resource-source href="{{ resource.source_url }}" target="_blank" rel="noopener noreferrer">查看 HTTPS 原文</a></dd></div>{% endif %}
+    <div><dt>版权提示</dt><dd data-resource-copyright>{{ resource.copyright_notice }}</dd></div>
+    {% if resource.attachment_media_id %}<div><dt>审核附件</dt><dd><a data-resource-attachment href="{{ media_download_url(resource.attachment_media_id) }}">下载审核附件</a></dd></div>{% endif %}
+  </dl>
+  <section aria-label="资源正文">{{ render_blocks(resource.blocks) }}</section>
+</div>
+{% endblock %}

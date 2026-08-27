@@ -636,6 +636,10 @@ def test_sourced_resource_requires_fresh_exact_source_check_and_renders_safe_lin
         'link[rel="canonical"]'
     )["href"] == "https://test.example/resources"
     document = BeautifulSoup(detail.data, "html.parser")
+    assert document.select_one("main#main-content.editorial-detail") is not None
+    assert document.select_one(".editorial-meta") is not None
+    assert document.select_one("[data-resource-authorship]") is not None
+    assert document.select_one("[data-resource-copyright]") is not None
     source = document.select_one("a[data-resource-source]")
     canonical = document.select_one('link[rel="canonical"]')
     assert canonical["href"] == "https://test.example/resources/sourced-report"
@@ -914,6 +918,9 @@ def test_announcement_fixed_interval_current_future_expired_and_archived_are_exa
     current_response = admin_client.get("/announcements/current-announcement")
     assert current_response.status_code == 200
     current_document = BeautifulSoup(current_response.data, "html.parser")
+    assert current_document.select_one("main#main-content.editorial-detail") is not None
+    assert current_document.select_one(".editorial-meta") is not None
+    assert current_document.select_one("[data-announcement-validity]") is not None
     assert current_document.select_one('link[rel="canonical"]')["href"] == (
         "https://test.example/announcements/current-announcement"
     )

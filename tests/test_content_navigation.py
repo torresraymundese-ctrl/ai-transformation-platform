@@ -683,6 +683,8 @@ def test_rendered_server_links_follow_the_url_context_matrix(
     assert policy is not None and not policy.has_attr("href")
 
     resource = documents["resources.detail"]
+    assert resource.select_one("main#main-content.editorial-detail") is not None
+    assert resource.select_one(".editorial-meta") is not None
     source = resource.select_one("a[data-resource-source]")
     assert source["href"] == content["resource_source"]
     assert source["href"].startswith("https://")
@@ -698,6 +700,8 @@ def test_rendered_server_links_follow_the_url_context_matrix(
     )
 
     announcement = documents["announcements.detail"]
+    assert announcement.select_one("main#main-content.editorial-detail") is not None
+    assert announcement.select_one(".editorial-meta") is not None
     internal_cta = announcement.select_one("a[data-announcement-cta]")
     assert internal_cta["href"] == "/assessment"
     assert internal_cta.get("target") is None

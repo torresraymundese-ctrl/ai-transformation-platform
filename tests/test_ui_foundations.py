@@ -136,3 +136,21 @@ def test_scenario_filters_keep_accessible_labels_and_selected_values(client):
     assert form.select_one('#industry[value="manufacturing"]') is not None
     assert form.select_one('#maturity option[selected][value="pilot"]') is not None
     assert form.select_one('a[href="/scenarios"]') is not None
+
+
+@pytest.mark.parametrize("path", ("/", "/about"))
+def test_static_public_pages_use_named_main_and_no_inline_layout(client, path):
+    """Inline layout inside the shared main would bypass the responsive UI contract."""
+    page = _page(client.get(path))
+
+    assert page.select_one("main#main-content") is not None
+    assert not page.select("main [style]")
+
+
+def test_home_preserves_real_content_sections_and_single_primary_action(client):
+    """The home page must keep published collections without inventing a metric claim."""
+    page = _page(client.get("/"))
+
+    assert page.select_one(".home-hero h1") is not None
+    assert page.select_one('.home-hero a[href="/assessment"]') is not None
+    assert "27+" not in page.get_text(" ", strip=True)
