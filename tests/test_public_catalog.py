@@ -211,22 +211,41 @@ def test_scenario_summary_is_static_with_one_full_width_action_pair(published_ca
             "¥10,000,000,000,000,000,000,000,000—"
             "¥10,000,000,000,000,003,000,000,000",
         ),
+        (
+            10**100,
+            10**100 + 1,
+            "¥1,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,"
+            "000,000,000,000,000,000,000,000,000,000,000,000,000,000,000万—¥10,000,000,"
+            "000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,"
+            "000,000,000,000,000,000,000,000,000,000,000,000,001",
+        ),
     ),
 )
 def test_scenario_summary_preserves_exact_published_budget_values(
-    published_catalog, db, minimum, maximum, expected,
+    published_catalog, db, monkeypatch, minimum, maximum, expected,
 ):
     """Rounding a legal published budget to a shorter 万 value must fail."""
-    service = db.execute(
-        "SELECT service_id FROM scenario_services link "
-        "JOIN scenarios scenario ON scenario.id=link.scenario_id "
-        "WHERE scenario.code='mfg_knowledge_assistant' LIMIT 1"
-    ).fetchone()
-    db.execute(
-        "UPDATE services SET min_budget=?,max_budget=? WHERE id=?",
-        (minimum, maximum, service["service_id"]),
-    )
-    db.commit()
+    if type(minimum) is int and minimum > 2**63 - 1:
+        scenario = dict(catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        ))
+        scenario["budget"] = ((minimum, maximum),)
+        monkeypatch.setattr(
+            public_catalog_blueprint.catalog,
+            "public_scenario",
+            lambda slug, now: scenario,
+        )
+    else:
+        service = db.execute(
+            "SELECT service_id FROM scenario_services link "
+            "JOIN scenarios scenario ON scenario.id=link.scenario_id "
+            "WHERE scenario.code='mfg_knowledge_assistant' LIMIT 1"
+        ).fetchone()
+        db.execute(
+            "UPDATE services SET min_budget=?,max_budget=? WHERE id=?",
+            (minimum, maximum, service["service_id"]),
+        )
+        db.commit()
 
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
     budget = document.select_one(

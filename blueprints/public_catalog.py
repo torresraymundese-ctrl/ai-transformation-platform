@@ -23,10 +23,25 @@ def _content_now():
     return provider() if callable(provider) else shanghai_now()
 
 
+def _group_decimal_whole(whole):
+    """Group a non-negative decimal whole-number string without numeric coercion."""
+    first_group = len(whole) % 3 or 3
+    groups = [whole[:first_group]]
+    groups.extend(
+        whole[index:index + 3]
+        for index in range(first_group, len(whole), 3)
+    )
+    return ",".join(groups)
+
+
 def _format_cny_amount(value):
     """Render one validated public budget without rounding or exponent notation."""
     if type(value) not in (int, float):
         raise TypeError("budget amount must be an exact int or float")
+    if type(value) is int:
+        if value >= 10000 and value % 10000 == 0:
+            return f"¥{_group_decimal_whole(str(value // 10000))}万"
+        return f"¥{_group_decimal_whole(str(value))}"
     source = str(value)
     number = Decimal(source)
     suffix = ""
@@ -37,7 +52,7 @@ def _format_cny_amount(value):
     if "." in plain:
         plain = plain.rstrip("0").rstrip(".")
     whole, separator, fraction = plain.partition(".")
-    grouped = f"{int(whole):,}"
+    grouped = _group_decimal_whole(whole)
     if separator:
         grouped = f"{grouped}.{fraction}"
     return f"¥{grouped}{suffix}"
