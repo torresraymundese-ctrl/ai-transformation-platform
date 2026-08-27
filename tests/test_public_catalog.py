@@ -68,6 +68,44 @@ def _assert_decision_shell(document):
     assert document.select_one('.decision-summary a[href="/assessment"]') is not None
 
 
+@pytest.mark.parametrize(
+    "path, context_labels",
+    (
+        ("/industries/manufacturing", ("适用部门", "企业规模", "优先场景")),
+        ("/scenarios/mfg-knowledge-assistant", ("适用行业", "相关部门", "适用痛点")),
+    ),
+)
+def test_catalog_details_keep_verified_theme_context_and_numbered_sections(
+    published_catalog, path, context_labels,
+):
+    """Catch detail pages that separate verified context from the themed hero."""
+    document = page(published_catalog.get(path))
+
+    themes = document.select(".detail-theme")
+    assert len(themes) == 1
+    theme = themes[0]
+    assert theme.select_one('.detail-breadcrumb[aria-label="面包屑"]') is not None
+    assert theme.select_one(".detail-hero h1") is not None
+    context = theme.select_one("dl.detail-context")
+    assert context is not None
+    assert tuple(node.get_text(" ", strip=True) for node in context.select("dt")) == context_labels
+
+    main_sections = document.select(".decision-main > section:has(h2)")
+    assert main_sections
+    assert all("decision-section" in node.get("class", ()) for node in main_sections)
+    assert len(document.select("main#main-content")) == 1
+
+    if path.startswith("/scenarios/"):
+        context_text = context.get_text(" ", strip=True)
+        for selector in (
+            '[data-content-section="industries"] li',
+            '[data-content-section="departments"] li',
+            '[data-content-section="pains"] li',
+        ):
+            assert document.select_one(selector).get_text(" ", strip=True) in context_text
+        assert "mfg_knowledge_assistant" not in context_text
+
+
 def test_industry_detail_uses_real_decision_summary_and_return_link(published_catalog):
     """Catch an industry detail that loses its published decision context or list return."""
     document = page(published_catalog.get("/industries/manufacturing"))

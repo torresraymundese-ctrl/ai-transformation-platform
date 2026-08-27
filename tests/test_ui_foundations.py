@@ -106,6 +106,30 @@ def test_decision_detail_css_keeps_the_summary_before_content_on_narrow_screens(
     assert ".decision-main { grid-row: 2; }" in css
 
 
+def test_decision_detail_css_numbers_primary_chapters(client):
+    """Dropping the chapter counter would remove the report-like decision hierarchy."""
+    response = client.get("/static/css/public-pages.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert ".decision-main { counter-reset: decision-section; }" in css
+    assert ".decision-section > h2::before" in css
+    assert "counter-increment: decision-section;" in css
+    assert "counter(decision-section, decimal-leading-zero)" in css
+
+
+def test_mobile_sticky_cta_css_reserves_its_compact_fixed_row(client):
+    """Catch a wrapping fixed CTA that can cover the mobile detail content below it."""
+    response = client.get("/static/css/ui-components.css")
+    css = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert ".sticky-cta { flex-wrap: nowrap; align-items: center; }" in css
+    assert ".sticky-cta .cta-text { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }" in css
+    assert ".sticky-cta .btn { flex: 0 0 auto; min-height: 2.75rem; }" in css
+    assert "body.has-sticky-cta { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }" in css
+
+
 @pytest.mark.parametrize(
     "path, page_class",
     (

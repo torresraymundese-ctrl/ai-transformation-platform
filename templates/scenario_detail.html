@@ -8,25 +8,32 @@
 {% block content %}
 {% set timeline_value %}{% if scenario.timeline %}{% for minimum, maximum in scenario.timeline %}{{ minimum }}—{{ maximum }} 周{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
 {% set budget_value %}{% if scenario.budget %}{% for minimum, maximum in scenario.budget %}{{ minimum }}—{{ maximum }}{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
-<div class="public-container">{{ breadcrumb('/scenarios', '返回场景列表', scenario.title) }}</div>
-{{ detail_hero(scenario.title, scenario.summary, 'AI 场景') }}
+<div class="detail-theme">
+  <div class="public-container">{{ breadcrumb('/scenarios', '返回场景列表', scenario.title) }}</div>
+  {{ detail_hero(scenario.title, scenario.summary, 'AI 场景') }}
+  <div class="public-container"><dl class="detail-context">
+    <div><dt>适用行业</dt><dd>{{ scenario.industries|join('、') }}</dd></div>
+    <div><dt>相关部门</dt><dd>{{ scenario.departments|join('、') }}</dd></div>
+    <div><dt>适用痛点</dt><dd>{{ scenario.pains|join('、') }}</dd></div>
+  </dl></div>
+</div>
 <div class="public-container decision-layout">
   <div class="decision-main">
-    <section data-content-section="problem-boundary"><h2>问题与边界</h2>{{ render_blocks(scenario.blocks) }}</section>
-    <section data-content-section="industries"><h2>行业</h2><ul>{% for value in scenario.industries %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="departments"><h2>部门</h2><ul>{% for value in scenario.departments %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="pains"><h2>痛点</h2><ul>{% for value in scenario.pains %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="maturity"><h2>成熟度</h2><ul>{% for value in scenario.maturity %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="prerequisites"><h2>前置条件</h2><ul>{% for value in scenario.prerequisites %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="inputs"><h2>输入</h2><ul>{% for value in scenario.inputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="outputs"><h2>输出</h2><ul>{% for value in scenario.outputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="steps"><h2>实施步骤</h2><ol>{% for value in scenario.steps %}<li>{{ value }}</li>{% endfor %}</ol></section>
-    <section data-content-section="metrics"><h2>评测指标</h2><ul>{% for metric in scenario.metrics %}<li>{{ metric.label }}：{{ metric.value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="risks"><h2>风险与注意事项</h2><ul>{% for risk in scenario.risks %}<li><strong>{{ risk.label }}</strong>：{{ risk.description }}</li>{% endfor %}</ul></section>
-    <section data-content-section="timeline"><h2>周期</h2><ul>{% for minimum, maximum in scenario.timeline %}<li>{{ minimum }}—{{ maximum }} 周</li>{% else %}<li>评估后确认</li>{% endfor %}</ul></section>
-    <section data-content-section="budget"><h2>预算</h2><ul>{% for minimum, maximum in scenario.budget %}<li>{{ minimum }}—{{ maximum }}</li>{% else %}<li>评估后确认</li>{% endfor %}</ul></section>
-    <section data-content-section="services"><h2>服务</h2><ul>{% for item in scenario.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul></section>
-    {% if scenario.resources %}<section data-content-section="related-resources"><h2>相关资源</h2><ul>{% for item in scenario.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>{% endif %}
+    <section class="decision-section" data-content-section="problem-boundary"><h2>问题与边界</h2>{{ render_blocks(scenario.blocks) }}</section>
+    <section class="decision-section" data-content-section="industries"><h2>行业</h2><ul>{% for value in scenario.industries %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="departments"><h2>部门</h2><ul>{% for value in scenario.departments %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="pains"><h2>痛点</h2><ul>{% for value in scenario.pains %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="maturity"><h2>成熟度</h2><ul>{% for value in scenario.maturity %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="prerequisites"><h2>前置条件</h2><ul>{% for value in scenario.prerequisites %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="inputs"><h2>输入</h2><ul>{% for value in scenario.inputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="outputs"><h2>输出</h2><ul>{% for value in scenario.outputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="steps"><h2>实施步骤</h2><ol>{% for value in scenario.steps %}<li>{{ value }}</li>{% endfor %}</ol></section>
+    <section class="decision-section" data-content-section="metrics"><h2>评测指标</h2><ul>{% for metric in scenario.metrics %}<li>{{ metric.label }}：{{ metric.value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="risks"><h2>风险与注意事项</h2><ul>{% for risk in scenario.risks %}<li><strong>{{ risk.label }}</strong>：{{ risk.description }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="timeline"><h2>周期</h2><ul>{% for minimum, maximum in scenario.timeline %}<li>{{ minimum }}—{{ maximum }} 周</li>{% else %}<li>评估后确认</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="budget"><h2>预算</h2><ul>{% for minimum, maximum in scenario.budget %}<li>{{ minimum }}—{{ maximum }}</li>{% else %}<li>评估后确认</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="services"><h2>服务</h2><ul>{% for item in scenario.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul></section>
+    {% if scenario.resources %}<section class="decision-section" data-content-section="related-resources"><h2>相关资源</h2><ul>{% for item in scenario.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>{% endif %}
   </div>
   <aside class="decision-summary" aria-labelledby="decision-summary-title">
     <h2 id="decision-summary-title">决策摘要</h2>

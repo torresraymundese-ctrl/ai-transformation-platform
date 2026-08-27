@@ -6,17 +6,24 @@
 {% block main_attributes %} class="public-page decision-detail public-industry-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ industry.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<div class="public-container">{{ breadcrumb('/industries', '返回行业方案列表', industry.title) }}</div>
-{{ detail_hero(industry.title, industry.summary, '行业方案') }}
+<div class="detail-theme">
+  <div class="public-container">{{ breadcrumb('/industries', '返回行业方案列表', industry.title) }}</div>
+  {{ detail_hero(industry.title, industry.summary, '行业方案') }}
+  <div class="public-container"><dl class="detail-context">
+    <div><dt>适用部门</dt><dd>{{ industry.departments|join('、') }}</dd></div>
+    <div><dt>企业规模</dt><dd>{{ industry.company_sizes|join('、') }}</dd></div>
+    <div><dt>优先场景</dt><dd>{{ industry.scenarios|map(attribute='title')|join('、') }}</dd></div>
+  </dl></div>
+</div>
 <div class="public-container decision-layout">
   <div class="decision-main">
-    <section data-content-section="overview"><h2>概述</h2>{{ render_blocks(industry.blocks) }}</section>
-    <section data-content-section="business-pains"><h2>业务痛点</h2><ul>{% for value in industry.pains %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="departments"><h2>适用部门</h2><ul>{% for value in industry.departments %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="sme-fit"><h2>企业规模</h2><ul>{% for value in industry.company_sizes %}<li>{{ value }}</li>{% endfor %}</ul></section>
-    <section data-content-section="priority-scenarios"><h2>优先场景</h2><ul>{% for item in industry.scenarios %}<li><a href="{{ url_for('public_catalog.scenario_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>
-    <section data-content-section="service-packages"><h2>服务包</h2><ul>{% for item in industry.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul></section>
-    {% if industry.resources %}<section data-content-section="related-resources"><h2>相关资源</h2><ul>{% for item in industry.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>{% endif %}
+    <section class="decision-section" data-content-section="overview"><h2>概述</h2>{{ render_blocks(industry.blocks) }}</section>
+    <section class="decision-section" data-content-section="business-pains"><h2>业务痛点</h2><ul>{% for value in industry.pains %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="departments"><h2>适用部门</h2><ul>{% for value in industry.departments %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="sme-fit"><h2>企业规模</h2><ul>{% for value in industry.company_sizes %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="priority-scenarios"><h2>优先场景</h2><ul>{% for item in industry.scenarios %}<li><a href="{{ url_for('public_catalog.scenario_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>
+    <section class="decision-section" data-content-section="service-packages"><h2>服务包</h2><ul>{% for item in industry.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul></section>
+    {% if industry.resources %}<section class="decision-section" data-content-section="related-resources"><h2>相关资源</h2><ul>{% for item in industry.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>{% endif %}
   </div>
   <aside class="decision-summary" aria-labelledby="decision-summary-title">
     <h2 id="decision-summary-title">决策摘要</h2>

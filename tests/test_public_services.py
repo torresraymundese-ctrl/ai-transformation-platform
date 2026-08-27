@@ -395,8 +395,20 @@ def test_every_public_service_detail_has_complete_delivery_structure_and_ctas(
         assert document.select_one('body[data-analytics-page="services"]') is not None
         assert document.select_one("main#main-content.decision-detail") is not None
         assert len(document.select("main#main-content")) == 1
-        assert document.select_one(".detail-hero h1") is not None
+        themes = document.select(".detail-theme")
+        assert len(themes) == 1
+        theme = themes[0]
+        assert theme.select_one('.detail-breadcrumb[aria-label="面包屑"]') is not None
+        assert theme.select_one(".detail-hero h1") is not None
+        context = theme.select_one("dl.detail-context")
+        assert context is not None
+        assert tuple(node.get_text(" ", strip=True) for node in context.select("dt")) == (
+            "适用行业", "相关部门", "适用成熟度",
+        )
         assert document.select_one(".decision-main") is not None
+        main_sections = document.select(".decision-main > section:has(h2)")
+        assert main_sections
+        assert all("decision-section" in node.get("class", ()) for node in main_sections)
         summary = document.select_one(
             'aside.decision-summary[aria-labelledby="decision-summary-title"]'
         )
