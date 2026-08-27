@@ -5,17 +5,9 @@
 {% block analytics_page %}scenario_detail{% endblock %}
 {% block main_attributes %} class="public-page decision-detail public-scenario-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ scenario.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% macro format_cny(amount) -%}
-  {%- if amount >= 10000 and amount % 10000 == 0 -%}
-    ¥{{ (amount / 10000)|int }}万
-  {%- else -%}
-    {%- set exact_amount = "{:,}".format(amount) -%}
-    ¥{{ exact_amount[:-2] if exact_amount.endswith('.0') else exact_amount }}
-  {%- endif -%}
-{%- endmacro %}
 {% block content %}
 {% set timeline_value %}{% if scenario.timeline %}{% for minimum, maximum in scenario.timeline %}{{ minimum }}—{{ maximum }} 周{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
-{% set budget_value %}{% if scenario.budget %}{% for minimum, maximum in scenario.budget %}{{ format_cny(minimum) }}—{{ format_cny(maximum) }}{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
+{% set budget_value %}{% if scenario.budget %}{% for minimum, maximum in scenario.budget %}{{ format_cny_amount(minimum) }}—{{ format_cny_amount(maximum) }}{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
 <div class="detail-theme">
   <div class="public-container">{{ breadcrumb('/scenarios', '返回场景列表', scenario.title) }}</div>
   {{ detail_hero(scenario.title, scenario.summary, 'AI 场景') }}

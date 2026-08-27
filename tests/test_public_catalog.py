@@ -204,6 +204,13 @@ def test_scenario_summary_is_static_with_one_full_width_action_pair(published_ca
         (10001, 12345, "¥10,001—¥12,345"),
         (50000.5, 100000.25, "¥50,000.5—¥100,000.25"),
         (50000, 100000, "¥5万—¥10万"),
+        (0.00001, 0.00002, "¥0.00001—¥0.00002"),
+        (
+            1e25,
+            1.0000000000000003e25,
+            "¥10,000,000,000,000,000,000,000,000—"
+            "¥10,000,000,000,000,003,000,000,000",
+        ),
     ),
 )
 def test_scenario_summary_preserves_exact_published_budget_values(

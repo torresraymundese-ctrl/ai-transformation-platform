@@ -1,5 +1,7 @@
 """HTTP-only public adapters for the published core content catalog."""
 
+from decimal import Decimal
+
 from flask import Blueprint, abort, current_app, redirect, render_template, request
 
 import catalog_content_repository as catalog
@@ -19,6 +21,26 @@ def _canonical(path):
 def _content_now():
     provider = current_app.config.get("CONTENT_NOW_PROVIDER")
     return provider() if callable(provider) else shanghai_now()
+
+
+def _format_cny_amount(value):
+    """Render one validated public budget without rounding or exponent notation."""
+    if type(value) not in (int, float):
+        raise TypeError("budget amount must be an exact int or float")
+    source = str(value)
+    number = Decimal(source)
+    suffix = ""
+    if "e" not in source.lower() and number >= 10000 and number % 10000 == 0:
+        number /= 10000
+        suffix = "万"
+    plain = format(number, "f")
+    if "." in plain:
+        plain = plain.rstrip("0").rstrip(".")
+    whole, separator, fraction = plain.partition(".")
+    grouped = f"{int(whole):,}"
+    if separator:
+        grouped = f"{grouped}.{fraction}"
+    return f"¥{grouped}{suffix}"
 
 
 @bp.get("/industries")
@@ -56,7 +78,12 @@ def scenario_detail(slug):
         abort(404)
     if scenario["redirect"]:
         return redirect(f"/scenarios/{scenario['slug']}", code=301)
-    return render_template("scenario_detail.html", scenario=scenario, canonical=_canonical(f"/scenarios/{scenario['slug']}"))
+    return render_template(
+        "scenario_detail.html",
+        scenario=scenario,
+        format_cny_amount=_format_cny_amount,
+        canonical=_canonical(f"/scenarios/{scenario['slug']}"),
+    )
 
 
 @bp.get("/service-packages")
