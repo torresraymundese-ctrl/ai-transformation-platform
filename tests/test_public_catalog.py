@@ -219,6 +219,12 @@ def test_scenario_summary_is_static_with_one_full_width_action_pair(published_ca
             "000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,000,"
             "000,000,000,000,000,000,000,000,000,000,000,000,001",
         ),
+        pytest.param(
+            10**5000 + 1,
+            10**5000 + 2,
+            "¥100," + "000," * 1665 + "001—¥100," + "000," * 1665 + "002",
+            id="beyond-python-integer-string-limit",
+        ),
     ),
 )
 def test_scenario_summary_preserves_exact_published_budget_values(

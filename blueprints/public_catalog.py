@@ -34,14 +34,26 @@ def _group_decimal_whole(whole):
     return ",".join(groups)
 
 
+def _group_exact_integer(value):
+    """Group an exact integer without invoking Python's digit-limited conversion."""
+    chunks = []
+    while value >= 1000:
+        value, remainder = divmod(value, 1000)
+        chunks.append(f"{remainder:03d}")
+    chunks.append(f"{value:d}")
+    return ",".join(reversed(chunks))
+
+
 def _format_cny_amount(value):
     """Render one validated public budget without rounding or exponent notation."""
     if type(value) not in (int, float):
         raise TypeError("budget amount must be an exact int or float")
     if type(value) is int:
+        suffix = ""
         if value >= 10000 and value % 10000 == 0:
-            return f"¥{_group_decimal_whole(str(value // 10000))}万"
-        return f"¥{_group_decimal_whole(str(value))}"
+            value //= 10000
+            suffix = "万"
+        return f"¥{_group_exact_integer(value)}{suffix}"
     source = str(value)
     number = Decimal(source)
     suffix = ""
