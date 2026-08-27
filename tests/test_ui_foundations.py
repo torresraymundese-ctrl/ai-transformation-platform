@@ -1,10 +1,30 @@
 from bs4 import BeautifulSoup
 import pytest
+import re
 
 
 def _page(response):
     assert response.status_code == 200
     return BeautifulSoup(response.get_data(as_text=True), "html.parser")
+
+
+def _css_custom_color(css, name):
+    match = re.search(rf"{re.escape(name)}:\s*(#[0-9a-f]{{6}})", css.lower())
+    assert match is not None, name
+    return match.group(1)
+
+
+def _contrast_ratio(foreground, background):
+    def luminance(color):
+        channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+        channels = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in channels
+        ]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+    lighter, darker = sorted((luminance(foreground), luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
 
 
 def test_public_shell_loads_design_layers_after_legacy_css(client):
@@ -41,7 +61,14 @@ def test_shared_focus_rules_make_the_skip_link_and_focus_visible(client):
     assert ".skip-link:focus" in css
     assert "transform: translateY(0)" in css
     assert ":focus-visible" in css
-    assert "box-shadow: var(--ui-focus)" in css
+    assert "outline: 3px solid var(--ui-focus)" in css
+    assert "outline-offset: 3px" in css
+    assert "box-shadow: none" in css
+
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    focus = _css_custom_color(tokens, "--ui-focus")
+    assert _contrast_ratio(focus, "#ffffff") >= 3
+    assert _contrast_ratio(focus, "#061b46") >= 3
 
 
 def test_design_tokens_are_served_with_approved_values(client):
@@ -83,6 +110,52 @@ def test_footer_has_no_inline_layout_styles(client):
     footer = page.select_one("footer.footer")
     assert footer is not None
     assert not footer.select("[style]")
+
+
+@pytest.mark.parametrize(
+    "path",
+    ("/industries/manufacturing", "/scenarios/mfg-knowledge-assistant"),
+)
+def test_decision_cta_accessible_name_matches_its_visible_label(client, db, path):
+    """A replacement aria-label must not make the CTA name differ from its visible text."""
+    db.execute(
+        "UPDATE content_items SET status='published', published_at='2026-08-24 10:00:00' "
+        "WHERE entry_type IN ('industry', 'scenario') AND status='draft'"
+    )
+    db.commit()
+    page = _page(client.get(path))
+    cta = page.select_one('.decision-summary a[href="/assessment"]')
+
+    assert cta is not None
+    assert cta.get_text(" ", strip=True) == "获取适配建议"
+    assert cta.get("aria-label") in (None, "获取适配建议")
+
+
+def test_shared_navigation_and_footer_use_readable_text_colors(client):
+    """Low-contrast legacy shell colors must not leak through the UI layer."""
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    css = client.get("/static/css/ui-components.css").get_data(as_text=True)
+    ink = _css_custom_color(tokens, "--ui-ink-650")
+
+    assert _contrast_ratio(ink, "#ffffff") >= 4.5
+    assert _contrast_ratio(ink, "#f5f5f7") >= 4.5
+    assert ".nav-links a { color: var(--ui-ink-650);" in css
+    assert ".footer { color: var(--ui-ink-650);" in css
+    assert ".footer a," in css
+    assert ".footer-bottom { color: var(--ui-ink-650);" in css
+
+
+def test_shared_navigation_and_footer_links_keep_touch_targets_and_mobile_columns(client):
+    """Shrinking shell links or keeping four mobile footer columns must fail this contract."""
+    css = client.get("/static/css/ui-components.css").get_data(as_text=True)
+
+    assert ".nav-links a," in css
+    assert ".mobile-navigation-panel a," in css
+    assert ".footer-inner a {" in css
+    assert "min-height: 2.75rem;" in css
+    assert ".footer-bottom a { min-height: 2.75rem; display: inline-flex; align-items: center; }" in css
+    assert ".footer-inner { grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert ".footer-inner > :first-child { grid-column: 1 / -1; }" in css
 
 
 def test_navigation_brand_text_overrides_the_legacy_span_color(client):

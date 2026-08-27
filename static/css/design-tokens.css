@@ -21,7 +21,7 @@
   --ui-radius-panel: 0.75rem;
   --ui-container: 75rem;
   --ui-reading: 52rem;
-  --ui-focus: 0 0 0 3px rgba(15, 95, 239, 0.42);
+  --ui-focus: #0f5fef;
   --ui-motion-fast: 160ms;
   --ui-motion-standard: 220ms;
 }

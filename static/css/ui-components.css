@@ -12,9 +12,16 @@
 
 .skip-link:focus { transform: translateY(0); }
 
+a:focus-visible,
+summary:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 :focus-visible {
-  outline: 0;
-  box-shadow: var(--ui-focus);
+  outline: 3px solid var(--ui-focus);
+  outline-offset: 3px;
+  box-shadow: none;
 }
 
 .btn,
@@ -44,6 +51,8 @@ summary {
 
 .nav-brand-text strong { color: var(--ui-blue-600); }
 
+.nav-links a { color: var(--ui-ink-650); }
+
 .nav-links a.active { box-shadow: inset 0 -3px 0 var(--ui-blue-600); }
 
 .nav-cta { min-height: 2.75rem; display: inline-flex; align-items: center; }
@@ -52,11 +61,28 @@ summary {
 
 .footer-contact { line-height: 1.8; }
 
+.footer { color: var(--ui-ink-650); }
+
+.footer a,
+.footer-bottom { color: var(--ui-ink-650); }
+
+.nav-links a,
+.mobile-navigation-panel a,
+.footer-inner a {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+}
+
+.footer-bottom a { min-height: 2.75rem; display: inline-flex; align-items: center; }
+
 .sticky-cta { min-height: 4.5rem; }
 
 @media (max-width: 767px) {
   .nav-brand-text { font-size: 1rem; }
   .mobile-navigation-panel { max-width: calc(100vw - 2rem); }
+  .footer-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-space-4); }
+  .footer-inner > :first-child { grid-column: 1 / -1; }
   .sticky-cta { flex-wrap: nowrap; align-items: center; }
   .sticky-cta .cta-text { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
   .sticky-cta .btn { flex: 0 0 auto; min-height: 2.75rem; }
