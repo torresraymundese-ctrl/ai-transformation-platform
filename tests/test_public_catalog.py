@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 import hashlib
 import json
+import re
 import sqlite3
 
 import pytest
@@ -54,6 +55,18 @@ def published_catalog(client, db):
 def page(response):
     assert response.status_code == 200
     return BeautifulSoup(response.data, "html.parser")
+
+
+def _css_declarations(css, selector):
+    """Read one public CSS rule as its browser-facing declaration mapping."""
+    match = re.search(rf"{re.escape(selector)}\s*\{{([^}}]+)\}}", css)
+    assert match is not None, selector
+    return {
+        name.strip(): value.strip()
+        for declaration in match.group(1).split(";")
+        if ":" in declaration
+        for name, value in (declaration.split(":", 1),)
+    }
 
 
 def _assert_decision_shell(document):
@@ -134,6 +147,119 @@ def test_scenario_detail_uses_real_decision_summary(published_catalog):
     assert "已评估" not in summary
     assert "已覆盖" not in summary
     assert document.select_one('.decision-summary a[href="/scenarios"]') is not None
+
+
+def test_scenario_detail_composes_exactly_three_business_chapters(published_catalog):
+    """A storage-field section added back to the main column must break this contract."""
+    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    chapters = document.select(".decision-main > .decision-section")
+
+    assert [chapter.select_one(":scope > h2").get_text(" ", strip=True) for chapter in chapters] == [
+        "适用场景",
+        "实施路径",
+        "关键输入、输出与风险",
+    ]
+    for marker in SCENARIO_REQUIRED_SECTIONS:
+        assert len(document.select(f'[data-content-section="{marker}"]')) == 1, marker
+    assert document.select_one('.detail-theme [data-content-section="industries"]') is not None
+    assert document.select_one('.detail-theme [data-content-section="departments"]') is not None
+    assert document.select_one('.detail-theme [data-content-section="pains"]') is not None
+    assert document.select_one('.decision-summary [data-content-section="timeline"]') is not None
+    assert document.select_one('.decision-summary [data-content-section="budget"]') is not None
+    assert document.select('.decision-main [data-content-section="timeline"]') == []
+    assert document.select('.decision-main [data-content-section="budget"]') == []
+
+
+def test_scenario_summary_is_static_with_one_full_width_action_pair(published_catalog):
+    """Sticky, pill-shaped, duplicated, or raw-decimal summary actions must fail."""
+    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+    summaries = document.select("aside.decision-summary")
+    actions = summaries[0].select_one(":scope > .decision-summary-actions")
+    css = published_catalog.get("/static/css/public-pages.css").get_data(as_text=True)
+
+    assert len(summaries) == 1
+    assert actions is not None
+    assert [link.get_text(" ", strip=True) for link in actions.select("a")] == [
+        "获取适配建议",
+        "返回场景列表",
+    ]
+    assert [link.get("href") for link in actions.select("a")] == [
+        "/assessment",
+        "/scenarios",
+    ]
+    summary_rules = _css_declarations(css, ".public-scenario-detail .decision-summary")
+    action_rules = _css_declarations(css, ".decision-summary-actions .btn")
+    assert summary_rules["position"] == "static"
+    assert action_rules["width"] == "100%"
+    assert action_rules["border-radius"] == "var(--ui-radius-control)"
+    summary_text = summaries[0].get_text(" ", strip=True)
+    assert "50000.0" not in summary_text
+    assert "100000.0" not in summary_text
+    assert "¥5万" in summary_text
+
+
+def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_catalog):
+    """Ungrouped controls or a title-only scenario card must break the catalog design."""
+    document = page(published_catalog.get(
+        "/scenarios?industry=manufacturing&department=production&maturity=explore"
+    ))
+    form = document.select_one("form.public-filter.public-filter-panel")
+
+    assert form is not None
+    fields = form.select(":scope > .public-filter-fields > .public-filter-field")
+    assert [field.select_one("label").get("for") for field in fields] == [
+        "industry",
+        "department",
+        "maturity",
+        "per_page",
+    ]
+    assert [field.select_one("input, select").get("id") for field in fields] == [
+        "industry",
+        "department",
+        "maturity",
+        "per_page",
+    ]
+    assert form.select_one(':scope > .public-filter-actions button[type="submit"]') is not None
+    assert document.select_one('#industry[value="manufacturing"]') is not None
+    assert document.select_one('#department[value="production"]') is not None
+    assert document.select_one('#maturity option[selected][value="explore"]') is not None
+
+    cards = document.select('[data-scenario-code="mfg_knowledge_assistant"] > article.catalog-card')
+    assert len(cards) == 1
+    metadata = cards[0].select_one("dl.catalog-card-meta")
+    assert metadata is not None
+    assert [term.get_text(" ", strip=True) for term in metadata.select("dt")] == [
+        "行业",
+        "部门",
+        "成熟度",
+    ]
+    metadata_text = metadata.get_text(" ", strip=True)
+    for published_label in ("制造业", "生产", "探索", "试点"):
+        assert published_label in metadata_text
+    assert "mfg_knowledge_assistant" not in cards[0].get_text(" ", strip=True)
+
+
+def test_home_uses_compact_navy_hero_and_composed_published_sections(published_catalog):
+    """A white oversized hero or bare card grid must fail the approved home rhythm."""
+    document = page(published_catalog.get("/"))
+    hero = document.select_one(".home-hero.home-hero--navy")
+    css = published_catalog.get("/static/css/public-pages.css").get_data(as_text=True)
+
+    assert hero is not None
+    assert hero.select_one('a[href="/assessment"]') is not None
+    assert hero.select_one('a[href="/service-packages"]') is not None
+    hero_rules = _css_declarations(css, ".home-hero")
+    assert hero_rules["background"] == "var(--ui-navy-950)"
+    assert hero_rules["color"] == "var(--ui-surface-000)"
+    for marker, href in (
+        ("home-industries", "/industries/manufacturing"),
+        ("home-scenarios", "/scenarios/mfg-knowledge-assistant"),
+    ):
+        section = document.select_one(f'section.home-section[data-content-section="{marker}"]')
+        assert section is not None
+        assert section.select_one(":scope > .public-container > .home-section-heading-row") is not None
+        assert section.select_one(":scope > .public-container > .catalog-grid") is not None
+        assert section.select_one(f'a[href="{href}"]') is not None
 
 
 def test_public_catalog_lists_use_the_shared_shell_and_private_analytics(published_catalog):

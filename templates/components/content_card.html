@@ -7,6 +7,13 @@
     <h2><a class="catalog-card-link" href="{{ href }}">{{ item.title }}</a></h2>
   {% endif %}
   <p>{{ item.summary }}</p>
+  {% if item.industries is defined and item.departments is defined and item.maturity is defined %}
+  <dl class="catalog-card-meta">
+    <div><dt>行业</dt><dd>{{ item.industries|join('、') }}</dd></div>
+    <div><dt>部门</dt><dd>{{ item.departments|join('、') }}</dd></div>
+    <div><dt>成熟度</dt><dd>{{ item.maturity|join('、') }}</dd></div>
+  </dl>
+  {% endif %}
   <span class="catalog-card-action" aria-hidden="true">查看详情</span>
 </article>
 {%- endmacro %}

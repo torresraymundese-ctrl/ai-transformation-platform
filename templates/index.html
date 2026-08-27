@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block content %}
-  <section class="home-hero">
+  <section class="home-hero home-hero--navy">
     <div class="public-container home-hero-inner">
       <p class="public-eyebrow">企业 AI 转型平台</p>
       <h1>企业 AI 转型，从可验证的业务场景开始</h1>
@@ -22,70 +22,82 @@
   </section>
 
   {% if industries %}
-  <section class="public-section public-section--muted" data-content-section="home-industries">
+  <section class="public-section public-section--muted home-section" data-content-section="home-industries">
     <div class="public-container">
-      <header class="public-section-header"><h2>行业方案</h2><p>从已发布的行业路径开始。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>行业方案</h2><p>从已发布的行业路径开始。</p></header>
+        <a class="btn btn-outline" href="/industries">查看全部行业方案</a>
+      </div>
+      <div class="catalog-grid{% if industries|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in industries %}{{ content_card(item, url_for('public_catalog.industry_detail', slug=item.slug), heading_level=3) }}{% endfor %}
       </div>
-      <p class="section-action"><a class="btn btn-outline" href="/industries">查看全部行业方案</a></p>
     </div>
   </section>
   {% endif %}
 
   {% if scenarios %}
-  <section class="public-section" data-content-section="home-scenarios">
+  <section class="public-section home-section" data-content-section="home-scenarios">
     <div class="public-container">
-      <header class="public-section-header"><h2>AI 场景</h2><p>根据部门与成熟度选择可实施场景。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>AI 场景</h2><p>根据部门与成熟度选择可实施场景。</p></header>
+        <a class="btn btn-outline" href="/scenarios">查看全部 AI 场景</a>
+      </div>
+      <div class="catalog-grid{% if scenarios|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in scenarios %}{{ content_card(item, url_for('public_catalog.scenario_detail', slug=item.slug), heading_level=3) }}{% endfor %}
       </div>
-      <p class="section-action"><a class="btn btn-outline" href="/scenarios">查看全部 AI 场景</a></p>
     </div>
   </section>
   {% endif %}
 
   {% if services %}
-  <section class="public-section public-section--muted" data-content-section="home-services">
+  <section class="public-section public-section--muted home-section" data-content-section="home-services">
     <div class="public-container">
-      <header class="public-section-header"><h2>服务与交付</h2><p>浏览已发布的服务包范围、周期和验收边界。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>服务与交付</h2><p>浏览已发布的服务包范围、周期和验收边界。</p></header>
+        <a class="btn btn-outline" href="/service-packages">查看全部服务包</a>
+      </div>
+      <div class="catalog-grid{% if services|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in services %}{{ content_card(item, url_for('public_catalog.service_package_detail', slug=item.slug), item.category, heading_level=3) }}{% endfor %}
       </div>
-      <p class="section-action"><a class="btn btn-outline" href="/service-packages">查看全部服务包</a></p>
     </div>
   </section>
   {% endif %}
 
   {% if cases %}
-  <section class="public-section" data-content-section="home-cases">
+  <section class="public-section home-section" data-content-section="home-cases">
     <div class="public-container">
-      <header class="public-section-header"><h2>已验证案例</h2><p>仅展示通过来源、隐私与指标审核的案例。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>已验证案例</h2><p>仅展示通过来源、隐私与指标审核的案例。</p></header>
+        <a class="btn btn-outline" href="/cases">查看全部已验证案例</a>
+      </div>
+      <div class="catalog-grid{% if cases|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in cases %}{{ content_card(item, url_for('public_catalog.case_detail', slug=item.slug), item.verification_label, heading_level=3) }}{% endfor %}
       </div>
-      <p class="section-action"><a class="btn btn-outline" href="/cases">查看全部已验证案例</a></p>
     </div>
   </section>
   {% endif %}
 
   {% if resources %}
-  <section class="public-section public-section--muted" data-content-section="home-resources">
+  <section class="public-section public-section--muted home-section" data-content-section="home-resources">
     <div class="public-container">
-      <header class="public-section-header"><h2>审核资源</h2><p>仅展示已发布且完整的资源。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>审核资源</h2><p>仅展示已发布且完整的资源。</p></header>
+        <a class="btn btn-outline" href="/resources">查看全部审核资源</a>
+      </div>
+      <div class="catalog-grid{% if resources|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in resources %}{{ content_card(item, url_for('public_catalog.resource_detail', slug=item.slug), item.resource_type_label, heading_level=3) }}{% endfor %}
       </div>
-      <p class="section-action"><a class="btn btn-outline" href="/resources">查看全部审核资源</a></p>
     </div>
   </section>
   {% endif %}
 
   {% if announcements %}
-  <section class="public-section" data-content-section="home-announcements">
+  <section class="public-section home-section" data-content-section="home-announcements">
     <div class="public-container">
-      <header class="public-section-header"><h2>当前公告</h2><p>仅展示当前有效且已发布的公告。</p></header>
-      <div class="catalog-grid">
+      <div class="home-section-heading-row">
+        <header class="public-section-header"><h2>当前公告</h2><p>仅展示当前有效且已发布的公告。</p></header>
+      </div>
+      <div class="catalog-grid{% if announcements|length == 1 %} catalog-grid--single{% endif %}">
         {% for item in announcements %}{{ content_card(item, url_for('public_catalog.announcement_detail', slug=item.slug), heading_level=3) }}{% endfor %}
       </div>
     </div>

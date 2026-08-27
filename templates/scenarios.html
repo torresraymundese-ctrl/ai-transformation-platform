@@ -10,23 +10,35 @@
 {{ page_header("AI 场景目录", "按行业、部门和成熟度浏览已发布的 AI 场景。") }}
 <section class="public-list">
   <div class="public-container">
-    <form class="public-filter" method="get" aria-label="筛选场景">
-      <label for="industry">行业</label>
-      <input id="industry" name="industry" value="{{ filters.industry }}">
-      <label for="department">部门</label>
-      <input id="department" name="department" value="{{ filters.department }}">
-      <label for="maturity">成熟度</label>
-      <select id="maturity" name="maturity">
-        <option value="" {% if not filters.maturity %}selected{% endif %}>全部</option>
-        {% for code, label in maturity_labels.items() %}<option value="{{ code }}" {% if filters.maturity == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-      <label for="per_page">每页</label>
-      <select id="per_page" name="per_page">
-        <option value="20" {% if page.per_page == 20 %}selected{% endif %}>20</option>
-        <option value="50" {% if page.per_page == 50 %}selected{% endif %}>50</option>
-      </select>
-      <button type="submit">筛选</button>
-      {% if filters.industry or filters.department or filters.maturity or page.per_page != 20 %}<a class="btn btn-outline" href="/scenarios">清除筛选</a>{% endif %}
+    <form class="public-filter public-filter-panel" method="get" aria-label="筛选场景">
+      <div class="public-filter-fields">
+        <div class="public-filter-field">
+          <label for="industry">行业</label>
+          <input id="industry" name="industry" value="{{ filters.industry }}">
+        </div>
+        <div class="public-filter-field">
+          <label for="department">部门</label>
+          <input id="department" name="department" value="{{ filters.department }}">
+        </div>
+        <div class="public-filter-field">
+          <label for="maturity">成熟度</label>
+          <select id="maturity" name="maturity">
+            <option value="" {% if not filters.maturity %}selected{% endif %}>全部</option>
+            {% for code, label in maturity_labels.items() %}<option value="{{ code }}" {% if filters.maturity == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="public-filter-field">
+          <label for="per_page">每页</label>
+          <select id="per_page" name="per_page">
+            <option value="20" {% if page.per_page == 20 %}selected{% endif %}>20</option>
+            <option value="50" {% if page.per_page == 50 %}selected{% endif %}>50</option>
+          </select>
+        </div>
+      </div>
+      <div class="public-filter-actions">
+        <button class="btn btn-primary" type="submit">筛选场景</button>
+        {% if filters.industry or filters.department or filters.maturity or page.per_page != 20 %}<a class="btn btn-outline" href="/scenarios">清除筛选</a>{% endif %}
+      </div>
     </form>
     <div class="catalog-grid">
       {% for scenario in page.items %}
