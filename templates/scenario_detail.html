@@ -6,10 +6,11 @@
 {% block main_attributes %} class="public-page decision-detail public-scenario-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ scenario.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% macro format_cny(amount) -%}
-  {%- if amount >= 10000 -%}
-    ¥{% if amount % 10000 == 0 %}{{ (amount / 10000)|int }}{% else %}{{ (amount / 10000)|round(2) }}{% endif %}万
+  {%- if amount >= 10000 and amount % 10000 == 0 -%}
+    ¥{{ (amount / 10000)|int }}万
   {%- else -%}
-    ¥{% if amount == amount|int %}{{ amount|int }}{% else %}{{ amount|round(2) }}{% endif %}
+    {%- set exact_amount = "{:,}".format(amount) -%}
+    ¥{{ exact_amount[:-2] if exact_amount.endswith('.0') else exact_amount }}
   {%- endif -%}
 {%- endmacro %}
 {% block content %}
