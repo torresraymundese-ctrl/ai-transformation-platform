@@ -153,6 +153,7 @@ def test_shared_navigation_and_footer_links_keep_touch_targets_and_mobile_column
     assert ".mobile-navigation-panel a," in css
     assert ".footer-inner a {" in css
     assert "min-height: 2.75rem;" in css
+    assert ".nav-links a { min-inline-size: 2.75rem; }" in css
     assert ".footer-bottom a { min-height: 2.75rem; display: inline-flex; align-items: center; }" in css
     assert ".footer-inner { grid-template-columns: repeat(2, minmax(0, 1fr));" in css
     assert ".footer-inner > :first-child { grid-column: 1 / -1; }" in css
