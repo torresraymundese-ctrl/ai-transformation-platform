@@ -2,7 +2,7 @@
 
 ## Scope and boundaries
 
-- Plan BASE: `23e6a29b80c26c92b219cb3694691965bfbdbcad`; current code HEAD for this evidence: `426be81061a7dfd668bb37035ffe35300326719e`.
+- Plan BASE: `23e6a29b80c26c92b219cb3694691965bfbdbcad`; current code HEAD for this evidence: `c35a1a18881d2dee1df04b88dcbcf00968a07eeb`.
 - This evidence covers only the public homepage, scenario catalog/detail, and resource detail. It does not cover assessment/report UI, admin UI, all functions, final full regression, or deployment.
 - All browser work used the Codex in-app browser on a disposable `127.0.0.1` fixture. No production server, real database, public URL, deploy, dependency install, or external-resource navigation was used.
 - Existing unrelated Task 12 working-tree changes were preserved and were not staged with this evidence.
@@ -43,15 +43,28 @@ node --test tests/js/app_runtime.test.js tests/js/analytics_runtime.test.js
 
 Node syntax exited `0`; Node runtime passed `7`, failed `0`, exit `0` (`140.29ms`). `py_compile tests/test_ui_foundations.py` and the scoped diff check also exited `0`.
 
-The earlier frozen public partition remains useful historical evidence only: it passed `523` tests on exact visual-fix HEAD `b906bc8b415ab4c34d00651b8ac9c959d37f556b`. It was not rerun before this re-review and therefore is not claimed to cover `426be81`. No full suite was run.
+The earlier frozen public partition remains useful historical evidence only: it passed `523` tests on exact visual-fix HEAD `b906bc8b415ab4c34d00651b8ac9c959d37f556b`. It was not rerun before these re-reviews and therefore is not claimed to cover Fix 2 or Fix 3. No full suite was run.
+
+## Full-plan review Fix 3
+
+The fresh re-review confirmed four findings closed but found that desktop navigation was 44px high and only 42px wide. Commit `c35a1a18881d2dee1df04b88dcbcf00968a07eeb` (`fix: enforce desktop navigation target width`) adds `min-inline-size: 2.75rem` to desktop navigation links and extends the existing target-size contract.
+
+- Exact RED: `1 failed in 0.97s`, basetemp `full-review-fix2-red-20260827-a`.
+- Focused GREEN: `5 passed in 3.14s`, basetemp `full-review-fix2-green-20260827-a`.
+- Node syntax and runtime (`7` passed), `py_compile`, and two-file diff check: exit `0`.
+- Exact Browser measurement on the committed code: active `AI 场景` anchor `44×44px`, computed `min-inline-size: 44px`; page `scrollWidth=clientWidth=1425`.
+- `scenarios-desktop.png` was recaptured at the required desktop viewport and inspected together with the approved baseline. No other screenshot was changed.
+
+No large partition or full suite was run for Fix 3 before re-review.
 
 ## Disposable fixture and cleanup
 
 The post-fix fixture used the existing application factory, migrations, normal admin HTTP publishing workflow, local source-check transport, disposable SQLite, and disposable media storage.
 
-- Command: `python .superpowers/sdd/2026-08-26-ui-foundations-public-catalog/task6_local_fixture.py --db .../task6-full-review-fix1-frozen.db --media .../task6-full-review-fix1-frozen-media --host 127.0.0.1 --port 62711`.
-- Process tree: launcher PID `24488`, listener PID `19612`, console child PID `21104`; the only application listener was `127.0.0.1:62711`.
-- Cleanup: the exact listener/launcher processes were stopped, the console child exited, and post-stop verification reported `port 62711 closed`. The in-app viewport override was reset, the tab was moved to `about:blank`, and the tab was closed.
+- Fix 2 command: `python .superpowers/sdd/2026-08-26-ui-foundations-public-catalog/task6_local_fixture.py --db .../task6-full-review-fix1-frozen.db --media .../task6-full-review-fix1-frozen-media --host 127.0.0.1 --port 62711`.
+- Fix 3 command: the same helper with `task6-full-review-fix2-frozen.db`, matching media path, and `--host 127.0.0.1 --port 62729`.
+- Fix 3 process tree: launcher PID `7880`, listener PID `20312`, console child PID `8168`; the only application listener was `127.0.0.1:62729`.
+- Cleanup: the exact listener/launcher processes were stopped, the console child exited, and post-stop verification reported `port 62729 closed`. The in-app viewport override was reset, the tab was moved to `about:blank`, and the tab was closed.
 - Fixture DB/media/log/helper remain only as ignored local control artifacts under the Task 6 SDD directory; no fixture path is staged.
 
 ## Current-run screenshots
@@ -61,7 +74,7 @@ The in-app Browser layout viewport override was explicitly set to `1440×1024` o
 | Screenshot | Route / requested viewport | Exported dimensions / SHA-256 | Inspection result |
 | --- | --- | --- | --- |
 | [home-desktop.png](evidence/ui-public/home-desktop.png) | `/` / `1440×1024` | `1425×875` / `A09B3D31D4C04AD197850D291D4F6F60882C8F4D151913599EF170725AA1BF1F` | Accepted: hierarchy, long heading, navigation, and primary/secondary actions render without clipping or horizontal overflow. |
-| [scenarios-desktop.png](evidence/ui-public/scenarios-desktop.png) | `/scenarios` / `1440×1024` | `1425×875` / `B8298BB7FB72246A472C6CD03B75DAC0DA8D9FB4863BDFECB46F4C347E1746D4` | Accepted: filters, six visible cards, long Chinese copy, active navigation, and shell text render without horizontal overflow. |
+| [scenarios-desktop.png](evidence/ui-public/scenarios-desktop.png) | `/scenarios` / `1440×1024` | `1425×875` / `7D3CE0E385B329AC88D2FB15B6B8A6968C0729789EFE6394334FC63AA8B8CF18` | Accepted: filters, six visible cards, long Chinese copy, and the measured `44×44px` active navigation target render without horizontal overflow. |
 | [scenario-detail-desktop.png](evidence/ui-public/scenario-detail-desktop.png) | `/scenarios/mfg-knowledge-assistant` / `1440×1024` | `1425×875` / `BD1AF61E2BAF14EB4B61E2D0FDF0A6B88F2CE457D26FAD37849B8452DFB9446E` | Accepted: breadcrumb, title, verified context, numbered chapters, decision summary, and CTA are visible; no horizontal overflow. |
 | [scenario-detail-mobile.png](evidence/ui-public/scenario-detail-mobile.png) | same scenario / `390×844` | `375×811` / `E0355246E8FFDD1B7BD211B1B6C7F87F4D2BADE42A748C4D20AA42AA24C242A1` | Accepted: long text wraps cleanly; the settled CTA is `72px`, nowrap, with `72px` body reservation and no content overlap. |
 | [resource-detail-mobile.png](evidence/ui-public/resource-detail-mobile.png) | `/resources/task6-reviewed-resource` / `390×844` | `375×811` / `1C8C033675D2732EAF9D4ADEE76F3BFDC0348E6251292A42614E94A69C73AD66` | Accepted: footer is two columns with its company block spanning the row; final copyright remains reachable above the fixed CTA. |
@@ -74,7 +87,7 @@ The final scenario detail keeps the approved white shell, active `AI 场景` nav
 
 - CTA name: industry/scenario detail visibly says `获取适配建议` and has no conflicting `aria-label`.
 - Focus: a real Browser click opened the mobile menu; real `Escape` closed it and restored focus to `<summary>菜单</summary>`. The computed focus style was solid `rgb(15, 95, 239)` with the expected outline/offset after capture scaling.
-- Shell contrast/targets: inactive navigation/footer text uses `--ui-ink-650`; navigation, mobile-menu, and footer links have a minimum `2.75rem` target height.
+- Shell contrast/targets: inactive navigation/footer text uses `--ui-ink-650`; navigation, mobile-menu, and footer links have a minimum `2.75rem` target height, and desktop navigation also has a minimum `2.75rem` inline size.
 - Scenario filter: `manufacturing + production + explore` preserved all values and returned exactly `制造知识助手`.
 - Empty/reset: `retail + production + explore` produced the empty state; `清除筛选` restored `/scenarios` and 12 cards.
 - Internal CTAs: real local clicks reached `/assessment`, `/service-packages`, and `/scenarios`.
@@ -89,4 +102,4 @@ The screenshots and scoped checks also do not establish full WCAG conformance, 2
 
 ## Outcome
 
-The five accessibility/responsive defects from the first full-plan review are addressed in local code and exact refreshed visual evidence. The plan remains blocked at the evidence checkpoint because native `Tab`/`Shift+Tab`/`Enter`/`Space` is `NOT PROVEN`; no next UI plan or deployment may start.
+The five accessibility/responsive defects from the first full-plan review, including the follow-up desktop-width gap, are addressed in local code and exact refreshed visual evidence. The plan remains blocked at the evidence checkpoint because native `Tab`/`Shift+Tab`/`Enter`/`Space` is `NOT PROVEN`; no next UI plan or deployment may start.
