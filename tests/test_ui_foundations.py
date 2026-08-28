@@ -30,12 +30,38 @@ def _contrast_ratio(foreground, background):
 def test_public_shell_loads_design_layers_after_legacy_css(client):
     page = _page(client.get("/"))
     hrefs = [link["href"] for link in page.select('link[rel="stylesheet"]')]
-    assert hrefs[-4:] == [
+    assert hrefs[-5:] == [
         "/static/css/app.css",
         "/static/css/design-tokens.css",
         "/static/css/ui-components.css",
         "/static/css/public-pages.css",
+        "/static/css/guided-story.css",
     ]
+
+
+def test_scale_inspired_tokens_and_story_layer_are_local(client):
+    """The local public shell needs the industrial story layer and its responsive safety rules."""
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True).lower()
+    story_css = client.get("/static/css/guided-story.css").get_data(as_text=True)
+    page = _page(client.get("/"))
+
+    for token in (
+        "--ui-graphite-1000: #07090d",
+        "--ui-graphite-950: #0d1117",
+        "--ui-paper-050: #f3f1eb",
+        "--ui-signal-blue: #0f6fef",
+        "--ui-signal-cyan: #5bd9e8",
+        "--ui-container-wide: 85rem",
+    ):
+        assert token in tokens
+
+    assert page.select_one('link[href="/static/css/guided-story.css"]') is not None
+    assert "position: sticky" in story_css
+    assert "min-height: 100svh" in story_css
+    assert "@media (max-width: 767px)" in story_css
+    assert "@media (prefers-reduced-motion: reduce)" in story_css
+    mobile_story_css = story_css.split("@media (max-width: 767px)", 1)[1]
+    assert ".story-product { position: static; top: auto; }" in mobile_story_css
 
 
 def test_home_has_skip_link_and_single_named_main(client):
@@ -84,9 +110,25 @@ def test_design_tokens_are_served_with_approved_values(client):
         "--ui-ink-950: #15213a",
         "--ui-ink-650: #536176",
         "--ui-line-200: #dde4ee",
+        "--ui-graphite-1000: #07090d",
+        "--ui-graphite-950: #0d1117",
+        "--ui-paper-050: #f3f1eb",
+        "--ui-signal-blue: #0f6fef",
+        "--ui-signal-cyan: #5bd9e8",
+        "--ui-container-wide: 85rem",
     ):
         assert token in css.lower()
     assert "prefers-reduced-motion: reduce" in css
+
+
+def test_shared_shell_has_truthful_signal_bar(client):
+    """The assessment route is visibly connected to the shared public shell."""
+    page = _page(client.get("/"))
+    signal = page.select_one("[data-site-signal]")
+
+    assert signal is not None
+    assert signal.get_text(" ", strip=True) == "从评估到实施，建立可验证的 AI 转型路径"
+    assert signal.select_one('a[href="/assessment"]') is not None
 
 
 def test_shared_shell_uses_real_brand_and_truthful_conversion_copy(client):
@@ -132,17 +174,19 @@ def test_decision_cta_accessible_name_matches_its_visible_label(client, db, path
 
 
 def test_shared_navigation_and_footer_use_readable_text_colors(client):
-    """Low-contrast legacy shell colors must not leak through the UI layer."""
+    """The shared shell keeps readable text on its paper and graphite surfaces."""
     tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
     css = client.get("/static/css/ui-components.css").get_data(as_text=True)
     ink = _css_custom_color(tokens, "--ui-ink-650")
+    paper = _css_custom_color(tokens, "--ui-paper-050")
+    graphite = _css_custom_color(tokens, "--ui-graphite-950")
 
     assert _contrast_ratio(ink, "#ffffff") >= 4.5
     assert _contrast_ratio(ink, "#f5f5f7") >= 4.5
+    assert _contrast_ratio(paper, graphite) >= 4.5
     assert ".nav-links a { color: var(--ui-ink-650);" in css
-    assert ".footer { color: var(--ui-ink-650);" in css
-    assert ".footer a," in css
-    assert ".footer-bottom { color: var(--ui-ink-650);" in css
+    assert ".footer { color: var(--ui-paper-050); background: var(--ui-graphite-950); }" in css
+    assert ".footer a,\n.footer-bottom { color: var(--ui-paper-050); }" in css
 
 
 def test_shared_navigation_and_footer_links_keep_touch_targets_and_mobile_columns(client):

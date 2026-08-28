@@ -39,7 +39,24 @@ summary {
   text-align: center;
 }
 
-.nav { background: rgba(255, 255, 255, 0.96); }
+.site-signal {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--ui-space-3);
+  color: var(--ui-paper-050);
+  background: var(--ui-graphite-1000);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.site-signal a { color: inherit; }
+
+.nav {
+  border-bottom: 1px solid var(--ui-line-light);
+  background: color-mix(in srgb, var(--ui-paper-050) 96%, transparent);
+}
 
 .nav-inner { min-height: 4.5rem; height: auto; }
 
@@ -51,22 +68,30 @@ summary {
 
 .nav-brand-text strong { color: var(--ui-blue-600); }
 
-.nav-links a { color: var(--ui-ink-650); }
+.nav-links a { color: var(--ui-ink-650); letter-spacing: 0.01em; }
 
 .nav-links a { min-inline-size: 2.75rem; }
 
-.nav-links a.active { box-shadow: inset 0 -3px 0 var(--ui-blue-600); }
+.nav-links a.active { box-shadow: inset 0 -3px 0 var(--ui-signal-blue); }
 
-.nav-cta { min-height: 2.75rem; display: inline-flex; align-items: center; }
+.nav-cta {
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-signal-blue);
+}
 
 .footer-company-summary { max-width: 32rem; line-height: 1.8; }
 
 .footer-contact { line-height: 1.8; }
 
-.footer { color: var(--ui-ink-650); }
+.footer { color: var(--ui-paper-050); background: var(--ui-graphite-950); }
 
 .footer a,
-.footer-bottom { color: var(--ui-ink-650); }
+.footer-bottom { color: var(--ui-paper-050); }
+
+.footer h4 { color: var(--ui-paper-050); }
 
 .nav-links a,
 .mobile-navigation-panel a,

@@ -1,4 +1,12 @@
 :root {
+  --ui-graphite-1000: #07090d;
+  --ui-graphite-950: #0d1117;
+  --ui-graphite-800: #252b33;
+  --ui-paper-050: #f3f1eb;
+  --ui-signal-blue: #0f6fef;
+  --ui-signal-cyan: #5bd9e8;
+  --ui-line-dark: #343b44;
+  --ui-line-light: #d8dde3;
   --ui-navy-950: #061b46;
   --ui-blue-600: #0f5fef;
   --ui-blue-700: #0b49bf;
@@ -18,12 +26,14 @@
   --ui-space-7: 4rem;
   --ui-space-8: 5rem;
   --ui-radius-control: 0.5rem;
-  --ui-radius-panel: 0.75rem;
+  --ui-radius-panel: 0.375rem;
   --ui-container: 75rem;
+  --ui-container-wide: 85rem;
   --ui-reading: 52rem;
   --ui-focus: #0f5fef;
   --ui-motion-fast: 160ms;
   --ui-motion-standard: 220ms;
+  --ui-motion-story: 680ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
