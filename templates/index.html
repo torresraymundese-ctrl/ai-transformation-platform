@@ -92,6 +92,9 @@
         <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
       </div>
       <div class="story-product" data-product-surface="roadmap">
+        <div class="story-technology-art story-technology-art--roadmap" aria-hidden="true">
+          <img data-technology-art src="/static/images/ui/industrial-data-infrastructure.webp" alt="" width="1600" height="1000" loading="lazy" decoding="async">
+        </div>
         {% for service in services[:3] %}
         <article>
           <h3><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></h3>
@@ -112,6 +115,9 @@
         </div>
       </div>
       <div class="story-product" data-product-surface="evidence">
+        <div class="story-technology-art story-technology-art--evidence" aria-hidden="true">
+          <img data-technology-art src="/static/images/ui/enterprise-compute-space.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+        </div>
         {% for case in cases[:1] %}
         <article>
           <p class="public-eyebrow">{{ case.verification_label }}</p>

@@ -94,6 +94,29 @@
 
 .story-product > :last-child { border-bottom: 0; }
 
+.story-technology-art {
+  overflow: hidden;
+  min-width: 0;
+  border-bottom: 1px solid var(--ui-line-light);
+}
+
+.story-technology-art--roadmap {
+  aspect-ratio: 16 / 10;
+  background: var(--ui-graphite-950);
+}
+
+.story-technology-art--evidence {
+  aspect-ratio: 16 / 9;
+  background: var(--ui-paper-050);
+}
+
+.story-technology-art img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
 .story-product article h2,
 .story-product article h3 { margin: 0.5rem 0; }
 

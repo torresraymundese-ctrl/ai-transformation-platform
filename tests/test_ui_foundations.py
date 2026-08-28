@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup
+from pathlib import Path
 import pytest
 import re
 
@@ -363,6 +364,23 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
         "story-evidence",
     ]
     assert "27+" not in page.get_text(" ", strip=True)
+
+
+def test_home_technology_assets_are_local_decorative_and_bounded(client):
+    """Decorative technology art must remain local, empty-alt, and within its performance budget."""
+    page = _page(client.get("/"))
+    images = page.select("img[data-technology-art]")
+
+    assert [image["src"] for image in images] == [
+        "/static/images/ui/industrial-data-infrastructure.webp",
+        "/static/images/ui/enterprise-compute-space.webp",
+    ]
+    assert all(image.get("alt") == "" for image in images)
+    root = Path(__file__).resolve().parents[1]
+    for image in images:
+        asset = root / "static" / image["src"].removeprefix("/static/")
+        assert asset.exists()
+        assert asset.stat().st_size <= 350_000
 
 
 def test_guided_story_runtime_is_local_and_does_not_intercept_native_scrolling(client):
