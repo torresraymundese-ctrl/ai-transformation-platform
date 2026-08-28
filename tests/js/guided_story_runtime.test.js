@@ -246,6 +246,8 @@ test('an earlier chapter becomes active again when the reader scrolls upward', (
   assert.equal(view.story.dataset.activeChapter, 'story-purpose');
   assert.equal(view.chapters[0].dataset.storyActive, 'true');
   assert.equal(view.steps[0].getAttribute('aria-current'), 'step');
+  assert.equal(view.document.listeners.has('wheel'), false);
+  assert.equal(view.environment.listeners.has('wheel'), false);
 });
 
 test('the browser branch exports and bootstraps without CommonJS', () => {

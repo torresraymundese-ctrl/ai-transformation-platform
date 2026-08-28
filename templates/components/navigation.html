@@ -1,7 +1,7 @@
-<div class="site-signal" data-site-signal>
+<div class="site-signal" data-site-signal{% if request.path == '/' %} hidden{% endif %}>
   <a href="/assessment">从评估到实施，建立可验证的 AI 转型路径</a>
 </div>
-<nav class="nav">
+<nav class="nav{% if request.path == '/' %} nav--home-dark{% endif %}"{% if request.path == '/' %} data-home-navigation="dark-evidence"{% endif %}>
   <div class="nav-inner">
     <a href="/" class="nav-logo" aria-label="企业 AI 转型平台首页">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="">

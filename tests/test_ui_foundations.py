@@ -48,14 +48,14 @@ def test_public_shell_loads_design_layers_after_legacy_css(client):
         "/static/css/design-tokens.css",
         "/static/css/ui-components.css",
         "/static/css/public-pages.css",
-        "/static/css/guided-story.css",
+        "/static/css/dark-evidence-home.css",
     ]
 
 
 def test_scale_inspired_tokens_and_story_layer_are_local(client):
-    """The local public shell needs the industrial story layer and its responsive safety rules."""
+    """The selected local story layer keeps the industrial tokens and safety regimes."""
     tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True).lower()
-    story_css = client.get("/static/css/guided-story.css").get_data(as_text=True)
+    story_css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
     page = _page(client.get("/"))
 
     for token in (
@@ -68,13 +68,14 @@ def test_scale_inspired_tokens_and_story_layer_are_local(client):
     ):
         assert token in tokens
 
-    assert page.select_one('link[href="/static/css/guided-story.css"]') is not None
-    assert "position: sticky" in story_css
-    assert "min-height: 100svh" in story_css
+    assert page.select_one('link[href="/static/css/dark-evidence-home.css"]') is not None
+    assert "@media (min-width: 1100px)" in story_css
+    assert "@media (min-width: 768px) and (max-width: 1099px)" in story_css
     assert "@media (max-width: 767px)" in story_css
     assert "@media (prefers-reduced-motion: reduce)" in story_css
     mobile_story_css = story_css.split("@media (max-width: 767px)", 1)[1]
-    assert ".story-product { position: static; top: auto; }" in mobile_story_css
+    assert ".home-dark-evidence .story-product--overview" in mobile_story_css
+    assert "position: static" in mobile_story_css
 
 
 def test_hero_secondary_action_keeps_a_visible_outline_label(client):
@@ -144,11 +145,12 @@ def test_design_tokens_are_served_with_approved_values(client):
 
 
 def test_shared_shell_has_truthful_signal_bar(client):
-    """The assessment route is visibly connected to the shared public shell."""
-    page = _page(client.get("/"))
+    """Non-home routes remain visibly connected to the shared assessment shell."""
+    page = _page(client.get("/about"))
     signal = page.select_one("[data-site-signal]")
 
     assert signal is not None
+    assert signal.get("hidden") is None
     assert signal.get_text(" ", strip=True) == "从评估到实施，建立可验证的 AI 转型路径"
     assert signal.select_one('a[href="/assessment"]') is not None
 
@@ -401,8 +403,8 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     assert "27+" not in page.get_text(" ", strip=True)
 
 
-def test_home_dark_evidence_css_keeps_one_signal_and_desktop_only_shell_scope(client):
-    """Task 2 owns one signal color and desktop composition, not shell behavior."""
+def test_home_dark_evidence_css_keeps_one_signal_color(client):
+    """The dark homepage keeps one signal color across its composition."""
     css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
 
     for secondary_blue in ("#5ca0ff", "#075fce", "#4d9cff", "#62a8ff"):
@@ -415,14 +417,71 @@ def test_home_dark_evidence_css_keeps_one_signal_and_desktop_only_shell_scope(cl
         ".home-dark-evidence .home-application-links a:hover,\n"
         ".home-dark-evidence .home-application-links a:focus-visible",
     )
-    for shell_behavior in (
-        ".home-dark-evidence .site-signal",
-        ".home-dark-evidence .sticky-cta",
-        ".home-dark-evidence .nav-logo img",
-        ".home-dark-evidence .nav-cta:hover",
-        "@media (max-width:",
-    ):
-        assert shell_behavior not in css
+
+
+def test_home_navigation_and_conversion_surfaces_follow_dark_evidence_contract(client):
+    """Only the homepage gets the dark shell and its duplicate fixed CTA is suppressed."""
+    home = _page(client.get("/"))
+    navigation = home.select_one("nav.nav.nav--home-dark[data-home-navigation]")
+
+    assert navigation is not None
+    assert navigation["data-home-navigation"] == "dark-evidence"
+    assert [link.get("href") for link in navigation.select("a[href]")] == [
+        "/",
+        "/industries",
+        "/scenarios",
+        "/service-packages",
+        "/cases",
+        "/about",
+        "/assessment",
+        "/industries",
+        "/scenarios",
+        "/service-packages",
+        "/cases",
+        "/about",
+        "/assessment",
+    ]
+    assert home.select_one("[data-site-signal]").has_attr("hidden")
+    assert [link.get("href") for link in home.select(".home-hero-actions a")] == [
+        "/assessment"
+    ]
+    assert len(home.select('main a.btn-primary[href="/assessment"]')) == 2
+    assert home.select_one('[data-home-section="final-cta"] a[href="/assessment"]')
+
+    about = _page(client.get("/about"))
+    assert about.select_one("nav.nav.nav--home-dark") is None
+    assert about.select_one("nav.nav[data-home-navigation]") is None
+    assert not about.select_one("[data-site-signal]").has_attr("hidden")
+
+
+def test_home_responsive_shell_declares_three_safe_layout_regimes(client):
+    """Static CSS must cover desktop, compact desktop, mobile, and reduced motion."""
+    css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
+
+    hidden_conversion = _css_rule(
+        css,
+        ".home-dark-evidence .site-signal,\n.home-dark-evidence .sticky-cta",
+    )
+    assert "display: none" in hidden_conversion
+    assert "@media (min-width: 1100px)" in css
+    assert "@media (min-width: 768px) and (max-width: 1099px)" in css
+    assert "@media (max-width: 767px)" in css
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    mobile_css = css.split("@media (max-width: 767px)", 1)[1].split(
+        "@media (prefers-reduced-motion: reduce)", 1
+    )[0]
+    mobile_css = re.sub(r"(?m)^  ", "", mobile_css)
+    mobile_progress = _css_rule(
+        mobile_css, ".home-dark-evidence .guided-story-progress"
+    )
+    mobile_step = _css_rule(
+        mobile_css, ".home-dark-evidence .guided-story-progress a"
+    )
+    assert "overflow-x: auto" in mobile_progress
+    assert "min-width: 2.75rem" in mobile_step
+    assert "min-height: 2.75rem" in mobile_step
+    assert "transform: scale(1.02)" in css
+    assert "[data-story-mode=\"enhanced\"]" in css
 
 
 def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):

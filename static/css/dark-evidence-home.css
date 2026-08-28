@@ -11,9 +11,20 @@
   --home-container: 80rem;
   --home-section-space: clamp(7.5rem, 11vw, 11.25rem);
   min-width: 20rem;
+  max-width: 100%;
+  overflow-x: clip;
   color: var(--home-copy);
   background: var(--home-graphite-1000);
   color-scheme: dark;
+}
+
+.home-dark-evidence .site-signal,
+.home-dark-evidence .sticky-cta {
+  display: none;
+}
+
+.home-dark-evidence.has-sticky-cta {
+  padding-bottom: 0;
 }
 
 .home-dark-evidence .nav {
@@ -32,6 +43,46 @@
 .home-dark-evidence .nav-brand-text strong,
 .home-dark-evidence .nav-links a {
   color: var(--home-white);
+}
+
+.home-dark-evidence .nav--home-dark .nav-links a.active {
+  box-shadow: inset 0 -3px 0 var(--home-signal);
+}
+
+.home-dark-evidence .nav--home-dark .nav-cta {
+  border-radius: 0.125rem;
+  background: var(--home-signal);
+}
+
+.home-dark-evidence .nav--home-dark .nav-cta:hover,
+.home-dark-evidence .nav--home-dark .nav-cta:focus-visible {
+  color: var(--home-white) !important;
+  background: var(--home-signal);
+  box-shadow: none;
+  filter: brightness(0.88);
+  transform: none;
+}
+
+.home-dark-evidence .nav--home-dark .mobile-navigation summary {
+  color: var(--home-white);
+}
+
+.home-dark-evidence .nav--home-dark .mobile-navigation-panel {
+  border-color: var(--home-line);
+  border-radius: 0.125rem;
+  color: var(--home-copy);
+  background: var(--home-graphite-950);
+  box-shadow: none;
+}
+
+.home-dark-evidence .nav--home-dark .mobile-navigation-panel a {
+  color: var(--home-copy);
+}
+
+.home-dark-evidence .nav--home-dark .mobile-navigation-panel a:hover,
+.home-dark-evidence .nav--home-dark .mobile-navigation-panel a:focus-visible {
+  color: var(--home-white);
+  background: var(--home-graphite-900);
 }
 
 .home-dark-evidence .public-page .btn-primary {
@@ -192,6 +243,12 @@
   height: 100%;
   display: block;
   object-fit: cover;
+  transition: transform 680ms ease;
+}
+
+.home-dark-evidence .home-art:hover img,
+.home-dark-evidence .story-technology-art:hover img {
+  transform: scale(1.02);
 }
 
 .home-dark-evidence .home-art--hero {
@@ -596,4 +653,435 @@
 .home-dark-evidence .home-final-cta p {
   margin: 0.75rem 0 0;
   color: #9daabc;
+}
+
+.home-dark-evidence [data-story-mode="enhanced"] .story-copy,
+.home-dark-evidence [data-story-mode="enhanced"] .story-product {
+  opacity: 0.72;
+  transform: translateY(1.25rem);
+  transition: opacity 680ms ease, transform 680ms ease;
+}
+
+.home-dark-evidence [data-story-mode="enhanced"] .story-chapter[data-story-active="true"] .story-copy,
+.home-dark-evidence [data-story-mode="enhanced"] .story-chapter[data-story-active="true"] .story-product {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (min-width: 1100px) {
+  .home-dark-evidence .guided-story-progress {
+    position: fixed;
+    top: 50%;
+    right: max(0rem, calc((100vw - var(--home-container)) / 2 - 4rem));
+    z-index: 20;
+    width: 3rem;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    transform: translateY(-50%);
+    white-space: normal;
+  }
+
+  .home-dark-evidence .guided-story-progress a {
+    width: 3rem;
+    min-height: 3rem;
+    display: grid;
+    place-items: center;
+    border-inline-end: 1px solid var(--home-line);
+    color: var(--home-muted);
+    font-size: 0.75rem;
+    text-decoration: none;
+  }
+
+  .home-dark-evidence .guided-story-progress a[aria-current="step"] {
+    border-color: var(--home-signal);
+    color: var(--home-white);
+    background: var(--home-graphite-950);
+  }
+
+  .home-dark-evidence .guided-story-progress a span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  .home-dark-evidence .nav-inner {
+    width: calc(100% - 3rem);
+  }
+
+  .home-dark-evidence .guided-story-progress {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    z-index: 20;
+    width: 2.75rem;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    transform: translateY(-50%);
+    white-space: normal;
+  }
+
+  .home-dark-evidence .guided-story-progress a {
+    width: 2.75rem;
+    min-height: 2.75rem;
+    display: grid;
+    place-items: center;
+    border-inline-end: 1px solid var(--home-line);
+    color: var(--home-muted);
+    font-size: 0.6875rem;
+    text-decoration: none;
+  }
+
+  .home-dark-evidence .guided-story-progress a[aria-current="step"] {
+    border-color: var(--home-signal);
+    color: var(--home-white);
+    background: var(--home-graphite-950);
+  }
+
+  .home-dark-evidence .guided-story-progress a span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .home-dark-evidence .home-hero-copy {
+    width: min(34rem, calc(100% - 6rem));
+    padding-block: 5rem;
+  }
+
+  .home-dark-evidence .home-hero-copy h1 {
+    font-size: clamp(3.75rem, 7vw, 4.75rem);
+  }
+
+  .home-dark-evidence .story-product--overview {
+    inset-inline-start: 44%;
+  }
+
+  .home-dark-evidence .home-capability-number {
+    grid-column: 1;
+    font-size: 4rem;
+  }
+
+  .home-dark-evidence .home-capability-copy {
+    grid-column: 2 / span 5;
+    padding-inline-end: 1rem;
+  }
+
+  .home-dark-evidence .home-capability-row > .story-product {
+    grid-column: 7 / -1;
+  }
+
+  .home-dark-evidence .home-application-copy {
+    grid-column: 1 / span 6;
+    padding: 2.5rem;
+  }
+
+  .home-dark-evidence .home-applications > .story-technology-art {
+    grid-column: 7 / -1;
+    min-height: 28rem;
+  }
+
+  .home-dark-evidence .home-proof-metrics article {
+    padding-inline: 1.5rem;
+  }
+
+  .home-dark-evidence [data-demo-value] {
+    white-space: normal;
+  }
+
+  .home-dark-evidence .home-final-cta {
+    padding-inline: 3rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .home-dark-evidence .nav-inner {
+    width: calc(100% - 2.5rem);
+    padding-inline: 0;
+  }
+
+  .home-dark-evidence .guided-story-progress {
+    position: static;
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    gap: 0.25rem;
+    overflow-x: auto;
+    clip: auto;
+    clip-path: none;
+    transform: none;
+    border-bottom: 1px solid var(--home-line);
+    background: var(--home-graphite-950);
+    white-space: nowrap;
+    scrollbar-width: thin;
+  }
+
+  .home-dark-evidence .guided-story-progress a {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+    border: 1px solid transparent;
+    color: var(--home-muted);
+    font-size: 0.75rem;
+    text-decoration: none;
+  }
+
+  .home-dark-evidence .guided-story-progress a[aria-current="step"] {
+    border-color: var(--home-signal);
+    color: var(--home-white);
+    background: var(--home-graphite-900);
+  }
+
+  .home-dark-evidence .story-chapter {
+    scroll-margin-top: 4.5rem;
+  }
+
+  .home-dark-evidence .story-chapter--hero {
+    min-height: 0;
+  }
+
+  .home-dark-evidence .home-hero-shell {
+    display: grid;
+  }
+
+  .home-dark-evidence .home-hero-copy {
+    width: calc(100% - 2.5rem);
+    margin-inline: auto;
+    padding-block: 5rem 3rem;
+  }
+
+  .home-dark-evidence .home-hero-copy h1 {
+    max-width: 100%;
+    font-size: clamp(2.625rem, 12vw, 3.5rem);
+    letter-spacing: -0.045em;
+  }
+
+  .home-dark-evidence .home-hero-copy > p:not(.public-eyebrow):not(.home-audit-note) {
+    margin-top: 1.5rem;
+    font-size: 1rem;
+  }
+
+  .home-dark-evidence .story-product--overview {
+    position: static;
+    height: clamp(18rem, 72vw, 27rem);
+  }
+
+  .home-dark-evidence .story-product--overview::after {
+    display: none;
+  }
+
+  .home-dark-evidence .home-positioning,
+  .home-dark-evidence .home-capability-row,
+  .home-dark-evidence .home-applications,
+  .home-dark-evidence .home-proof,
+  .home-dark-evidence .home-news {
+    width: calc(100% - 2.5rem);
+  }
+
+  .home-dark-evidence .home-positioning {
+    padding-block: 4rem 3rem;
+    text-align: start;
+  }
+
+  .home-dark-evidence .home-capability-row {
+    min-height: 0;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    padding-block: 4.5rem;
+  }
+
+  .home-dark-evidence .home-capability-number,
+  .home-dark-evidence .home-capability-copy,
+  .home-dark-evidence .home-capability-row > .story-product {
+    grid-column: 1;
+  }
+
+  .home-dark-evidence .home-capability-number {
+    font-size: 4rem;
+  }
+
+  .home-dark-evidence .home-capability-copy {
+    padding-inline-end: 0;
+  }
+
+  .home-dark-evidence .home-capability-row > .story-product {
+    position: static;
+    border-block-start: 1px solid var(--home-line);
+    border-inline-start: 0;
+  }
+
+  .home-dark-evidence .home-capability-row .home-art,
+  .home-dark-evidence .home-capability-row .story-technology-art {
+    min-height: 16rem;
+  }
+
+  .home-dark-evidence .home-inline-links {
+    display: grid;
+  }
+
+  .home-dark-evidence .home-inline-links li {
+    min-width: 0;
+  }
+
+  .home-dark-evidence .home-inline-links li + li {
+    border-block-start: 1px solid var(--home-line);
+    border-inline-start: 0;
+  }
+
+  .home-dark-evidence .home-applications {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .home-dark-evidence .home-application-copy,
+  .home-dark-evidence .home-applications > .story-technology-art {
+    grid-column: 1;
+  }
+
+  .home-dark-evidence .home-application-copy {
+    padding: 2rem 1.25rem;
+  }
+
+  .home-dark-evidence .home-application-links {
+    grid-template-columns: 1fr;
+  }
+
+  .home-dark-evidence .home-application-links a:nth-child(n) {
+    margin-inline: 0;
+  }
+
+  .home-dark-evidence .home-applications > .story-technology-art {
+    min-height: 19rem;
+    border-block-start: 1px solid var(--home-line);
+    border-inline-start: 0;
+  }
+
+  .home-dark-evidence .home-proof,
+  .home-dark-evidence .home-news {
+    padding-block: 4.5rem;
+  }
+
+  .home-dark-evidence .home-proof-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .home-dark-evidence .home-proof-metrics article {
+    padding: 2rem 0;
+  }
+
+  .home-dark-evidence .home-proof-metrics article + article {
+    border-block-start: 1px solid var(--home-line);
+    border-inline-start: 0;
+  }
+
+  .home-dark-evidence [data-demo-value] {
+    white-space: normal;
+  }
+
+  .home-dark-evidence .home-case-links > a {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding-block: 0.75rem;
+  }
+
+  .home-dark-evidence .home-case-links > a > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .home-dark-evidence .home-news-row {
+    grid-template-columns: minmax(5rem, 0.35fr) minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding-inline: 0.75rem;
+  }
+
+  .home-dark-evidence .home-news-row > span:nth-child(2) {
+    overflow-wrap: anywhere;
+  }
+
+  .home-dark-evidence .home-final-cta {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2rem;
+    padding: 3.5rem 1.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-dark-evidence .nav {
+    position: static;
+  }
+
+  .home-dark-evidence .guided-story {
+    scroll-snap-type: none;
+  }
+
+  .home-dark-evidence .guided-story-progress {
+    position: static;
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    gap: 0.25rem;
+    overflow-x: auto;
+    clip: auto;
+    clip-path: none;
+    transform: none;
+    white-space: nowrap;
+  }
+
+  .home-dark-evidence .guided-story-progress a {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .home-dark-evidence .story-chapter,
+  .home-dark-evidence .story-product {
+    position: static;
+    top: auto;
+    scroll-snap-align: none;
+  }
+
+  .home-dark-evidence [data-story-mode="enhanced"] .story-copy,
+  .home-dark-evidence [data-story-mode="enhanced"] .story-product,
+  .home-dark-evidence .home-art img,
+  .home-dark-evidence .story-technology-art img {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .home-dark-evidence .home-art:hover img,
+  .home-dark-evidence .story-technology-art:hover img {
+    transform: none;
+  }
 }
