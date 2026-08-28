@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}企业 AI 转型平台 - 经审核的场景、服务与内容{% endblock %}
 {% block analytics_page %}home{% endblock %}
+{% block body_class %}home-dark-evidence{% endblock %}
 {% block main_attributes %} class="public-page public-home"{% endblock %}
 {% block head %}
 <meta name="description" content="从已发布的行业方案、AI 场景、服务包、已验证案例和审核资源中选择企业 AI 转型路径。">
 <link rel="canonical" href="{{ canonical }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/guided-story.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dark-evidence-home.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -35,6 +36,9 @@
         </div>
       </div>
       <div class="story-product story-product--overview" data-product-surface="overview">
+        <div class="home-art home-art--hero" aria-hidden="true">
+          <img data-home-art src="/static/images/ui/home-ai-core.webp" alt="" width="1920" height="1080" fetchpriority="high">
+        </div>
         {% for scenario in scenarios[:3] %}
         <article>
           <span>0{{ loop.index }}</span>
@@ -71,6 +75,9 @@
         <a href="/scenarios" class="btn btn-outline">浏览全部 AI 场景</a>
       </div>
       <div class="story-product" data-product-surface="matching">
+        <div class="home-art home-art--knowledge" aria-hidden="true">
+          <img data-home-art src="/static/images/ui/home-knowledge-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+        </div>
         {% for scenario in scenarios[:3] %}
         <article>
           <h3><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></h3>
@@ -92,6 +99,9 @@
         <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
       </div>
       <div class="story-product" data-product-surface="roadmap">
+        <div class="home-art home-art--path" aria-hidden="true">
+          <img data-home-art src="/static/images/ui/home-path-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+        </div>
         <div class="story-technology-art story-technology-art--roadmap" aria-hidden="true">
           <img data-technology-art src="/static/images/ui/industrial-data-infrastructure.webp" alt="" width="1600" height="1000" loading="lazy" decoding="async">
         </div>

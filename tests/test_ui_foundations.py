@@ -377,6 +377,52 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     assert "27+" not in page.get_text(" ", strip=True)
 
 
+def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):
+    """The selected homepage art must stay local, lightweight, and correctly prioritized."""
+    page = _page(client.get("/"))
+
+    assert page.body.get("class") and "home-dark-evidence" in page.body["class"]
+    assert page.select_one('link[href="/static/css/dark-evidence-home.css"]') is not None
+    expected = {
+        "/static/images/ui/home-ai-core.webp": (1920, 1080, 350_000),
+        "/static/images/ui/home-knowledge-system.webp": (1600, 900, 300_000),
+        "/static/images/ui/home-path-system.webp": (1600, 900, 300_000),
+    }
+    root = Path(__file__).resolve().parents[1]
+
+    assert len(page.select("img[data-home-art]")) == len(expected)
+    for url, (width, height, byte_limit) in expected.items():
+        matches = page.select(f'img[data-home-art][src="{url}"]')
+        assert len(matches) == 1
+        image = matches[0]
+        assert image.get("alt") == ""
+        assert (image.get("width"), image.get("height")) == (str(width), str(height))
+
+        asset = root / "static" / url.removeprefix("/static/")
+        assert asset.exists()
+        assert 0 < asset.stat().st_size <= byte_limit
+        with Image.open(asset) as bitmap:
+            assert bitmap.format == "WEBP"
+            assert bitmap.size == (width, height)
+            assert not getattr(bitmap, "is_animated", False)
+            assert getattr(bitmap, "n_frames", 1) == 1
+            bitmap.verify()
+        with Image.open(asset) as bitmap:
+            bitmap.load()
+
+    hero = page.select_one('img[data-home-art][src="/static/images/ui/home-ai-core.webp"]')
+    assert hero.get("fetchpriority") == "high"
+    assert hero.get("loading") != "lazy"
+
+    for url in (
+        "/static/images/ui/home-knowledge-system.webp",
+        "/static/images/ui/home-path-system.webp",
+    ):
+        supporting = page.select_one(f'img[data-home-art][src="{url}"]')
+        assert supporting.get("loading") == "lazy"
+        assert supporting.get("decoding") == "async"
+
+
 def _assert_home_technology_assets_contract(page):
     images = page.select("img[data-technology-art]")
 

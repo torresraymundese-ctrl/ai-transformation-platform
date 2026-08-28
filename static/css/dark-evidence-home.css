@@ -1,0 +1,13 @@
+.home-dark-evidence {
+  --home-graphite-1000: #07090d;
+  --home-graphite-950: #0d1117;
+  --home-graphite-900: #12171f;
+  --home-paper: #f3f1eb;
+  --home-white: #ffffff;
+  --home-copy: #d7dde5;
+  --home-muted: #8e99a8;
+  --home-line: #2b323c;
+  --home-signal: #0f6fef;
+  --home-container: 80rem;
+  --home-section-space: clamp(7.5rem, 11vw, 11.25rem);
+}
