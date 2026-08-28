@@ -385,6 +385,32 @@ def test_scenario_filters_are_intersection_not_union(published_catalog):
     assert codes == {"mfg_knowledge_assistant"}
 
 
+def test_scenario_catalog_uses_signal_panel_and_editorial_rows(published_catalog):
+    """Keep the published scenario filters paired with their editorial result rows."""
+    document = page(published_catalog.get("/scenarios?industry=manufacturing&maturity=pilot"))
+
+    panel = document.select_one('form.scenario-signal-panel[aria-label="筛选场景"]')
+    assert panel is not None
+    assert panel.select_one("[data-result-count]").get_text(" ", strip=True).startswith("共 ")
+    rows = document.select("[data-scenario-code].scenario-signal-row > article.catalog-card")
+    assert rows
+    assert rows[0].select_one("dl.catalog-card-meta") is not None
+    assert document.select_one('#industry[value="manufacturing"]') is not None
+    assert document.select_one('#maturity option[selected][value="pilot"]') is not None
+
+
+def test_scenario_detail_uses_decision_cover_and_exact_three_chapters(published_catalog):
+    """Keep the decision cover while preserving the three published detail chapters."""
+    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
+
+    assert document.select_one(".scenario-decision-cover h1") is not None
+    assert [h.get_text(" ", strip=True) for h in document.select(".decision-main > .decision-section > h2")] == [
+        "适用场景", "实施路径", "关键输入、输出与风险"
+    ]
+    assert len(document.select('[data-content-section="timeline"]')) == 1
+    assert len(document.select('[data-content-section="budget"]')) == 1
+
+
 @pytest.mark.parametrize("query", (
     "?industry=invalid&department=invalid&maturity=starting&page=-1&per_page=999",
     "?industry=manufacturing&maturity=starting&page=zero&per_page=20.5",

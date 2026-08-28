@@ -10,7 +10,15 @@
 {{ page_header("AI 场景目录", "按行业、部门和成熟度浏览已发布的 AI 场景。") }}
 <section class="public-list">
   <div class="public-container">
-    <form class="public-filter public-filter-panel" method="get" aria-label="筛选场景">
+    <div class="scenario-catalog-intro">
+      <p class="public-eyebrow">场景信号</p>
+      <p>用行业、部门和成熟度收敛已发布的 AI 落地路径。</p>
+    </div>
+    <form class="public-filter public-filter-panel scenario-signal-panel" method="get" aria-label="筛选场景">
+      <div class="scenario-signal-panel-heading">
+        <p>筛选维度</p>
+        <p data-result-count>共 {{ page.total }} 个已发布场景</p>
+      </div>
       <div class="public-filter-fields">
         <div class="public-filter-field">
           <label for="industry">行业</label>
@@ -42,7 +50,7 @@
     </form>
     <div class="catalog-grid">
       {% for scenario in page.items %}
-      <div data-scenario-code="{{ scenario.code }}">
+      <div class="scenario-signal-row" data-scenario-code="{{ scenario.code }}">
         {{ content_card(scenario, url_for('public_catalog.scenario_detail', slug=scenario.slug)) }}
       </div>
       {% endfor %}
