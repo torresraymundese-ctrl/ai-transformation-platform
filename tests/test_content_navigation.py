@@ -531,13 +531,27 @@ def _rendered_html(test_client, path, expected_status=200):
     return _page(response)
 
 
+def _is_verified_same_document_fragment(document, href, parsed):
+    fragment = parsed.fragment
+    return (
+        href.startswith("#")
+        and not parsed.scheme
+        and not parsed.netloc
+        and not parsed.path
+        and not parsed.query
+        and fragment
+        and not fragment.lower().startswith(("javascript:", "http:", "https:"))
+        and document.find(id=fragment) is not None
+    )
+
+
 def _assert_rendered_link_matrix(surface, document):
     for link in document.select("a[href]"):
         href = link["href"]
         parsed = urlsplit(href)
         if href.startswith("/") and not href.startswith("//"):
             continue
-        if href == "#main-content":
+        if _is_verified_same_document_fragment(document, href, parsed):
             continue
         if parsed.scheme in {"mailto", "tel"}:
             assert href in TRUSTED_RENDERED_CONTACTS, (surface, href)
@@ -557,12 +571,26 @@ def test_rendered_link_matrix_accepts_same_document_fragment(client):
     _assert_rendered_link_matrix("public.home", document)
 
 
+def test_rendered_link_matrix_accepts_any_verified_same_document_id():
+    document = BeautifulSoup(
+        '<section id="chapter-42"></section><a href="#chapter-42">chapter</a>',
+        "html.parser",
+    )
+
+    _assert_rendered_link_matrix("fragment-test", document)
+
+
 @pytest.mark.parametrize(
-    "href",
-    ("#javascript:alert(1)", "#https://attacker.example", "#"),
+    ("href", "target"),
+    (
+        ("#missing-chapter", ""),
+        ("#javascript:alert(1)", '<section id="javascript:alert(1)"></section>'),
+        ("#https://attacker.example", '<section id="https://attacker.example"></section>'),
+        ("#", ""),
+    ),
 )
-def test_rendered_link_matrix_rejects_unapproved_fragments(href):
-    document = BeautifulSoup(f'<a href="{href}">unsafe</a>', "html.parser")
+def test_rendered_link_matrix_rejects_unapproved_fragments(href, target):
+    document = BeautifulSoup(f'{target}<a href="{href}">unsafe</a>', "html.parser")
     with pytest.raises(AssertionError):
         _assert_rendered_link_matrix("fragment-test", document)
 
@@ -665,19 +693,20 @@ def test_rendered_server_links_follow_the_url_context_matrix(
         _assert_rendered_link_matrix(surface, document)
 
     home = documents["public.home"]
-    for section, href in (
-        ("home-industries", f"/industries/{content['industry']['slug']}"),
-        ("home-scenarios", f"/scenarios/{content['scenario']['slug']}"),
-        ("home-services", f"/service-packages/{content['service']['slug']}"),
-        ("home-cases", f"/cases/{content['case']['slug']}"),
-        ("home-resources", f"/resources/{content['resource']['slug']}"),
+    for chapter_id, href in (
+        ("story-matching", f"/industries/{content['industry']['slug']}"),
+        ("story-purpose", f"/scenarios/{content['scenario']['slug']}"),
+        ("story-roadmap", f"/service-packages/{content['service']['slug']}"),
+        ("story-evidence", f"/cases/{content['case']['slug']}"),
+        ("story-evidence", f"/resources/{content['resource']['slug']}"),
         (
-            "home-announcements",
+            "story-evidence",
             f"/announcements/{content['announcement']['slug']}",
         ),
     ):
-        assert home.select_one(f'[data-content-section="{section}"]') is not None
-        assert home.select_one(f'a[href="{href}"]') is not None
+        chapter = home.select_one(f'#{chapter_id}')
+        assert chapter is not None
+        assert chapter.select_one(f'a[href="{href}"]') is not None
 
     policy = documents["public.assessment"].select_one("#privacy-policy-link")
     assert policy is not None and not policy.has_attr("href")
