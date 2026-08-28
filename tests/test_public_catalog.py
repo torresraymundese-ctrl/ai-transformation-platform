@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import app as app_module
 import blueprints.public_catalog as public_catalog_blueprint
 import catalog_content_repository as catalog
+import content_repository
 from content_clock import SHANGHAI
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
 from content_json import ContentJsonError, decode_database_json
@@ -302,9 +303,16 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
     assert "mfg_knowledge_assistant" not in cards[0].get_text(" ", strip=True)
 
 
-def test_home_uses_guided_story_with_published_scenario_and_service(published_catalog):
+def test_home_uses_guided_story_with_published_scenario_and_service(published_catalog, db):
     """The homepage keeps published catalog evidence in its matching chapters."""
+    db.execute(
+        "UPDATE content_items SET status='published',published_at=? "
+        "WHERE entry_type='service' AND status='draft'",
+        (NOW,),
+    )
+    db.commit()
     document = page(published_catalog.get("/"))
+    home_data = content_repository.home_page_data()
     story = document.select_one("[data-guided-story]")
 
     assert story is not None
@@ -313,8 +321,16 @@ def test_home_uses_guided_story_with_published_scenario_and_service(published_ca
     roadmap = story.select_one("#story-roadmap")
     assert matching is not None
     assert roadmap is not None
-    assert matching.select_one('a[href="/scenarios/mfg-knowledge-assistant"]') is not None
-    assert roadmap.select_one('a[href="/service-packages"]') is not None
+    first_scenario = home_data["scenarios"][0]
+    first_service = home_data["services"][0]
+    assert matching.select_one(
+        f'a[href="/scenarios/{first_scenario.slug}"]'
+    ) is not None
+    roadmap_product = roadmap.select_one('[data-product-surface="roadmap"]')
+    assert roadmap_product is not None
+    assert roadmap_product.select_one(
+        f'a[href="/service-packages/{first_service.slug}"]'
+    ) is not None
 
 
 def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
