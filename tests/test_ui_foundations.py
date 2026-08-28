@@ -249,6 +249,15 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     """The home page must keep published collections without inventing a metric claim."""
     page = _page(client.get("/"))
 
-    assert page.select_one(".home-hero h1") is not None
-    assert page.select_one('.home-hero a[href="/assessment"]') is not None
+    story = page.select_one("[data-guided-story]")
+    assert story is not None
+    assert len(story.select("h1")) == 1
+    assert story.select_one('a[href="/assessment"]') is not None
+    assert [chapter["id"] for chapter in story.select("[data-story-chapter]")] == [
+        "story-purpose",
+        "story-assessment",
+        "story-matching",
+        "story-roadmap",
+        "story-evidence",
+    ]
     assert "27+" not in page.get_text(" ", strip=True)

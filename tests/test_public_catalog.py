@@ -302,27 +302,48 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
     assert "mfg_knowledge_assistant" not in cards[0].get_text(" ", strip=True)
 
 
-def test_home_uses_compact_navy_hero_and_composed_published_sections(published_catalog):
-    """A white oversized hero or bare card grid must fail the approved home rhythm."""
+def test_home_uses_guided_story_with_published_scenario_and_service(published_catalog):
+    """The homepage keeps published catalog evidence in its matching chapters."""
     document = page(published_catalog.get("/"))
-    hero = document.select_one(".home-hero.home-hero--navy")
-    css = published_catalog.get("/static/css/public-pages.css").get_data(as_text=True)
+    story = document.select_one("[data-guided-story]")
 
-    assert hero is not None
-    assert hero.select_one('a[href="/assessment"]') is not None
-    assert hero.select_one('a[href="/service-packages"]') is not None
-    hero_rules = _css_declarations(css, ".home-hero")
-    assert hero_rules["background"] == "var(--ui-navy-950)"
-    assert hero_rules["color"] == "var(--ui-surface-000)"
-    for marker, href in (
-        ("home-industries", "/industries/manufacturing"),
-        ("home-scenarios", "/scenarios/mfg-knowledge-assistant"),
-    ):
-        section = document.select_one(f'section.home-section[data-content-section="{marker}"]')
-        assert section is not None
-        assert section.select_one(":scope > .public-container > .home-section-heading-row") is not None
-        assert section.select_one(":scope > .public-container > .catalog-grid") is not None
-        assert section.select_one(f'a[href="{href}"]') is not None
+    assert story is not None
+    assert document.select_one(".home-hero--navy") is None
+    matching = story.select_one("#story-matching")
+    roadmap = story.select_one("#story-roadmap")
+    assert matching is not None
+    assert roadmap is not None
+    assert matching.select_one('a[href="/scenarios/mfg-knowledge-assistant"]') is not None
+    assert roadmap.select_one('a[href="/service-packages"]') is not None
+
+
+def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
+    document = page(published_catalog.get("/"))
+    story = document.select_one("[data-guided-story]")
+    assert story is not None
+    expected = [
+        "story-purpose",
+        "story-assessment",
+        "story-matching",
+        "story-roadmap",
+        "story-evidence",
+    ]
+    assert [section["id"] for section in story.select("[data-story-chapter]")] == expected
+    assert [link["href"] for link in story.select("[data-story-step]")] == [
+        f"#{chapter_id}" for chapter_id in expected
+    ]
+    assert story.select_one('#story-purpose a[href="/assessment"]') is not None
+    assert story.select_one('#story-purpose a[href="/scenarios"]') is not None
+    assert story.select_one('#story-evidence a[href="/assessment"]') is not None
+    assert story.select("video") == []
+
+
+def test_home_labels_every_simulated_result_as_demo_data(published_catalog):
+    document = page(published_catalog.get("/"))
+    assessment = document.select_one("#story-assessment")
+    assert assessment is not None
+    assert assessment.select_one("[data-demo-label]").get_text(" ", strip=True) == "演示数据"
+    assert "行业平均" not in assessment.get_text(" ", strip=True)
 
 
 def test_public_catalog_lists_use_the_shared_shell_and_private_analytics(published_catalog):

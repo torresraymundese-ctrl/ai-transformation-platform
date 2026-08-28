@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "components/content_card.html" import content_card %}
 {% block title %}企业 AI 转型平台 - 经审核的场景、服务与内容{% endblock %}
 {% block analytics_page %}home{% endblock %}
 {% block main_attributes %} class="public-page public-home"{% endblock %}
@@ -9,106 +8,124 @@
 {% endblock %}
 
 {% block content %}
-  <section class="home-hero home-hero--navy">
-    <div class="public-container home-hero-inner">
-      <p class="public-eyebrow">企业 AI 转型平台</p>
-      <h1>企业 AI 转型，从可验证的业务场景开始</h1>
-      <p>用已审核、已发布的内容建立转型路径，再通过评估确认当前准备度。</p>
-      <div class="ui-actions">
-        <a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估</a>
+  <div class="guided-story" data-guided-story data-active-chapter="story-purpose">
+    <nav class="guided-story-progress" aria-label="首页转型路径">
+      {% for chapter_id, label in (
+        ('story-purpose', '为什么转型'),
+        ('story-assessment', '评估准备度'),
+        ('story-matching', '匹配场景'),
+        ('story-roadmap', '形成路径'),
+        ('story-evidence', '验证价值')
+      ) %}
+      <a href="#{{ chapter_id }}" data-story-step="{{ chapter_id }}"{% if loop.first %} aria-current="step"{% endif %}>
+        <span aria-hidden="true">0{{ loop.index }}</span><span>{{ label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <section id="story-purpose" class="story-chapter story-chapter--hero" data-story-chapter data-story-key="purpose">
+      <div class="story-copy">
+        <p class="public-eyebrow">企业 AI 转型平台</p>
+        <h1>关键的业务场景，需要可验证的 AI 落地路径</h1>
+        <p>先判断准备度，再匹配场景和实施路径，让每一步都有事实依据。</p>
+        <div class="ui-actions">
+          <a href="/assessment" class="btn btn-primary">开始 AI 就绪度评估</a>
+          <a href="/scenarios" class="btn btn-outline">浏览 AI 场景</a>
+        </div>
+      </div>
+      <div class="story-product story-product--overview" data-product-surface="overview">
+        {% for scenario in scenarios[:3] %}
+        <article>
+          <span>0{{ loop.index }}</span>
+          <h2><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></h2>
+          <p>{{ scenario.summary }}</p>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section id="story-assessment" class="story-chapter" data-story-chapter data-story-key="assessment">
+      <div class="story-copy">
+        <p class="public-eyebrow">01 / 诊断</p>
+        <h2>先评估当前准备度</h2>
+        <p>从业务目标、数据、系统和组织条件开始，确认下一步需要补齐的事实。</p>
+        <a href="/assessment" class="btn btn-primary">开始 AI 就绪度评估</a>
+      </div>
+      <div class="story-product" data-product-surface="assessment">
+        <p><span data-demo-label>演示数据</span></p>
+        <h3>准备度评估输出</h3>
+        <dl>
+          <div><dt>当前状态</dt><dd>先完成评估，再确认优先事项</dd></div>
+          <div><dt>评估维度</dt><dd>业务、数据、系统与组织</dd></div>
+          <div><dt>下一步</dt><dd>根据结果匹配可实施场景</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section id="story-matching" class="story-chapter" data-story-chapter data-story-key="matching">
+      <div class="story-copy">
+        <p class="public-eyebrow">02 / 匹配</p>
+        <h2>匹配高价值场景</h2>
+        <p>已发布的场景以行业、部门和成熟度为依据，帮助团队从具体问题开始。</p>
+        <a href="/scenarios" class="btn btn-outline">浏览全部 AI 场景</a>
+      </div>
+      <div class="story-product" data-product-surface="matching">
+        {% for scenario in scenarios[:3] %}
+        <article>
+          <h3><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></h3>
+          <p>{{ scenario.summary }}</p>
+          <p>{{ scenario.industries|join('、') }} · {{ scenario.departments|join('、') }}</p>
+        </article>
+        {% endfor %}
+        {% if industries %}
+        <p class="story-compact-links">行业方案：{% for industry in industries[:3] %}<a href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}">{{ industry.title }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section id="story-roadmap" class="story-chapter" data-story-chapter data-story-key="roadmap">
+      <div class="story-copy">
+        <p class="public-eyebrow">03 / 路径</p>
+        <h2>形成实施路径</h2>
+        <p>把已确认的场景推进为可执行的服务、交付边界和后续评估。</p>
         <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
       </div>
-    </div>
-  </section>
+      <div class="story-product" data-product-surface="roadmap">
+        {% for service in services[:3] %}
+        <article>
+          <h3><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></h3>
+          <p>{{ service.summary }}</p>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
 
-  {% if industries %}
-  <section class="public-section public-section--muted home-section" data-content-section="home-industries">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>行业方案</h2><p>从已发布的行业路径开始。</p></header>
-        <a class="btn btn-outline" href="/industries">查看全部行业方案</a>
+    <section id="story-evidence" class="story-chapter" data-story-chapter data-story-key="evidence">
+      <div class="story-copy">
+        <p class="public-eyebrow">04 / 证据</p>
+        <h2>用证据进入下一步</h2>
+        <p>用已审核的案例、资源和当前公告继续验证适合团队的转型起点。</p>
+        <div class="ui-actions">
+          <a href="/assessment" class="btn btn-primary">开始评估</a>
+          <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
+        </div>
       </div>
-      <div class="catalog-grid{% if industries|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in industries %}{{ content_card(item, url_for('public_catalog.industry_detail', slug=item.slug), heading_level=3) }}{% endfor %}
+      <div class="story-product" data-product-surface="evidence">
+        {% for case in cases[:1] %}
+        <article>
+          <p class="public-eyebrow">{{ case.verification_label }}</p>
+          <h3><a href="{{ url_for('public_catalog.case_detail', slug=case.slug) }}">{{ case.title }}</a></h3>
+          <p>{{ case.summary }}</p>
+        </article>
+        {% endfor %}
+        {% for resource in resources[:2] %}
+        <p><a href="{{ url_for('public_catalog.resource_detail', slug=resource.slug) }}">{{ resource.title }}</a></p>
+        {% endfor %}
+        {% for announcement in announcements[:2] %}
+        <p><a href="{{ url_for('public_catalog.announcement_detail', slug=announcement.slug) }}">{{ announcement.title }}</a></p>
+        {% endfor %}
+        <p class="story-compact-links"><a href="/cases">查看已验证案例</a> · <a href="/resources">查看审核资源</a></p>
       </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if scenarios %}
-  <section class="public-section home-section" data-content-section="home-scenarios">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>AI 场景</h2><p>根据部门与成熟度选择可实施场景。</p></header>
-        <a class="btn btn-outline" href="/scenarios">查看全部 AI 场景</a>
-      </div>
-      <div class="catalog-grid{% if scenarios|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in scenarios %}{{ content_card(item, url_for('public_catalog.scenario_detail', slug=item.slug), heading_level=3) }}{% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if services %}
-  <section class="public-section public-section--muted home-section" data-content-section="home-services">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>服务与交付</h2><p>浏览已发布的服务包范围、周期和验收边界。</p></header>
-        <a class="btn btn-outline" href="/service-packages">查看全部服务包</a>
-      </div>
-      <div class="catalog-grid{% if services|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in services %}{{ content_card(item, url_for('public_catalog.service_package_detail', slug=item.slug), item.category, heading_level=3) }}{% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if cases %}
-  <section class="public-section home-section" data-content-section="home-cases">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>已验证案例</h2><p>仅展示通过来源、隐私与指标审核的案例。</p></header>
-        <a class="btn btn-outline" href="/cases">查看全部已验证案例</a>
-      </div>
-      <div class="catalog-grid{% if cases|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in cases %}{{ content_card(item, url_for('public_catalog.case_detail', slug=item.slug), item.verification_label, heading_level=3) }}{% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if resources %}
-  <section class="public-section public-section--muted home-section" data-content-section="home-resources">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>审核资源</h2><p>仅展示已发布且完整的资源。</p></header>
-        <a class="btn btn-outline" href="/resources">查看全部审核资源</a>
-      </div>
-      <div class="catalog-grid{% if resources|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in resources %}{{ content_card(item, url_for('public_catalog.resource_detail', slug=item.slug), item.resource_type_label, heading_level=3) }}{% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if announcements %}
-  <section class="public-section home-section" data-content-section="home-announcements">
-    <div class="public-container">
-      <div class="home-section-heading-row">
-        <header class="public-section-header"><h2>当前公告</h2><p>仅展示当前有效且已发布的公告。</p></header>
-      </div>
-      <div class="catalog-grid{% if announcements|length == 1 %} catalog-grid--single{% endif %}">
-        {% for item in announcements %}{{ content_card(item, url_for('public_catalog.announcement_detail', slug=item.slug), heading_level=3) }}{% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  <section class="public-section home-final-cta">
-    <div class="public-container">
-      <h2>确认你的 AI 转型起点</h2>
-      <p>完成就绪度评估，获取与当前能力匹配的建议。</p>
-      <a href="/assessment" class="btn btn-outline">开始免费评估</a>
-    </div>
-  </section>
+    </section>
+  </div>
 {% endblock %}
