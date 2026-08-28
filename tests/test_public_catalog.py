@@ -391,9 +391,9 @@ def test_scenario_catalog_uses_signal_panel_and_editorial_rows(published_catalog
 
     panel = document.select_one('form.scenario-signal-panel[aria-label="筛选场景"]')
     assert panel is not None
-    assert panel.select_one("[data-result-count]").get_text(" ", strip=True).startswith("共 ")
     rows = document.select("[data-scenario-code].scenario-signal-row > article.catalog-card")
     assert rows
+    assert panel.select_one("[data-result-count]").get_text(" ", strip=True) == f"共 {len(rows)} 个已发布场景"
     assert rows[0].select_one("dl.catalog-card-meta") is not None
     assert document.select_one('#industry[value="manufacturing"]') is not None
     assert document.select_one('#maturity option[selected][value="pilot"]') is not None

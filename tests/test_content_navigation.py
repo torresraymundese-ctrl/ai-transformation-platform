@@ -540,6 +540,7 @@ def _is_verified_same_document_fragment(document, href, parsed):
         and not parsed.path
         and not parsed.query
         and fragment
+        and "%" not in fragment
         and not fragment.lower().startswith(("javascript:", "http:", "https:"))
         and document.find(id=fragment) is not None
     )
@@ -586,6 +587,9 @@ def test_rendered_link_matrix_accepts_any_verified_same_document_id():
         ("#missing-chapter", ""),
         ("#javascript:alert(1)", '<section id="javascript:alert(1)"></section>'),
         ("#https://attacker.example", '<section id="https://attacker.example"></section>'),
+        ("#%6aavascript:alert(1)", '<section id="%6aavascript:alert(1)"></section>'),
+        ("#%68ttps:attacker.example", '<section id="%68ttps:attacker.example"></section>'),
+        ("#chapter%2D42", '<section id="chapter%2D42"></section>'),
         ("#", ""),
     ),
 )
