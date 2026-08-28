@@ -23,4 +23,10 @@ P3 follow-up: the desktop chapter stage has substantial upper whitespace in chap
 
 User goal: understand a defensible path from readiness to a scenario and begin assessment. The journey exposes a clear starting CTA, preserves published-only scenario information, labels deterministic output as `演示数据`, and offers a visible return path from detail to assessment. Native scroll, rapid scroll, reverse scroll, five chapter links, mobile menu open/Escape close, and browser find were exercised through the in-app browser. Native scrollbar dragging did not move in the available browser control surface and is therefore NOT PROVEN rather than inferred. No full WCAG conformance claim is made: no-JavaScript, media-query emulation, 200% zoom, and the complete native keyboard matrix require follow-up browser/environment coverage.
 
-final result: passed
+## 5. Controller closure round 1
+
+The exact required ten-file pytest responsibility command was rerun with fresh basetemp `task6-final-scoped-011`, durable ignored log capture, and exit status. Result: `556 passed in 285.05s (0:04:45)`, exit 0. A new disposable `127.0.0.1:50992` fixture was launched for the dedicated native keyboard/scroll run and then cleaned up; its listener PID 21120 was stopped and the port was confirmed closed.
+
+The in-app Browser session became unavailable before the dedicated native interaction actions could execute. Its required reconnection diagnostic reported zero available browser instances. Under the hard browser constraint no alternate automation surface was used. Therefore native scrollbar thumb drag and the Tab/Shift+Tab/Enter/Space/arrows/PageDown/200% matrix remain unproven, which blocks the completion gate.
+
+final result: blocked

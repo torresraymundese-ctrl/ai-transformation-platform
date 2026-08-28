@@ -50,3 +50,10 @@ Each image was opened and inspected after saving. Page-width checks: desktop hom
 ## 5. Safety and limits
 
 Only the supplied Scale image, local source, local ephemeral fixture, and Codex in-app Browser were used. No deployment, public binding, real database, Nginx, systemd, network request, or full test suite was used. This evidence does not claim WCAG compliance.
+
+## 6. Controller closure round 1
+
+- Fresh exact scoped pytest command: the ten Task 6 test files specified in the brief, `-q -p no:cacheprovider`, basetemp `task6-final-scoped-011`, and durable ignored log `.superpowers/sdd/2026-08-28-scale-inspired-guided-public-ui/task6-final-scoped-011.log`.
+- Result: PASS, `556 passed in 285.05s (0:04:45)`; `TASK6_PYTEST_EXIT=0`.
+- Dedicated interaction fixture: fresh SQLite/media under `runtime-task6-20260828-134300`, `127.0.0.1:50992`, listener PID 21120. It was stopped and `PORT_50992_CLOSED` was confirmed.
+- Required native interaction closure: BLOCKED. The in-app Browser reported its selected session unavailable; browser bootstrap troubleshooting plus a single browser listing returned no available in-app instances. Per the hard constraint no other browser surface was attempted. Consequently native scrollbar-thumb drag and Tab/Shift+Tab/Enter/Space/arrows/PageDown/200% zoom cannot be marked PASS and remain NOT PROVEN.
