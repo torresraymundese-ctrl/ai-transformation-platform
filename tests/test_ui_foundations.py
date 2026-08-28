@@ -14,6 +14,16 @@ def _css_custom_color(css, name):
     return match.group(1)
 
 
+def _css_rule(css, selector):
+    match = re.search(
+        rf"(?m)^{re.escape(selector)}\s*\{{(?P<declarations>[^}}]*)\}}",
+        css,
+        re.DOTALL,
+    )
+    assert match is not None, selector
+    return match.group("declarations")
+
+
 def _contrast_ratio(foreground, background):
     def luminance(color):
         channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
@@ -129,6 +139,54 @@ def test_shared_shell_has_truthful_signal_bar(client):
     assert signal is not None
     assert signal.get_text(" ", strip=True) == "从评估到实施，建立可验证的 AI 转型路径"
     assert signal.select_one('a[href="/assessment"]') is not None
+
+
+def test_signal_bar_anchor_keeps_a_full_touch_target(client):
+    """A line-height-only signal link would leave most of its 44px bar unclickable."""
+    css = client.get("/static/css/ui-components.css").get_data(as_text=True)
+    signal_anchor = _css_rule(css, ".site-signal a")
+
+    assert "display: inline-flex;" in signal_anchor
+    assert "min-height: 2.75rem;" in signal_anchor
+    assert "align-items: center;" in signal_anchor
+
+
+def test_story_product_heading_gets_panel_row_treatment(client):
+    """The assessment heading must not bypass the product panel's padded, ruled rows."""
+    css = client.get("/static/css/guided-story.css").get_data(as_text=True)
+    heading = _css_rule(css, ".story-product > h3")
+
+    assert "margin: 0;" in heading
+    assert "padding: clamp(1rem, 2.5vw, 2rem);" in heading
+    assert "border-bottom: 1px solid var(--ui-line-light);" in heading
+
+
+def test_public_buttons_and_story_tokens_use_industrial_contract(client):
+    """Public actions must use signal states while story motion and radii stay in scope."""
+    public_css = client.get("/static/css/public-pages.css").get_data(as_text=True)
+    token_css = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    primary = _css_rule(public_css, ".public-page .btn-primary")
+    primary_hover = _css_rule(public_css, ".public-page .btn-primary:hover")
+    primary_focus = _css_rule(public_css, ".public-page .btn-primary:focus-visible")
+    outline = _css_rule(public_css, ".public-page .btn-outline")
+    outline_hover = _css_rule(public_css, ".public-page .btn-outline:hover")
+    outline_focus = _css_rule(public_css, ".public-page .btn-outline:focus-visible")
+
+    assert "background: var(--ui-signal-blue);" in primary
+    assert "color: var(--ui-surface-000);" in primary
+    assert "background: var(--ui-signal-cyan);" in primary_hover
+    assert "background: var(--ui-signal-cyan);" in primary_focus
+    assert "border-color: var(--ui-signal-blue);" in outline
+    assert "color: var(--ui-graphite-950);" in outline
+    assert "background: var(--ui-paper-050);" in outline
+    assert "background: var(--ui-signal-cyan);" in outline_hover
+    assert "background: var(--ui-signal-cyan);" in outline_focus
+    assert "--ui-motion-story: 680ms;" in token_css
+
+    for token in ("--ui-radius-control", "--ui-radius-panel"):
+        radius = re.search(rf"{re.escape(token)}:\s*([0-9.]+)rem", token_css)
+        assert radius is not None, token
+        assert 0 <= float(radius.group(1)) * 16 <= 8
 
 
 def test_shared_shell_uses_real_brand_and_truthful_conversion_copy(client):

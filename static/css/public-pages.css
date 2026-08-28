@@ -370,6 +370,42 @@
   border-radius: var(--ui-radius-control);
 }
 
+.public-page .btn-primary {
+  border-color: var(--ui-signal-blue);
+  color: var(--ui-surface-000);
+  background: var(--ui-signal-blue);
+}
+
+.public-page .btn-primary:hover {
+  border-color: var(--ui-signal-cyan);
+  color: var(--ui-graphite-950);
+  background: var(--ui-signal-cyan);
+}
+
+.public-page .btn-primary:focus-visible {
+  border-color: var(--ui-signal-cyan);
+  color: var(--ui-graphite-950);
+  background: var(--ui-signal-cyan);
+}
+
+.public-page .btn-outline {
+  border-color: var(--ui-signal-blue);
+  color: var(--ui-graphite-950);
+  background: var(--ui-paper-050);
+}
+
+.public-page .btn-outline:hover {
+  border-color: var(--ui-signal-cyan);
+  color: var(--ui-graphite-950);
+  background: var(--ui-signal-cyan);
+}
+
+.public-page .btn-outline:focus-visible {
+  border-color: var(--ui-signal-cyan);
+  color: var(--ui-graphite-950);
+  background: var(--ui-signal-cyan);
+}
+
 .decision-item {
   display: grid;
   grid-template-columns: minmax(6rem, 0.8fr) minmax(0, 1.2fr);

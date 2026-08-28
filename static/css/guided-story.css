@@ -74,6 +74,12 @@
   border-bottom: 1px solid var(--ui-line-light);
 }
 
+.story-product > h3 {
+  margin: 0;
+  padding: clamp(1rem, 2.5vw, 2rem);
+  border-bottom: 1px solid var(--ui-line-light);
+}
+
 .story-product > :last-child { border-bottom: 0; }
 
 .story-product article h2,
