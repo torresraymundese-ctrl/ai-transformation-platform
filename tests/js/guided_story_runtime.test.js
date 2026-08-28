@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
+const vm = require('node:vm');
 const guided = require('../../static/js/guided_story.js');
 
 class FakeTarget {
@@ -37,7 +39,7 @@ class FakeElement {
 
 function guidedStoryFixture(options) {
   const settings = options || {};
-  const ids = [
+  const ids = settings.chapterIds || [
     'story-purpose',
     'story-assessment',
     'story-matching',
@@ -47,7 +49,8 @@ function guidedStoryFixture(options) {
   const document = new FakeTarget();
   const environment = new FakeTarget();
   const chapters = ids.map((id) => new FakeElement(id));
-  const steps = ids.map((id) => new FakeElement('', { storyStep: id }));
+  const stepIds = settings.stepIds === undefined ? ids : settings.stepIds;
+  const steps = stepIds.map((id) => new FakeElement('', { storyStep: id }));
   const story = new FakeElement('');
   let observer = null;
 
@@ -91,7 +94,7 @@ function activeCount(items, property) {
 
 test('the most visible chapter activates its matching progress step', () => {
   const view = guidedStoryFixture();
-  guided.initializeGuidedStory(view.document, view.environment);
+  const result = guided.initializeGuidedStory(view.document, view.environment);
   view.observer.callback([
     { target: view.chapters[1], isIntersecting: true, intersectionRatio: 0.25 },
     { target: view.chapters[2], isIntersecting: true, intersectionRatio: 0.75 },
@@ -102,6 +105,10 @@ test('the most visible chapter activates its matching progress step', () => {
   assert.equal(view.chapters[2].dataset.storyActive, 'true');
   assert.equal(activeCount(view.chapters, 'storyActive'), 1);
   assert.equal(view.steps.filter((step) => step.getAttribute('aria-current') === 'step').length, 1);
+  assert.deepEqual(view.observer.options.threshold, [0.25, 0.5, 0.75]);
+  assert.equal(view.observer.options.rootMargin, '-35% 0px -35% 0px');
+  assert.deepEqual(view.observer.observed, view.chapters);
+  assert.equal(result.observer, view.observer);
 });
 
 test('reduced motion keeps the complete story static and does not create an observer', () => {
@@ -135,16 +142,95 @@ test('a missing observer API leaves the complete story static', () => {
   assert.equal(result.observer, null);
 });
 
-test('repeated observer entries retain exactly one active chapter and step', () => {
+test('a missing environment leaves the complete story static', () => {
+  const view = guidedStoryFixture();
+  const result = guided.initializeGuidedStory(view.document);
+
+  assert.equal(view.story.dataset.storyMode, 'static');
+  assert.equal(result.observer, null);
+});
+
+test('entries outside this story cannot override a valid visible chapter', () => {
+  const view = guidedStoryFixture();
+  const outsideChapter = new FakeElement('story-matching');
+  guided.initializeGuidedStory(view.document, view.environment);
+
+  view.observer.callback([
+    { target: outsideChapter, isIntersecting: true, intersectionRatio: 0.95 },
+    { target: view.chapters[1], isIntersecting: true, intersectionRatio: 0.75 },
+  ]);
+
+  assert.equal(view.story.dataset.activeChapter, 'story-assessment');
+  assert.equal(activeCount(view.chapters, 'storyActive'), 1);
+});
+
+test('repeated observer targets use the highest ratio across a real entry batch', () => {
   const view = guidedStoryFixture();
   guided.initializeGuidedStory(view.document, view.environment);
-  const entry = { target: view.chapters[3], isIntersecting: true, intersectionRatio: 0.5 };
 
-  view.observer.callback([entry, entry]);
+  view.observer.callback([
+    { target: view.chapters[3], isIntersecting: true, intersectionRatio: 0.25 },
+    { target: view.chapters[2], isIntersecting: true, intersectionRatio: 0.5 },
+    { target: view.chapters[3], isIntersecting: true, intersectionRatio: 0.65 },
+  ]);
 
   assert.equal(view.story.dataset.activeChapter, 'story-roadmap');
   assert.equal(activeCount(view.chapters, 'storyActive'), 1);
   assert.equal(view.steps.filter((step) => step.getAttribute('aria-current') === 'step').length, 1);
+});
+
+test('duplicate progress links still leave only the first matching step current', () => {
+  const view = guidedStoryFixture({
+    stepIds: [
+      'story-purpose',
+      'story-assessment',
+      'story-assessment',
+      'story-roadmap',
+      'story-evidence',
+    ],
+  });
+
+  assert.equal(guided.activateStoryChapter(view.story, 'story-assessment'), true);
+  assert.equal(view.steps[1].getAttribute('aria-current'), 'step');
+  assert.equal(view.steps[2].getAttribute('aria-current'), null);
+  assert.equal(view.steps.filter((step) => step.getAttribute('aria-current') === 'step').length, 1);
+});
+
+test('an unknown chapter or missing step mapping leaves prior state intact', () => {
+  const view = guidedStoryFixture({
+    stepIds: ['story-purpose', 'story-matching', 'story-roadmap', 'story-evidence'],
+  });
+  guided.activateStoryChapter(view.story, 'story-purpose');
+  const activeChapter = view.story.dataset.activeChapter;
+  const activeSteps = view.steps.map((step) => step.getAttribute('aria-current'));
+
+  assert.equal(guided.activateStoryChapter(view.story, 'story-assessment'), false);
+  assert.equal(guided.activateStoryChapter(view.story, 'story-unknown'), false);
+  assert.equal(view.story.dataset.activeChapter, activeChapter);
+  assert.deepEqual(view.steps.map((step) => step.getAttribute('aria-current')), activeSteps);
+  assert.equal(view.chapters[0].dataset.storyActive, 'true');
+});
+
+test('an unknown initial chapter falls back to the first chapter with a legal step', () => {
+  const view = guidedStoryFixture({
+    stepIds: ['story-matching', 'story-roadmap', 'story-evidence'],
+  });
+  view.story.dataset.activeChapter = 'story-unknown';
+  const result = guided.initializeGuidedStory(view.document, view.environment);
+
+  assert.equal(view.story.dataset.activeChapter, 'story-matching');
+  assert.equal(view.chapters[2].dataset.storyActive, 'true');
+  assert.equal(result.observer, view.observer);
+});
+
+test('an empty or unmapped story stays static without an observer', () => {
+  const empty = guidedStoryFixture({ chapterIds: [], stepIds: [] });
+  const unmapped = guidedStoryFixture({ stepIds: [] });
+
+  assert.equal(guided.initializeGuidedStory(empty.document, empty.environment).observer, null);
+  assert.equal(empty.story.dataset.storyMode, 'static');
+  assert.equal(guided.initializeGuidedStory(unmapped.document, unmapped.environment).observer, null);
+  assert.equal(unmapped.story.dataset.storyMode, 'static');
 });
 
 test('an earlier chapter becomes active again when the reader scrolls upward', () => {
@@ -160,4 +246,16 @@ test('an earlier chapter becomes active again when the reader scrolls upward', (
   assert.equal(view.story.dataset.activeChapter, 'story-purpose');
   assert.equal(view.chapters[0].dataset.storyActive, 'true');
   assert.equal(view.steps[0].getAttribute('aria-current'), 'step');
+});
+
+test('the browser branch exports and bootstraps without CommonJS', () => {
+  const view = guidedStoryFixture();
+  const source = fs.readFileSync(require.resolve('../../static/js/guided_story.js'), 'utf8');
+
+  vm.runInNewContext(source, { document: view.document, window: view.environment });
+
+  assert.equal(typeof view.environment.guidedStory.activateStoryChapter, 'function');
+  assert.equal(typeof view.environment.guidedStory.initializeGuidedStory, 'function');
+  assert.equal(view.story.dataset.storyMode, 'enhanced');
+  assert.equal(view.observer.observed.length, view.chapters.length);
 });

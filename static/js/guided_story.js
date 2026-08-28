@@ -2,25 +2,40 @@
 (function () {
   "use strict";
 
-  function activateStoryChapter(story, chapterId) {
-    if (!story || typeof story.querySelectorAll !== "function") return false;
-    const chapters = Array.from(story.querySelectorAll("[data-story-chapter]"));
-    const steps = Array.from(story.querySelectorAll("[data-story-step]"));
-    const activeChapter = chapters.find(function (chapter) {
-      return chapter.id === chapterId;
+  function getStoryParts(story) {
+    if (!story || typeof story.querySelectorAll !== "function") return null;
+    return {
+      chapters: Array.from(story.querySelectorAll("[data-story-chapter]")),
+      steps: Array.from(story.querySelectorAll("[data-story-step]")),
+    };
+  }
+
+  function findStoryPair(parts, chapterId) {
+    if (!parts) return null;
+    const chapter = parts.chapters.find(function (candidate) {
+      return candidate.id === chapterId;
     });
-    if (!activeChapter) return false;
+    const step = parts.steps.find(function (candidate) {
+      return candidate.getAttribute("data-story-step") === chapterId;
+    });
+    return chapter && step ? { chapter: chapter, step: step } : null;
+  }
+
+  function activateStoryChapter(story, chapterId) {
+    const parts = getStoryParts(story);
+    const activePair = findStoryPair(parts, chapterId);
+    if (!activePair) return false;
 
     story.dataset.activeChapter = chapterId;
-    chapters.forEach(function (chapter) {
-      if (chapter === activeChapter) {
+    parts.chapters.forEach(function (chapter) {
+      if (chapter === activePair.chapter) {
         chapter.dataset.storyActive = "true";
       } else {
         delete chapter.dataset.storyActive;
       }
     });
-    steps.forEach(function (step) {
-      if (step.getAttribute("data-story-step") === chapterId) {
+    parts.steps.forEach(function (step) {
+      if (step === activePair.step) {
         step.setAttribute("aria-current", "step");
       } else {
         step.removeAttribute("aria-current");
@@ -35,9 +50,16 @@
       : null;
     if (!story) return null;
 
-    const chapters = Array.from(story.querySelectorAll("[data-story-chapter]"));
-    const initialChapterId = story.dataset.activeChapter || (chapters[0] && chapters[0].id);
-    if (initialChapterId) activateStoryChapter(story, initialChapterId);
+    const parts = getStoryParts(story);
+    const configuredPair = findStoryPair(parts, story.dataset.activeChapter);
+    const initialPair = configuredPair || parts.chapters.map(function (chapter) {
+      return findStoryPair(parts, chapter.id);
+    }).find(Boolean);
+    if (!initialPair) {
+      story.dataset.storyMode = "static";
+      return { story: story, observer: null };
+    }
+    activateStoryChapter(story, initialPair.chapter.id);
 
     const reduceMotion = environment && typeof environment.matchMedia === "function"
       && environment.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -50,7 +72,9 @@
     const handleEntries = function (entries) {
       let candidate = null;
       entries.forEach(function (entry) {
+        if (!parts.chapters.includes(entry.target)) return;
         if (!entry.isIntersecting) return;
+        if (!findStoryPair(parts, entry.target.id)) return;
         if (!candidate || entry.intersectionRatio > candidate.intersectionRatio) {
           candidate = entry;
         }
@@ -61,7 +85,7 @@
       threshold: [0.25, 0.5, 0.75],
       rootMargin: "-35% 0px -35% 0px",
     });
-    chapters.forEach(function (chapter) {
+    parts.chapters.forEach(function (chapter) {
       observer.observe(chapter);
     });
     return { story: story, observer: observer };
