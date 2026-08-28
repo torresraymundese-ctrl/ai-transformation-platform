@@ -26,123 +26,176 @@
     </nav>
 
     <section id="story-purpose" class="story-chapter story-chapter--hero" data-story-chapter data-story-key="purpose" data-story-active="true">
-      <div class="story-copy">
-        <p class="public-eyebrow">企业 AI 转型平台</p>
-        <h1>关键的业务场景，需要可验证的 AI 落地路径</h1>
-        <p>先判断准备度，再匹配场景和实施路径，让每一步都有事实依据。</p>
-        <div class="ui-actions">
-          <a href="/assessment" class="btn btn-primary">开始 AI 就绪度评估</a>
-          <a href="/scenarios" class="btn btn-outline">浏览 AI 场景</a>
+      <div class="home-hero-shell">
+        <div class="story-copy home-hero-copy">
+          <p class="public-eyebrow">企业 AI 转型平台</p>
+          <h1>让 AI 转型，从可验证的业务价值开始</h1>
+          <p>评估准备度，匹配高价值场景，形成可执行的实施路径。</p>
+          <div class="home-hero-actions">
+            <a href="/assessment" class="btn btn-primary">开始 AI 就绪度评估</a>
+          </div>
+          <p class="home-audit-note"><span aria-hidden="true">✓</span> 基于已审核内容</p>
         </div>
-      </div>
-      <div class="story-product story-product--overview" data-product-surface="overview">
-        <div class="home-art home-art--hero" aria-hidden="true">
-          <img data-home-art src="/static/images/ui/home-ai-core.webp" alt="" width="1920" height="1080" fetchpriority="high">
+        <div class="story-product story-product--overview" data-product-surface="overview">
+          <div class="home-art home-art--hero" aria-hidden="true">
+            <img data-home-art src="/static/images/ui/home-ai-core.webp" alt="" width="1920" height="1080" fetchpriority="high">
+          </div>
         </div>
-        {% for scenario in scenarios[:3] %}
-        <article>
-          <span>0{{ loop.index }}</span>
-          <h2><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></h2>
-          <p>{{ scenario.summary }}</p>
-        </article>
-        {% endfor %}
       </div>
     </section>
 
-    <section id="story-assessment" class="story-chapter" data-story-chapter data-story-key="assessment">
-      <div class="story-copy">
-        <p class="public-eyebrow">01 / 诊断</p>
-        <h2>先评估当前准备度</h2>
-        <p>从业务目标、数据、系统和组织条件开始，确认下一步需要补齐的事实。</p>
-        <a href="/assessment" class="btn btn-primary">开始 AI 就绪度评估</a>
-      </div>
-      <div class="story-product" data-product-surface="assessment">
-        <p><span data-demo-label>演示数据</span></p>
-        <h3>准备度评估输出</h3>
-        <dl>
-          <div><dt>当前状态</dt><dd>先完成评估，再确认优先事项</dd></div>
-          <div><dt>评估维度</dt><dd>业务、数据、系统与组织</dd></div>
-          <div><dt>下一步</dt><dd>根据结果匹配可实施场景</dd></div>
-        </dl>
+    <section id="story-assessment" class="story-chapter story-chapter--capability" data-story-chapter data-story-key="assessment" data-capability="assessment">
+      <header class="home-positioning">
+        <h2>从判断起点，到形成落地路径</h2>
+        <p>以可验证的方法论与行业经验，帮助企业在复杂的 AI 选择中建立共识、聚焦价值、降低风险。</p>
+      </header>
+      <div class="home-capability-row">
+        <p class="home-capability-number" aria-hidden="true">01</p>
+        <div class="story-copy home-capability-copy">
+          <p class="public-eyebrow">01 / 评估企业准备度</p>
+          <h2>评估企业准备度</h2>
+          <p>从战略、数据、组织、技术与治理维度，评估企业 AI 就绪度与能力差距。</p>
+          <a href="/assessment" class="home-text-link">了解评估方法 <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="story-product" data-product-surface="assessment">
+          <div class="home-art home-art--knowledge" aria-hidden="true">
+            <img data-home-art src="/static/images/ui/home-knowledge-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+          </div>
+        </div>
       </div>
     </section>
 
-    <section id="story-matching" class="story-chapter" data-story-chapter data-story-key="matching">
-      <div class="story-copy">
-        <p class="public-eyebrow">02 / 匹配</p>
-        <h2>匹配高价值场景</h2>
-        <p>已发布的场景以行业、部门和成熟度为依据，帮助团队从具体问题开始。</p>
-        <a href="/scenarios" class="btn btn-outline">浏览全部 AI 场景</a>
-      </div>
-      <div class="story-product" data-product-surface="matching">
-        <div class="home-art home-art--knowledge" aria-hidden="true">
-          <img data-home-art src="/static/images/ui/home-knowledge-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+    <section id="story-matching" class="story-chapter story-chapter--capability" data-story-chapter data-story-key="matching" data-capability="matching">
+      <div class="home-capability-row">
+        <p class="home-capability-number" aria-hidden="true">02</p>
+        <div class="story-copy home-capability-copy">
+          <p class="public-eyebrow">02 / 匹配高价值场景</p>
+          <h2>匹配高价值场景</h2>
+          <p>基于业务价值、可行性与实施难度，从已发布目录中识别并排序高价值 AI 场景。</p>
+          <a href="/scenarios" class="home-text-link">浏览全部场景 <span aria-hidden="true">→</span></a>
         </div>
-        {% for scenario in scenarios[:3] %}
-        <article>
-          <h3><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></h3>
-          <p>{{ scenario.summary }}</p>
-          <p>{{ scenario.industries|join('、') }} · {{ scenario.departments|join('、') }}</p>
-        </article>
-        {% endfor %}
-        {% if industries %}
-        <p class="story-compact-links">行业方案：{% for industry in industries[:3] %}<a href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}">{{ industry.title }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</p>
-        {% endif %}
+        <div class="story-product" data-product-surface="matching">
+          <div class="home-art home-art--path" aria-hidden="true">
+            <img data-home-art src="/static/images/ui/home-path-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+          </div>
+          {% if scenarios %}
+          <ul class="home-inline-links" aria-label="已发布 AI 场景">
+            {% for scenario in scenarios[:3] %}
+            <li><a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }}</a></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
       </div>
     </section>
 
-    <section id="story-roadmap" class="story-chapter" data-story-chapter data-story-key="roadmap">
-      <div class="story-copy">
-        <p class="public-eyebrow">03 / 路径</p>
-        <h2>形成实施路径</h2>
-        <p>把已确认的场景推进为可执行的服务、交付边界和后续评估。</p>
-        <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
-      </div>
-      <div class="story-product" data-product-surface="roadmap">
-        <div class="home-art home-art--path" aria-hidden="true">
-          <img data-home-art src="/static/images/ui/home-path-system.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
+    <section id="story-roadmap" class="story-chapter story-chapter--capability" data-story-chapter data-story-key="roadmap" data-capability="delivery">
+      <div class="home-capability-row">
+        <p class="home-capability-number" aria-hidden="true">03</p>
+        <div class="story-copy home-capability-copy">
+          <p class="public-eyebrow">03 / 设计可执行交付</p>
+          <h2>设计可执行交付</h2>
+          <p>定义目标、路径与里程碑，明确资源与风险，形成可落地的实施方案与治理机制。</p>
+          <a href="/service-packages" class="home-text-link">查看服务与交付 <span aria-hidden="true">→</span></a>
         </div>
-        <div class="story-technology-art story-technology-art--roadmap" aria-hidden="true">
-          <img data-technology-art src="/static/images/ui/industrial-data-infrastructure.webp" alt="" width="1600" height="1000" loading="lazy" decoding="async">
+        <div class="story-product" data-product-surface="roadmap">
+          <div class="story-technology-art story-technology-art--roadmap" aria-hidden="true">
+            <img data-technology-art src="/static/images/ui/industrial-data-infrastructure.webp" alt="" width="1600" height="1000" loading="lazy" decoding="async">
+          </div>
+          {% if services %}
+          <ul class="home-inline-links" aria-label="已发布服务与交付">
+            {% for service in services[:3] %}
+            <li><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
         </div>
-        {% for service in services[:3] %}
-        <article>
-          <h3><a href="{{ url_for('public_catalog.service_package_detail', slug=service.slug) }}">{{ service.title }}</a></h3>
-          <p>{{ service.summary }}</p>
-        </article>
-        {% endfor %}
       </div>
     </section>
 
-    <section id="story-evidence" class="story-chapter" data-story-chapter data-story-key="evidence">
-      <div class="story-copy">
-        <p class="public-eyebrow">04 / 证据</p>
-        <h2>用证据进入下一步</h2>
-        <p>用已审核的案例、资源和当前公告继续验证适合团队的转型起点。</p>
-        <div class="ui-actions">
-          <a href="/assessment" class="btn btn-primary">开始评估</a>
-          <a href="/service-packages" class="btn btn-outline">查看服务与交付</a>
+    <section id="story-evidence" class="story-chapter story-chapter--evidence" data-story-chapter data-story-key="evidence">
+      <section class="home-applications" data-home-section="applications" data-product-surface="evidence" aria-labelledby="home-applications-title">
+        <div class="home-application-copy">
+          <p class="public-eyebrow">应用场景</p>
+          <h2 id="home-applications-title">把 AI 放进真实业务现场</h2>
+          {% if scenarios %}
+          <h3>{{ scenarios[0].title }}</h3>
+          <p>{{ scenarios[0].summary }}</p>
+          {% else %}
+          <p>当前暂无已发布场景，请先完成评估以确认适合的业务起点。</p>
+          {% endif %}
+          <div class="home-application-links">
+            {% for industry in industries[:2] %}
+            <a href="{{ url_for('public_catalog.industry_detail', slug=industry.slug) }}">{{ industry.title }} <span aria-hidden="true">→</span></a>
+            {% endfor %}
+            {% for scenario in scenarios[:2] %}
+            <a href="{{ url_for('public_catalog.scenario_detail', slug=scenario.slug) }}">{{ scenario.title }} <span aria-hidden="true">→</span></a>
+            {% endfor %}
+          </div>
         </div>
-      </div>
-      <div class="story-product" data-product-surface="evidence">
         <div class="story-technology-art story-technology-art--evidence" aria-hidden="true">
           <img data-technology-art src="/static/images/ui/enterprise-compute-space.webp" alt="" width="1600" height="900" loading="lazy" decoding="async">
         </div>
-        {% for case in cases[:1] %}
-        <article>
-          <p class="public-eyebrow">{{ case.verification_label }}</p>
-          <h3><a href="{{ url_for('public_catalog.case_detail', slug=case.slug) }}">{{ case.title }}</a></h3>
-          <p>{{ case.summary }}</p>
-        </article>
-        {% endfor %}
-        {% for resource in resources[:2] %}
-        <p><a href="{{ url_for('public_catalog.resource_detail', slug=resource.slug) }}">{{ resource.title }}</a></p>
-        {% endfor %}
-        {% for announcement in announcements[:2] %}
-        <p><a href="{{ url_for('public_catalog.announcement_detail', slug=announcement.slug) }}">{{ announcement.title }}</a></p>
-        {% endfor %}
-        <p class="story-compact-links"><a href="/cases">查看已验证案例</a> · <a href="/resources">查看审核资源</a></p>
-      </div>
+      </section>
+
+      <section class="home-proof" data-home-section="proof" aria-labelledby="home-proof-title">
+        <header>
+          <p class="public-eyebrow">成效速览</p>
+          <h2 id="home-proof-title">从路径到成果，持续验证价值</h2>
+        </header>
+        <div class="home-proof-metrics">
+          <article>
+            <div class="home-proof-value-row"><strong data-demo-value>12 周</strong><span data-demo-label>演示数据</span></div>
+            <p>从评估到首个场景上线</p>
+          </article>
+          <article>
+            <div class="home-proof-value-row"><strong data-demo-value>3 个优先场景</strong><span data-demo-label>演示数据</span></div>
+            <p>基于价值与可行性筛选</p>
+          </article>
+          <article>
+            <div class="home-proof-value-row"><strong data-demo-value>阶段路径</strong><span data-demo-label>演示数据</span></div>
+            <p>明确里程碑与关键交付物</p>
+          </article>
+        </div>
+        <div class="home-case-links" aria-label="已验证案例">
+          {% for case in cases[:3] %}
+          <a href="{{ url_for('public_catalog.case_detail', slug=case.slug) }}"><span>{{ case.verification_label }}</span>{{ case.title }} <span aria-hidden="true">→</span></a>
+          {% else %}
+          <p>暂无已发布案例；实际成效将在项目验证后更新。</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="home-news" data-home-section="news" aria-labelledby="home-news-title">
+        <h2 id="home-news-title">洞察与动态</h2>
+        <div class="home-news-list">
+          {% for announcement in announcements[:3] %}
+          <a href="{{ url_for('public_catalog.announcement_detail', slug=announcement.slug) }}" class="home-news-row">
+            <time datetime="{{ announcement.valid_from }}">{{ announcement.valid_from[:10] }}</time>
+            <span>{{ announcement.title }}</span>
+            <span aria-hidden="true">→</span>
+          </a>
+          {% endfor %}
+          {% for resource in resources[:3] %}
+          <a href="{{ url_for('public_catalog.resource_detail', slug=resource.slug) }}" class="home-news-row">
+            <time datetime="{{ resource.original_published_at }}">{{ resource.original_published_at[:10] }}</time>
+            <span>{{ resource.title }}</span>
+            <span aria-hidden="true">→</span>
+          </a>
+          {% endfor %}
+          {% if not announcements and not resources %}
+          <p class="home-news-empty">暂无已发布的公告或审核资源。</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="home-final-cta" data-home-section="final-cta" aria-labelledby="home-final-cta-title">
+        <div>
+          <h2 id="home-final-cta-title">确认你的 AI 转型起点</h2>
+          <p>花几分钟完成评估，获取专属建议与优先行动清单。</p>
+        </div>
+        <a href="/assessment" class="btn btn-primary">开始评估</a>
+      </section>
     </section>
   </div>
 {% endblock %}

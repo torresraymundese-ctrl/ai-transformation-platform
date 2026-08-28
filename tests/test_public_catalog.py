@@ -304,7 +304,7 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
 
 
 def test_home_uses_guided_story_with_published_scenario_and_service(published_catalog, db):
-    """The homepage keeps published catalog evidence in its matching chapters."""
+    """The homepage keeps every available published collection linked in its story."""
     db.execute(
         "UPDATE content_items SET status='published',published_at=? "
         "WHERE entry_type='service' AND status='draft'",
@@ -331,35 +331,80 @@ def test_home_uses_guided_story_with_published_scenario_and_service(published_ca
     assert roadmap_product.select_one(
         f'a[href="/service-packages/{first_service.slug}"]'
     ) is not None
+    if home_data["cases"]:
+        first_case = home_data["cases"][0]
+        assert story.select_one(f'a[href="/cases/{first_case.slug}"]') is not None
+    if home_data["resources"]:
+        first_resource = home_data["resources"][0]
+        assert story.select_one(
+            f'a[href="/resources/{first_resource.slug}"]'
+        ) is not None
+    if home_data["announcements"]:
+        first_announcement = home_data["announcements"][0]
+        assert story.select_one(
+            f'a[href="/announcements/{first_announcement.slug}"]'
+        ) is not None
 
 
 def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
     document = page(published_catalog.get("/"))
     story = document.select_one("[data-guided-story]")
     assert story is not None
-    expected = [
+    assert [section["id"] for section in story.select("[data-story-chapter]")] == [
         "story-purpose",
         "story-assessment",
         "story-matching",
         "story-roadmap",
         "story-evidence",
     ]
-    assert [section["id"] for section in story.select("[data-story-chapter]")] == expected
+    hero = story.select_one("#story-purpose")
+    assert hero.select_one("h1").get_text(" ", strip=True) == (
+        "让 AI 转型，从可验证的业务价值开始"
+    )
+    assert [
+        link.get_text(" ", strip=True)
+        for link in hero.select(".home-hero-actions a")
+    ] == ["开始 AI 就绪度评估"]
+    assert hero.select_one('a[href="/assessment"]') is not None
+    assert story.select_one('[data-capability="assessment"]') is not None
+    assert story.select_one('[data-capability="matching"]') is not None
+    assert story.select_one('[data-capability="delivery"]') is not None
+    assert story.select_one('[data-home-section="applications"]') is not None
+    assert story.select_one('[data-home-section="proof"]') is not None
+    assert story.select_one('[data-home-section="news"]') is not None
+    assert story.select_one('[data-home-section="final-cta"]') is not None
     assert [link["href"] for link in story.select("[data-story-step]")] == [
-        f"#{chapter_id}" for chapter_id in expected
+        "#story-purpose",
+        "#story-assessment",
+        "#story-matching",
+        "#story-roadmap",
+        "#story-evidence",
     ]
-    assert story.select_one('#story-purpose a[href="/assessment"]') is not None
-    assert story.select_one('#story-purpose a[href="/scenarios"]') is not None
-    assert story.select_one('#story-evidence a[href="/assessment"]') is not None
     assert story.select("video") == []
+    assert story.select(
+        "[data-customer-logo-wall], .customer-logo-wall, .logo-wall"
+    ) == []
+    assert story.select("[style]") == []
+    assert all(
+        image.get("src", "").startswith("/static/")
+        for image in story.select("img")
+    )
 
 
 def test_home_labels_every_simulated_result_as_demo_data(published_catalog):
     document = page(published_catalog.get("/"))
-    assessment = document.select_one("#story-assessment")
-    assert assessment is not None
-    assert assessment.select_one("[data-demo-label]").get_text(" ", strip=True) == "演示数据"
-    assert "行业平均" not in assessment.get_text(" ", strip=True)
+    values = document.select("[data-demo-value]")
+
+    assert values
+    for value in values:
+        label = value.select_one("[data-demo-label]")
+        if label is None:
+            sibling = value.find_next_sibling()
+            if sibling is not None and sibling.has_attr("data-demo-label"):
+                label = sibling
+        assert label is not None, value.get_text(" ", strip=True)
+        assert label.get_text(" ", strip=True) == "演示数据"
+    assert "行业平均" not in document.get_text(" ", strip=True)
 
 
 def test_public_catalog_lists_use_the_shared_shell_and_private_analytics(published_catalog):

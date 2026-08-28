@@ -366,7 +366,14 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     story = page.select_one("[data-guided-story]")
     assert story is not None
     assert len(story.select("h1")) == 1
-    assert story.select_one('a[href="/assessment"]') is not None
+    hero = story.select_one("#story-purpose")
+    assert [link.get("href") for link in hero.select(".home-hero-actions a")] == [
+        "/assessment"
+    ]
+    assert page.select_one('[data-home-section="applications"]') is not None
+    assert page.select_one('[data-home-section="proof"]') is not None
+    assert page.select_one('[data-home-section="news"]') is not None
+    assert page.select_one('[data-home-section="final-cta"]') is not None
     assert [chapter["id"] for chapter in story.select("[data-story-chapter]")] == [
         "story-purpose",
         "story-assessment",
@@ -374,6 +381,11 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
         "story-roadmap",
         "story-evidence",
     ]
+    assert not page.select("main [style]")
+    assert not page.select("main video")
+    assert not page.select(
+        "main [data-customer-logo-wall], main .customer-logo-wall, main .logo-wall"
+    )
     assert "27+" not in page.get_text(" ", strip=True)
 
 
@@ -480,7 +492,15 @@ def test_home_technology_asset_contract_rejects_in_memory_jinja_mutation(client,
     app = client.application
     loader = app.jinja_env.loader
     source, _, _ = loader.get_source(app.jinja_env, "index.html")
-    mutated_source = source.replace(' loading="lazy"', "", 1)
+    technology_image = (
+        'src="/static/images/ui/industrial-data-infrastructure.webp" alt="" '
+        'width="1600" height="1000" loading="lazy" decoding="async"'
+    )
+    mutated_source = source.replace(
+        technology_image,
+        technology_image.replace(' loading="lazy"', ""),
+        1,
+    )
 
     assert mutated_source != source
     monkeypatch.setattr(
