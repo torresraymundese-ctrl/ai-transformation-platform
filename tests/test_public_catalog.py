@@ -58,6 +58,66 @@ def page(response):
     return BeautifulSoup(response.data, "html.parser")
 
 
+def _publish_home_news_items():
+    """Publish one truthful resource and one current announcement for home HTTP tests."""
+    resource_id = create_content_draft(
+        ContentDraft(
+            entry_type="resource",
+            slug="home-audited-resource",
+            title="首页审核资源",
+            summary="用于验证首页审核资源行的真实发布内容。",
+            seo_title="首页审核资源",
+            seo_description="验证首页按公开投影展示审核资源。",
+            extension={
+                "resource_type": "guide",
+                "is_original": 1,
+                "source_name": None,
+                "source_url": None,
+                "source_url_sha256": None,
+                "source_check_code": None,
+                "source_checked_at": None,
+                "source_check_expires_at": None,
+                "source_check_url_sha256": None,
+                "original_published_at": "2026-08-20 09:30:00",
+                "copyright_notice": "本站原创，转载请保留版权说明。",
+                "attachment_media_id": None,
+            },
+            blocks=(
+                ContentBlock(
+                    "rich_text", "正文", "<p>首页审核资源正文。</p>", {}, None, 0
+                ),
+            ),
+        ),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    publish_content(resource_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+    announcement_id = create_content_draft(
+        ContentDraft(
+            entry_type="announcement",
+            slug="home-current-announcement",
+            title="首页当前公告",
+            summary="用于验证首页当前公告行的真实发布内容。",
+            seo_title="首页当前公告",
+            seo_description="验证首页按公开投影展示当前公告。",
+            extension={
+                "valid_from": "2026-08-24 09:00:00",
+                "valid_until": "2026-08-25 09:00:00",
+                "cta_url": "/assessment",
+            },
+            blocks=(
+                ContentBlock(
+                    "rich_text", "正文", "<p>首页当前公告正文。</p>", {}, None, 0
+                ),
+            ),
+        ),
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    publish_content(announcement_id, 1, actor="test-admin", now=NOW_DATETIME)
+
+
 def _css_declarations(css, selector):
     """Read one public CSS rule as its browser-facing declaration mapping."""
     match = re.search(rf"{re.escape(selector)}\s*\{{([^}}]+)\}}", css)
@@ -346,6 +406,33 @@ def test_home_uses_guided_story_with_published_scenario_and_service(published_ca
         ) is not None
 
 
+def test_home_news_orders_current_announcements_before_resources_and_has_honest_empty_state(
+    client,
+):
+    """The home route must group real current announcements before audited resources."""
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: NOW_DATETIME
+    empty_news = page(client.get("/")).select_one('[data-home-section="news"]')
+
+    assert empty_news.select(".home-news-row") == []
+    assert empty_news.select_one(".home-news-empty").get_text(" ", strip=True) == (
+        "暂无已发布的公告或审核资源。"
+    )
+
+    _publish_home_news_items()
+    news = page(client.get("/")).select_one('[data-home-section="news"]')
+    rows = news.select(".home-news-row")
+
+    assert [row["href"] for row in rows] == [
+        "/announcements/home-current-announcement",
+        "/resources/home-audited-resource",
+    ]
+    assert [row.select_one("time")["datetime"] for row in rows] == [
+        "2026-08-24 09:00:00",
+        "2026-08-20 09:30:00",
+    ]
+    assert news.select_one(".home-news-empty") is None
+
+
 def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
     document = page(published_catalog.get("/"))
     story = document.select_one("[data-guided-story]")
@@ -361,6 +448,11 @@ def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
     assert hero.select_one("h1").get_text(" ", strip=True) == (
         "让 AI 转型，从可验证的业务价值开始"
     )
+    assert hero.select_one(
+        ".home-hero-copy > p:not(.public-eyebrow):not(.home-audit-note)"
+    ).get_text(" ", strip=True) == (
+        "评估准备度，匹配高价值场景，形成可执行的实施路径。"
+    )
     assert [
         link.get_text(" ", strip=True)
         for link in hero.select(".home-hero-actions a")
@@ -373,6 +465,14 @@ def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
     assert story.select_one('[data-home-section="proof"]') is not None
     assert story.select_one('[data-home-section="news"]') is not None
     assert story.select_one('[data-home-section="final-cta"]') is not None
+    final_cta = story.select_one('[data-home-section="final-cta"]')
+    assert final_cta.select_one("h2").get_text(" ", strip=True) == (
+        "确认你的 AI 转型起点"
+    )
+    assert [
+        (link.get_text(" ", strip=True), link.get("href"))
+        for link in final_cta.select("a")
+    ] == [("开始评估", "/assessment")]
     assert [link["href"] for link in story.select("[data-story-step]")] == [
         "#story-purpose",
         "#story-assessment",

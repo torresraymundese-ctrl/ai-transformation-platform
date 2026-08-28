@@ -370,10 +370,22 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     assert [link.get("href") for link in hero.select(".home-hero-actions a")] == [
         "/assessment"
     ]
+    assert hero.select_one(
+        ".home-hero-copy > p:not(.public-eyebrow):not(.home-audit-note)"
+    ).get_text(" ", strip=True) == (
+        "评估准备度，匹配高价值场景，形成可执行的实施路径。"
+    )
     assert page.select_one('[data-home-section="applications"]') is not None
     assert page.select_one('[data-home-section="proof"]') is not None
     assert page.select_one('[data-home-section="news"]') is not None
-    assert page.select_one('[data-home-section="final-cta"]') is not None
+    final_cta = page.select_one('[data-home-section="final-cta"]')
+    assert final_cta.select_one("h2").get_text(" ", strip=True) == (
+        "确认你的 AI 转型起点"
+    )
+    assert [
+        (link.get_text(" ", strip=True), link.get("href"))
+        for link in final_cta.select("a")
+    ] == [("开始评估", "/assessment")]
     assert [chapter["id"] for chapter in story.select("[data-story-chapter]")] == [
         "story-purpose",
         "story-assessment",
@@ -387,6 +399,30 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
         "main [data-customer-logo-wall], main .customer-logo-wall, main .logo-wall"
     )
     assert "27+" not in page.get_text(" ", strip=True)
+
+
+def test_home_dark_evidence_css_keeps_one_signal_and_desktop_only_shell_scope(client):
+    """Task 2 owns one signal color and desktop composition, not shell behavior."""
+    css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
+
+    for secondary_blue in ("#5ca0ff", "#075fce", "#4d9cff", "#62a8ff"):
+        assert secondary_blue not in css.lower()
+    assert "color: var(--home-signal)" in _css_rule(
+        css, ".home-dark-evidence .home-text-link"
+    )
+    assert "color: var(--home-signal)" in _css_rule(
+        css,
+        ".home-dark-evidence .home-application-links a:hover,\n"
+        ".home-dark-evidence .home-application-links a:focus-visible",
+    )
+    for shell_behavior in (
+        ".home-dark-evidence .site-signal",
+        ".home-dark-evidence .sticky-cta",
+        ".home-dark-evidence .nav-logo img",
+        ".home-dark-evidence .nav-cta:hover",
+        "@media (max-width:",
+    ):
+        assert shell_behavior not in css
 
 
 def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):
