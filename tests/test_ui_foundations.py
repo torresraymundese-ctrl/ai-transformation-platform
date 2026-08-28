@@ -363,3 +363,16 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
         "story-evidence",
     ]
     assert "27+" not in page.get_text(" ", strip=True)
+
+
+def test_guided_story_runtime_is_local_and_does_not_intercept_native_scrolling(client):
+    """Story guidance may observe chapters, but must not take over browser scrolling."""
+    page = _page(client.get("/"))
+    response = client.get("/static/js/guided_story.js")
+    source = response.get_data(as_text=True)
+
+    assert page.select_one('script[src="/static/js/guided_story.js"][defer]') is not None
+    assert response.status_code == 200
+    assert "IntersectionObserver" in source
+    assert re.search(r"addEventListener\(['\"]wheel", source) is None
+    assert re.search(r"wheel[\s\S]{0,200}preventDefault", source) is None

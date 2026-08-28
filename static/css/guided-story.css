@@ -43,6 +43,18 @@
   scroll-snap-align: start;
 }
 
+[data-story-mode="enhanced"] .story-chapter {
+  transition: border-color var(--ui-motion-story), background-color var(--ui-motion-story);
+}
+
+.story-chapter[data-story-active="true"] {
+  border-inline-start: 0.25rem solid var(--ui-signal-blue);
+}
+
+.story-chapter[data-story-active="true"] .story-product {
+  border-color: var(--ui-signal-blue);
+}
+
 .story-copy { grid-column: span 5; }
 
 .story-copy h1,

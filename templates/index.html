@@ -24,7 +24,7 @@
       {% endfor %}
     </nav>
 
-    <section id="story-purpose" class="story-chapter story-chapter--hero" data-story-chapter data-story-key="purpose">
+    <section id="story-purpose" class="story-chapter story-chapter--hero" data-story-chapter data-story-key="purpose" data-story-active="true">
       <div class="story-copy">
         <p class="public-eyebrow">企业 AI 转型平台</p>
         <h1>关键的业务场景，需要可验证的 AI 落地路径</h1>
@@ -129,4 +129,8 @@
       </div>
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guided_story.js') }}" defer></script>
 {% endblock %}
