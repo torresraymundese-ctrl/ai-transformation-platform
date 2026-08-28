@@ -1,5 +1,7 @@
 from bs4 import BeautifulSoup
+from jinja2 import ChoiceLoader, DictLoader
 from pathlib import Path
+from PIL import Image
 import pytest
 import re
 
@@ -366,21 +368,77 @@ def test_home_preserves_real_content_sections_and_single_primary_action(client):
     assert "27+" not in page.get_text(" ", strip=True)
 
 
-def test_home_technology_assets_are_local_decorative_and_bounded(client):
-    """Decorative technology art must remain local, empty-alt, and within its performance budget."""
-    page = _page(client.get("/"))
+def _assert_home_technology_assets_contract(page):
     images = page.select("img[data-technology-art]")
 
     assert [image["src"] for image in images] == [
         "/static/images/ui/industrial-data-infrastructure.webp",
         "/static/images/ui/enterprise-compute-space.webp",
     ]
-    assert all(image.get("alt") == "" for image in images)
     root = Path(__file__).resolve().parents[1]
-    for image in images:
+    expected_assets = (
+        (
+            '#story-roadmap [data-product-surface="roadmap"]',
+            "/static/images/ui/industrial-data-infrastructure.webp",
+            (1600, 1000),
+        ),
+        (
+            '#story-evidence [data-product-surface="evidence"]',
+            "/static/images/ui/enterprise-compute-space.webp",
+            (1600, 900),
+        ),
+    )
+    for surface_selector, expected_src, expected_size in expected_assets:
+        wrappers = page.select(f"{surface_selector} .story-technology-art")
+        assert len(wrappers) == 1
+        wrapper = wrappers[0]
+        assert wrapper.get("aria-hidden") == "true"
+        image = wrapper.select_one("img[data-technology-art]")
+        assert image is not None
+        assert image.get("src") == expected_src
+        assert image.get("alt") == ""
+        assert image.get("loading") == "lazy", "missing loading=lazy"
+        assert image.get("decoding") == "async", "missing decoding=async"
+        assert (image.get("width"), image.get("height")) == tuple(
+            str(dimension) for dimension in expected_size
+        )
         asset = root / "static" / image["src"].removeprefix("/static/")
         assert asset.exists()
-        assert asset.stat().st_size <= 350_000
+        assert 0 < asset.stat().st_size <= 350_000
+        with Image.open(asset) as bitmap:
+            assert bitmap.format == "WEBP"
+            assert bitmap.size == expected_size
+            assert not getattr(bitmap, "is_animated", False)
+            assert getattr(bitmap, "n_frames", 1) == 1
+            bitmap.verify()
+        with Image.open(asset) as bitmap:
+            bitmap.load()
+
+
+def test_home_technology_assets_are_local_decorative_and_bounded(client):
+    """Decorative technology art must remain local, correctly placed, and fully decodable."""
+    _assert_home_technology_assets_contract(_page(client.get("/")))
+
+
+def test_home_technology_asset_contract_rejects_in_memory_jinja_mutation(client, monkeypatch):
+    """A missing lazy-load attribute in a temporary template must fail the real asset contract."""
+    app = client.application
+    loader = app.jinja_env.loader
+    source, _, _ = loader.get_source(app.jinja_env, "index.html")
+    mutated_source = source.replace(' loading="lazy"', "", 1)
+
+    assert mutated_source != source
+    monkeypatch.setattr(
+        app.jinja_env,
+        "loader",
+        ChoiceLoader((DictLoader({"index.html": mutated_source}), loader)),
+    )
+    app.jinja_env.cache.clear()
+    try:
+        with pytest.raises(AssertionError, match="missing loading=lazy"):
+            _assert_home_technology_assets_contract(_page(client.get("/")))
+    finally:
+        app.jinja_env.cache.clear()
 
 
 def test_guided_story_runtime_is_local_and_does_not_intercept_native_scrolling(client):
