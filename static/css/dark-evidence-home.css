@@ -111,6 +111,20 @@
   text-underline-offset: 0.22em;
 }
 
+.home-dark-evidence a:focus-visible,
+.home-dark-evidence summary:focus-visible,
+.home-dark-evidence button:focus-visible,
+.home-dark-evidence input:focus-visible,
+.home-dark-evidence select:focus-visible,
+.home-dark-evidence textarea:focus-visible {
+  outline: 3px solid var(--home-signal);
+  outline-offset: 3px;
+}
+
+.home-dark-evidence .nav-cta[hidden] {
+  display: none;
+}
+
 .home-dark-evidence .guided-story-progress {
   position: fixed;
   width: 1px;

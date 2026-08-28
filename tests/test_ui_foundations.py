@@ -417,6 +417,17 @@ def test_home_dark_evidence_css_keeps_one_signal_color(client):
         ".home-dark-evidence .home-application-links a:hover,\n"
         ".home-dark-evidence .home-application-links a:focus-visible",
     )
+    focus_rule = _css_rule(
+        css,
+        ".home-dark-evidence a:focus-visible,\n"
+        ".home-dark-evidence summary:focus-visible,\n"
+        ".home-dark-evidence button:focus-visible,\n"
+        ".home-dark-evidence input:focus-visible,\n"
+        ".home-dark-evidence select:focus-visible,\n"
+        ".home-dark-evidence textarea:focus-visible",
+    )
+    assert "outline: 3px solid var(--home-signal)" in focus_rule
+    assert "outline-offset: 3px" in focus_rule
 
 
 def test_home_navigation_and_conversion_surfaces_follow_dark_evidence_contract(client):
@@ -441,17 +452,27 @@ def test_home_navigation_and_conversion_surfaces_follow_dark_evidence_contract(c
         "/about",
         "/assessment",
     ]
+    home_nav_cta = navigation.select_one('[data-primary-cta][href="/assessment"]')
+    assert home_nav_cta is not None
+    assert home_nav_cta.has_attr("hidden")
     assert home.select_one("[data-site-signal]").has_attr("hidden")
     assert [link.get("href") for link in home.select(".home-hero-actions a")] == [
         "/assessment"
     ]
-    assert len(home.select('main a.btn-primary[href="/assessment"]')) == 2
-    assert home.select_one('[data-home-section="final-cta"] a[href="/assessment"]')
+    primary_actions = home.select('main a.btn-primary[href="/assessment"]')
+    assert len(primary_actions) == 2
+    assert primary_actions[0].find_parent(id="story-purpose") is not None
+    assert primary_actions[1].find_parent(
+        attrs={"data-home-section": "final-cta"}
+    ) is not None
 
     about = _page(client.get("/about"))
     assert about.select_one("nav.nav.nav--home-dark") is None
     assert about.select_one("nav.nav[data-home-navigation]") is None
     assert not about.select_one("[data-site-signal]").has_attr("hidden")
+    about_nav_cta = about.select_one('nav [data-primary-cta][href="/assessment"]')
+    assert about_nav_cta is not None
+    assert not about_nav_cta.has_attr("hidden")
 
 
 def test_home_responsive_shell_declares_three_safe_layout_regimes(client):
