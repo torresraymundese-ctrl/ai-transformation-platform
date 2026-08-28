@@ -57,3 +57,14 @@ Only the supplied Scale image, local source, local ephemeral fixture, and Codex 
 - Result: PASS, `556 passed in 285.05s (0:04:45)`; `TASK6_PYTEST_EXIT=0`.
 - Dedicated interaction fixture: fresh SQLite/media under `runtime-task6-20260828-134300`, `127.0.0.1:50992`, listener PID 21120. It was stopped and `PORT_50992_CLOSED` was confirmed.
 - Required native interaction closure: BLOCKED. The in-app Browser reported its selected session unavailable; browser bootstrap troubleshooting plus a single browser listing returned no available in-app instances. Per the hard constraint no other browser surface was attempted. Consequently native scrollbar-thumb drag and Tab/Shift+Tab/Enter/Space/arrows/PageDown/200% zoom cannot be marked PASS and remain NOT PROVEN.
+
+## 7. Controller supplemental browser evidence
+
+- Fixture: fresh ignored workspace `runtime-task6-controller-20260828-004`; `127.0.0.1:50993`; listener PID 9424. `/`, `/scenarios`, and `/scenarios/mfg-knowledge-assistant` each returned 200.
+- Browser: user-specified visible Codex in-app Browser tab was claimed and used; no alternate browser surface.
+- Scenario filters: PASS. Default displayed 12 published scenarios. `industry=manufacturing`, `department=production`, `maturity=explore` displayed exactly one item, code `mfg_knowledge_assistant`, and `共 1 个已发布场景`. Changing to `department=marketing`, `maturity=collaborate` displayed zero, `共 0 个已发布场景`, `暂时没有符合条件的内容`, `没有符合条件的场景`, and reset. Reset returned `/scenarios`, 12 items, and blank fields.
+- Pagination: NOT APPLICABLE — fixture count 12 is below default per-page 20.
+- Native CUA wheel: PASS — observed scroll Y 0 → 560 → 280.
+- Native keyboard and zoom: NOT PROVEN. CUA/DOM-CUA keypress and locator press left observed focus unchanged (filter input remained `industry`; homepage active element remained `body`). Ctrl+Plus five times left observable viewport unchanged. No scripted focus claim was substituted.
+- Native scrollbar thumb drag: NOT PROVEN. The browser-owned scrollbar could not be located by the Browser API, so no product-level failure is inferred.
+- Completion remains BLOCKED because the mandatory keyboard/scroll/zoom proof is incomplete.
