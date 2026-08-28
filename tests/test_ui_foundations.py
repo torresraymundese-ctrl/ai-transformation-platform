@@ -77,6 +77,15 @@ def test_scale_inspired_tokens_and_story_layer_are_local(client):
     assert ".story-product { position: static; top: auto; }" in mobile_story_css
 
 
+def test_hero_secondary_action_keeps_a_visible_outline_label(client):
+    """The hero's secondary path must override the public paper-fill button."""
+    css = client.get("/static/css/guided-story.css").get_data(as_text=True)
+    hero_outline = _css_rule(css, ".story-chapter--hero .btn-outline")
+
+    assert "background: transparent" in hero_outline
+    assert "color: var(--ui-paper-050)" in hero_outline
+
+
 def test_home_has_skip_link_and_single_named_main(client):
     page = _page(client.get("/"))
     assert page.select_one('a.skip-link[href="#main-content"]') is not None

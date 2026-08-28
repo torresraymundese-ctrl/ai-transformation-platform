@@ -169,7 +169,7 @@
 
 .story-chapter .btn-primary { background: var(--ui-signal-blue); }
 
-.story-chapter--hero .btn-outline { border-color: var(--ui-paper-050); color: var(--ui-paper-050); }
+.story-chapter--hero .btn-outline { border-color: var(--ui-paper-050); color: var(--ui-paper-050); background: transparent; }
 
 @media (max-width: 767px) {
   .guided-story-progress { position: static; transform: none; overflow-x: auto; display: flex; padding: 1rem; background: var(--ui-graphite-950); }
