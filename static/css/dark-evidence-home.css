@@ -1,6 +1,6 @@
 .home-dark-evidence {
-  --home-graphite-1000: #07090d;
-  --home-graphite-950: #0d1117;
+  --home-graphite-1000: #06080b;
+  --home-graphite-950: #0b1016;
   --home-graphite-900: #12171f;
   --home-paper: #f3f1eb;
   --home-white: #ffffff;
@@ -238,9 +238,8 @@
 .home-dark-evidence .story-product--overview::after {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 18%;
-  background: var(--home-graphite-1000);
-  box-shadow: 5rem 0 7rem 4rem var(--home-graphite-1000);
+  width: 34%;
+  background: linear-gradient(90deg, var(--home-graphite-1000), rgba(6, 8, 11, 0));
   content: "";
 }
 
@@ -272,7 +271,7 @@
 
 .home-dark-evidence .home-art--hero img {
   object-position: 64% center;
-  filter: invert(1) hue-rotate(180deg) brightness(0.72) contrast(1.25) saturate(1.1);
+  filter: brightness(0.96) contrast(1.06) saturate(0.96);
 }
 
 .home-dark-evidence .story-chapter--capability {
@@ -383,12 +382,26 @@
 .home-dark-evidence .home-art--knowledge img,
 .home-dark-evidence .home-art--path img {
   object-position: center;
-  filter: invert(1) hue-rotate(180deg) brightness(0.72) contrast(1.35) saturate(1.1);
+  filter: brightness(0.94) contrast(1.06) saturate(0.92);
+}
+
+.home-dark-evidence .home-art--knowledge,
+.home-dark-evidence .home-art--path {
+  position: relative;
+}
+
+.home-dark-evidence .home-art--knowledge::after,
+.home-dark-evidence .home-art--path::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(6, 8, 11, 0.44), transparent 44%, transparent 76%, rgba(6, 8, 11, 0.16));
+  content: "";
 }
 
 .home-dark-evidence .story-technology-art--roadmap img {
   object-position: center 48%;
-  filter: brightness(0.82) contrast(1.08);
+  filter: brightness(0.92) contrast(1.06);
 }
 
 .home-dark-evidence .home-inline-links {

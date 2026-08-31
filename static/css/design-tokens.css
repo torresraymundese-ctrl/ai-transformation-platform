@@ -1,9 +1,12 @@
 :root {
-  --ui-graphite-1000: #07090d;
-  --ui-graphite-950: #0d1117;
+  --ui-graphite-1000: #06080b;
+  --ui-graphite-950: #0b1016;
+  --ui-graphite-850: #18202a;
   --ui-graphite-800: #252b33;
   --ui-paper-050: #f3f1eb;
+  --ui-paper-000: #fbfaf7;
   --ui-signal-blue: #0f6fef;
+  --ui-silver-200: #d8dee6;
   --ui-signal-cyan: #5bd9e8;
   --ui-line-dark: #343b44;
   --ui-line-light: #d8dde3;
@@ -12,8 +15,8 @@
   --ui-blue-700: #0b49bf;
   --ui-teal-700: #007c91;
   --ui-amber-700: #9a5b00;
-  --ui-ink-950: #15213a;
-  --ui-ink-650: #536176;
+  --ui-ink-950: #111827;
+  --ui-ink-650: #556070;
   --ui-line-200: #dde4ee;
   --ui-surface-050: #f6f8fb;
   --ui-surface-000: #ffffff;
@@ -34,6 +37,8 @@
   --ui-motion-fast: 160ms;
   --ui-motion-standard: 220ms;
   --ui-motion-story: 680ms;
+  --ui-font-sans: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --ui-font-label: Inter, Arial, sans-serif;
 }
 
 @media (prefers-reduced-motion: reduce) {

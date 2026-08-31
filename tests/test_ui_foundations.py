@@ -59,11 +59,17 @@ def test_scale_inspired_tokens_and_story_layer_are_local(client):
     page = _page(client.get("/"))
 
     for token in (
-        "--ui-graphite-1000: #07090d",
-        "--ui-graphite-950: #0d1117",
+        "--ui-graphite-1000: #06080b",
+        "--ui-graphite-950: #0b1016",
+        "--ui-graphite-850: #18202a",
         "--ui-paper-050: #f3f1eb",
+        "--ui-paper-000: #fbfaf7",
+        "--ui-ink-950: #111827",
+        "--ui-ink-650: #556070",
+        "--ui-silver-200: #d8dee6",
         "--ui-signal-blue: #0f6fef",
-        "--ui-signal-cyan: #5bd9e8",
+        '--ui-font-sans: "noto sans sc", "source han sans sc", "microsoft yahei ui", "microsoft yahei", sans-serif',
+        "--ui-font-label: inter, arial, sans-serif",
         "--ui-container-wide: 85rem",
     ):
         assert token in tokens
@@ -130,14 +136,19 @@ def test_design_tokens_are_served_with_approved_values(client):
         "--ui-blue-700: #0b49bf",
         "--ui-teal-700: #007c91",
         "--ui-amber-700: #9a5b00",
-        "--ui-ink-950: #15213a",
-        "--ui-ink-650: #536176",
+        "--ui-ink-950: #111827",
+        "--ui-ink-650: #556070",
         "--ui-line-200: #dde4ee",
-        "--ui-graphite-1000: #07090d",
-        "--ui-graphite-950: #0d1117",
+        "--ui-graphite-1000: #06080b",
+        "--ui-graphite-950: #0b1016",
+        "--ui-graphite-850: #18202a",
         "--ui-paper-050: #f3f1eb",
+        "--ui-paper-000: #fbfaf7",
+        "--ui-silver-200: #d8dee6",
         "--ui-signal-blue: #0f6fef",
         "--ui-signal-cyan: #5bd9e8",
+        '--ui-font-sans: "noto sans sc", "source han sans sc", "microsoft yahei ui", "microsoft yahei", sans-serif',
+        "--ui-font-label: inter, arial, sans-serif",
         "--ui-container-wide: 85rem",
     ):
         assert token in css.lower()
@@ -535,7 +546,7 @@ def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):
     assert page.body.get("class") and "home-dark-evidence" in page.body["class"]
     assert page.select_one('link[href="/static/css/dark-evidence-home.css"]') is not None
     expected = {
-        "/static/images/ui/home-ai-core.webp": (1920, 1080, 350_000),
+        "/static/images/ui/home-ai-core-silver.webp": (1920, 1080, 350_000),
         "/static/images/ui/home-knowledge-system.webp": (1600, 900, 300_000),
         "/static/images/ui/home-path-system.webp": (1600, 900, 300_000),
     }
@@ -561,7 +572,9 @@ def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):
         with Image.open(asset) as bitmap:
             bitmap.load()
 
-    hero = page.select_one('img[data-home-art][src="/static/images/ui/home-ai-core.webp"]')
+    hero = page.select_one(
+        'img[data-home-art][src="/static/images/ui/home-ai-core-silver.webp"]'
+    )
     assert hero.get("fetchpriority") == "high"
     assert hero.get("loading") != "lazy"
 
@@ -572,6 +585,49 @@ def test_home_dark_evidence_assets_are_local_decodable_and_bounded(client):
         supporting = page.select_one(f'img[data-home-art][src="{url}"]')
         assert supporting.get("loading") == "lazy"
         assert supporting.get("decoding") == "async"
+
+
+def test_silver_evidence_assets_are_local_decodable_and_bound_to_public_surfaces(client):
+    """Silver-evidence art stays local, truthful, decodable, and visibly lit."""
+    page = _page(client.get("/"))
+    hero = page.select_one(
+        'img[data-home-art][src="/static/images/ui/home-ai-core-silver.webp"]'
+    )
+
+    assert hero is not None
+    assert hero.get("alt") == ""
+    assert (hero.get("width"), hero.get("height")) == ("1920", "1080")
+    assert hero.get("fetchpriority") == "high"
+
+    expected = {
+        "home-ai-core-silver.webp": (1920, 1080, 350_000),
+        "public-industry-operations.webp": (1920, 1080, 400_000),
+        "public-delivery-system.webp": (1600, 900, 340_000),
+        "public-trust-evidence.webp": (1600, 900, 340_000),
+    }
+    root = Path(__file__).resolve().parents[1] / "static" / "images" / "ui"
+
+    for filename, (width, height, byte_limit) in expected.items():
+        asset = root / filename
+        assert asset.exists(), filename
+        assert 0 < asset.stat().st_size <= byte_limit
+        with Image.open(asset) as bitmap:
+            assert bitmap.format == "WEBP"
+            assert bitmap.mode == "RGB"
+            assert bitmap.size == (width, height)
+            assert not getattr(bitmap, "is_animated", False)
+            assert getattr(bitmap, "n_frames", 1) == 1
+            bitmap.verify()
+        with Image.open(asset) as bitmap:
+            bitmap.load()
+
+    css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
+    assert "invert(" not in css.lower()
+    assert "hue-rotate(" not in css.lower()
+    hero_rule = _css_rule(css, ".home-dark-evidence .home-art--hero img")
+    brightness = re.search(r"brightness\(\s*([0-9]*\.?[0-9]+)\s*\)", hero_rule)
+    assert brightness is not None
+    assert float(brightness.group(1)) >= 0.9
 
 
 def _assert_home_technology_assets_contract(page):
