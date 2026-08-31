@@ -479,6 +479,10 @@ def test_home_responsive_shell_declares_three_safe_layout_regimes(client):
     """Static CSS must cover desktop, compact desktop, mobile, and reduced motion."""
     css = client.get("/static/css/dark-evidence-home.css").get_data(as_text=True)
 
+    root_rule = _css_rule(css, ".home-dark-evidence")
+    assert "min-width: 0" in root_rule
+    assert "min-width: 20rem" not in root_rule
+
     hidden_conversion = _css_rule(
         css,
         ".home-dark-evidence .site-signal,\n.home-dark-evidence .sticky-cta",

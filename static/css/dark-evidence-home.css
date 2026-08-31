@@ -10,7 +10,7 @@
   --home-signal: #0f6fef;
   --home-container: 80rem;
   --home-section-space: clamp(7.5rem, 11vw, 11.25rem);
-  min-width: 20rem;
+  min-width: 0;
   max-width: 100%;
   overflow-x: clip;
   color: var(--home-copy);
