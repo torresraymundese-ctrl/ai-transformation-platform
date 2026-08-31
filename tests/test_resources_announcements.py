@@ -429,7 +429,76 @@ def test_single_published_resource_uses_a_full_width_reviewed_editorial_row(
     assert row.select_one('[data-result-sequence]') is not None
     assert row.select_one('h2 a.catalog-card-link[href="/resources/editorial-resource-row"]') is not None
     assert row.select_one(".editorial-result-row__summary") is not None
-    assert row.select_one('dl.catalog-card-meta[data-resource-review]') is not None
+    assert row.select_one('dl.catalog-card-meta[data-resource-provenance]') is not None
+
+
+def test_resource_editorial_rows_only_render_actual_authorship_and_copyright_metadata(
+    client, admin_client, db
+):
+    original = _create_resource(
+        admin_client,
+        db,
+        action="publish",
+        slug="editorial-original-metadata",
+        title="原创资源元数据",
+        copyright_notice="原创资源版权说明。",
+    )
+    source_url = "https://example.com/editorial-source-metadata"
+    sourced = _create_resource(
+        admin_client,
+        db,
+        slug="editorial-sourced-metadata",
+        title="来源资源元数据",
+        is_original="0",
+        source_name="公开研究机构",
+        source_url=source_url,
+        copyright_notice="原文版权归公开研究机构所有。",
+    )
+    stored_source_url = db.execute(
+        "SELECT source_url FROM resource_content WHERE content_item_id=?", (sourced["id"],)
+    ).fetchone()[0]
+    admin_client.application.config["RESOURCE_SOURCE_TRANSPORT"] = _successful_transport()
+    checked = admin_client.post(
+        f"/admin/resources/{sourced['id']}/source-check",
+        data={
+            "csrf_token": CSRF,
+            "expected_lock_version": str(sourced["lock_version"]),
+            "expected_url_sha256": hashlib.sha256(stored_source_url.encode()).hexdigest(),
+        },
+    )
+    assert checked.status_code == 302
+    published = admin_client.post(
+        f"/admin/resources/{sourced['id']}",
+        data=_edit_resource_form(db, sourced["id"], action="publish"),
+    )
+    assert published.status_code == 302
+
+    document = BeautifulSoup(client.get("/resources").data, "html.parser")
+    original_row = document.select_one(
+        '[data-resource-card] a[href="/resources/editorial-original-metadata"]'
+    ).find_parent("article")
+    sourced_row = document.select_one(
+        '[data-resource-card] a[href="/resources/editorial-sourced-metadata"]'
+    ).find_parent("article")
+
+    assert "审核范围" not in document.get_text(" ", strip=True)
+    assert "已审核" not in document.get_text(" ", strip=True)
+    assert original_row.select_one("dl[data-resource-provenance]") is not None
+    assert [term.get_text(" ", strip=True) for term in original_row.select("dt")] == [
+        "内容归属", "版权说明"
+    ]
+    assert "本站原创" in original_row.get_text(" ", strip=True)
+    assert "原创资源版权说明。" in original_row.get_text(" ", strip=True)
+    assert original_row.select_one("a[data-resource-source]") is None
+    assert [term.get_text(" ", strip=True) for term in sourced_row.select("dt")] == [
+        "来源", "版权说明"
+    ]
+    source = sourced_row.select_one("a[data-resource-source]")
+    assert source is not None
+    assert source.get_text(" ", strip=True) == "公开研究机构"
+    assert source["href"] == stored_source_url
+    assert source["rel"] == ["noopener", "noreferrer"]
+    assert "原文版权归公开研究机构所有。" in sourced_row.get_text(" ", strip=True)
 
 
 def test_resource_editor_is_choice_first_and_has_exact_schema(admin_client):

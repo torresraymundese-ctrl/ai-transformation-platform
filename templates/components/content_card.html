@@ -31,9 +31,13 @@
     <div><dt>核验时间</dt><dd>{{ item.verified_at }}</dd></div>
   </dl>
   {% elif metadata_kind == 'resource' %}
-  <dl class="catalog-card-meta editorial-result-row__meta" data-resource-review>
-    <div><dt>资源类型</dt><dd>{{ item.resource_type_label }}</dd></div>
-    <div><dt>审核范围</dt><dd>来源、版权与内容</dd></div>
+  <dl class="catalog-card-meta editorial-result-row__meta" data-resource-provenance>
+    {% if item.is_original %}
+    <div><dt>内容归属</dt><dd>本站原创</dd></div>
+    {% else %}
+    <div><dt>来源</dt><dd><a data-resource-source href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">{{ item.source_name }}</a></dd></div>
+    {% endif %}
+    <div><dt>版权说明</dt><dd>{{ item.copyright_notice }}</dd></div>
   </dl>
   {% endif %}
   <span class="catalog-card-action editorial-result-row__action" aria-hidden="true">查看详情</span>

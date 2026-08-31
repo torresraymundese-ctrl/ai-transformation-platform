@@ -12,9 +12,19 @@
   <div class="public-container">
   <div class="catalog-grid catalog-grid--editorial" data-catalog-layout="editorial">
     {% for service in page.items %}
+    {% if loop.changed(service.category) %}
+    {% if not loop.first %}</div></section>{% endif %}
+    <section class="service-category-group" data-service-category-group="{{ service.category }}">
+      <header class="service-category-group__header" data-service-category-boundary>
+        <p class="public-eyebrow">交付类别</p>
+        <h2 data-service-category-heading>{{ service.category }}</h2>
+      </header>
+      <div class="service-category-group__rows">
+    {% endif %}
     <div data-service-card data-service-category="{{ service.category }}">
       {{ content_card(service, url_for('public_catalog.service_package_detail', slug=service.slug), service.category, sequence_label='%02d'|format(loop.index), layout='editorial', metadata_kind='service') }}
     </div>
+    {% if loop.last %}</div></section>{% endif %}
     {% endfor %}
   </div>
   {% if not page.items %}{{ empty_state("暂无已发布服务包。") }}{% endif %}

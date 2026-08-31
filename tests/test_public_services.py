@@ -372,6 +372,26 @@ def test_service_list_uses_page_contract_shell_canonical_and_compatibility_redir
     assert all(row.select_one('.editorial-result-row__summary') is not None for row in rows)
     assert all(row.select_one('dl.catalog-card-meta[data-service-category]') is not None for row in rows)
     assert document.select_one('[data-catalog-layout="editorial"]') is not None
+    expected_categories = []
+    for item in projection.items:
+        if not expected_categories or expected_categories[-1] != item.category:
+            expected_categories.append(item.category)
+    groups = document.select('[data-service-category-group]')
+    assert len(expected_categories) >= 2
+    assert [group["data-service-category-group"] for group in groups] == expected_categories
+    assert [
+        group.select_one('[data-service-category-heading]').get_text(" ", strip=True)
+        for group in groups
+    ] == expected_categories
+    assert [card["data-service-category"] for card in document.select('[data-service-card]')] == [
+        item.category for item in projection.items
+    ]
+    for group in groups:
+        assert group.select_one('[data-service-category-boundary]') is not None
+        assert {
+            card["data-service-category"]
+            for card in group.select('[data-service-card]')
+        } == {group["data-service-category-group"]}
     assert document.select("[data-service-code]") == []
     for code in SERVICE_MATURITY:
         assert code not in response.get_data(as_text=True)
