@@ -157,6 +157,23 @@ def _css_rule(css, selector):
     return match.group("declarations")
 
 
+def _css_member_rule(css, selector):
+    """Read one selector from a top-level grouped CSS rule without matching text blindly."""
+    for match in re.finditer(
+        r"(?ms)^(?P<selectors>[^{}]+)\{(?P<declarations>[^{}]*)\}", css
+    ):
+        selectors = [item.strip() for item in match.group("selectors").split(",")]
+        if selector in selectors:
+            return match.group("declarations")
+    raise AssertionError(selector)
+
+
+def _css_token_color(tokens, declaration_value):
+    match = re.fullmatch(r"var\((--ui-[a-z0-9-]+)\)", declaration_value)
+    assert match is not None, declaration_value
+    return _css_custom_color(tokens, match.group(1))
+
+
 def _css_blocks(css, opener):
     """Return balanced CSS blocks for an at-rule without treating nested rules as text."""
     blocks = []
@@ -474,6 +491,30 @@ def test_shared_navigation_and_footer_use_readable_text_colors(client):
     assert ".nav-links a { color: var(--ui-ink-650);" in css
     assert ".footer { color: var(--ui-paper-050); background: var(--ui-graphite-950); }" in css
     assert ".footer a,\n.footer-bottom { color: var(--ui-paper-050); }" in css
+
+
+def test_task5_small_editorial_and_assessment_text_meets_aa_contrast(client):
+    """Signal blue is an accent; small document text must keep a 4.5:1 foreground."""
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    editorial_css = client.get("/static/css/silver-evidence-public.css").get_data(
+        as_text=True
+    )
+    assessment_css = client.get("/static/css/assessment.css").get_data(as_text=True)
+    paper = _css_custom_color(tokens, "--ui-paper-050")
+    graphite = _css_custom_color(tokens, "--ui-graphite-1000")
+
+    examples = (
+        (editorial_css, ".public-shell .review-dossier__meta a", paper),
+        (editorial_css, ".public-shell .editorial-content-flow a", paper),
+        (editorial_css, ".public-shell .review-dossier .public-eyebrow", paper),
+        (editorial_css, ".public-shell .editorial-cover .public-eyebrow", graphite),
+        (assessment_css, ".privacy-card a", paper),
+        (assessment_css, ".assessment-eyebrow", graphite),
+    )
+    for css, selector, background in examples:
+        declarations = _css_declarations(_css_member_rule(css, selector))
+        foreground = _css_token_color(tokens, declarations["color"])
+        assert _contrast_ratio(foreground, background) >= 4.5, selector
 
 
 def test_shared_navigation_and_footer_links_keep_touch_targets_and_mobile_columns(client):

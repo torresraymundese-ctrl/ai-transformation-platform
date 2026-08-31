@@ -680,11 +680,17 @@
 }
 
 .public-shell .editorial-cover .public-eyebrow,
-.public-shell .manifesto-cover .public-eyebrow,
+.public-shell .manifesto-cover .public-eyebrow {
+  margin: 0 0 1rem;
+  color: var(--ui-silver-200);
+  font: 700 0.75rem/1.2 var(--ui-font-label);
+  letter-spacing: 0.14em;
+}
+
 .public-shell .editorial-evidence > .public-eyebrow,
 .public-shell .review-dossier .public-eyebrow {
   margin: 0 0 1rem;
-  color: var(--ui-signal-blue);
+  color: var(--ui-ink-650);
   font: 700 0.75rem/1.2 var(--ui-font-label);
   letter-spacing: 0.14em;
 }
@@ -822,14 +828,14 @@
 .public-shell .review-dossier__meta > div { display: grid; grid-template-columns: minmax(8rem, 0.34fr) minmax(0, 0.66fr); gap: 1rem; padding: 1.1rem 0; border-bottom: 1px solid var(--ui-line-200); }
 .public-shell .review-dossier__meta dt { color: var(--ui-ink-650); }
 .public-shell .review-dossier__meta dd { margin: 0; color: var(--ui-ink-950); line-height: 1.65; }
-.public-shell .review-dossier__meta a { color: var(--ui-signal-blue); }
+.public-shell .review-dossier__meta a { color: var(--ui-ink-650); text-decoration-color: var(--ui-signal-blue); }
 
 .public-shell .editorial-content-flow { max-width: 72ch; }
 .public-shell .editorial-content-flow > h2 { margin-bottom: 2rem; }
 .public-shell .editorial-content-flow h3 { margin: 2.25rem 0 1rem; color: inherit; font-size: clamp(1.25rem, 2vw, 1.6rem); line-height: 1.35; }
 .public-shell .editorial-content-flow p,
 .public-shell .editorial-content-flow li { line-height: 1.75; }
-.public-shell .editorial-content-flow a { color: var(--ui-signal-blue); }
+.public-shell .editorial-content-flow a { color: var(--ui-ink-650); text-decoration-color: var(--ui-signal-blue); }
 .public-shell .editorial-content-flow .content-block--rich-text { margin-block: 1.5rem; }
 .public-shell .editorial-content-flow .content-block--image-text { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(14rem, 0.85fr); gap: clamp(1.5rem, 4vw, 4rem); align-items: start; margin-inline: 0; padding-block: clamp(2rem, 4vw, 3.5rem); border-top: 1px solid var(--ui-line-200); border-bottom: 1px solid var(--ui-line-200); }
 .public-shell .editorial-content-flow .content-block--image-text img { grid-column: 1; grid-row: 1 / span 5; width: 100%; max-height: 30rem; object-fit: cover; }
@@ -841,7 +847,7 @@
 .public-shell .editorial-content-flow .content-block--metric strong { color: var(--ui-signal-blue); font: 500 clamp(3rem, 6vw, 5.25rem)/0.95 var(--ui-font-label); font-variant-numeric: tabular-nums; letter-spacing: -0.06em; }
 .public-shell .editorial-content-flow .content-block--steps ol { margin: 1.25rem 0 0; padding: 0; list-style: none; counter-reset: editorial-step; border-top: 1px solid var(--ui-line-200); }
 .public-shell .editorial-content-flow .content-block--steps li { position: relative; padding: 1rem 0 1rem 3.5rem; border-bottom: 1px solid var(--ui-line-200); }
-.public-shell .editorial-content-flow .content-block--steps li::before { position: absolute; left: 0; counter-increment: editorial-step; content: counter(editorial-step, decimal-leading-zero); color: var(--ui-signal-blue); font: 700 0.8rem/1.2 var(--ui-font-label); letter-spacing: 0.08em; }
+.public-shell .editorial-content-flow .content-block--steps li::before { position: absolute; left: 0; counter-increment: editorial-step; content: counter(editorial-step, decimal-leading-zero); color: var(--ui-ink-650); font: 700 0.8rem/1.2 var(--ui-font-label); letter-spacing: 0.08em; }
 .public-shell .editorial-content-flow .content-block--download,
 .public-shell .editorial-content-flow .content-block--cta { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: baseline; padding: 1.25rem 0; border-top: 1px solid var(--ui-line-200); border-bottom: 1px solid var(--ui-line-200); }
 .public-shell .editorial-end-action { margin: 0; padding-top: clamp(2rem, 4vw, 3.5rem); border-top: 1px solid var(--ui-ink-950); }
@@ -865,7 +871,7 @@
 .public-shell .ui-status-page { display: grid; min-height: min(34rem, 58vh); place-items: center; }
 .public-shell .ui-status-content { width: min(calc(100% - 2.5rem), 80rem); padding-block: clamp(5rem, 12vw, 10rem); }
 .public-shell .ui-status-content > div { max-width: 42rem; }
-.public-shell .ui-status-content .public-eyebrow { margin: 0 0 1rem; color: var(--ui-signal-blue); font: 700 0.75rem/1.2 var(--ui-font-label); letter-spacing: 0.14em; }
+.public-shell .ui-status-content .public-eyebrow { margin: 0 0 1rem; color: var(--ui-ink-650); font: 700 0.75rem/1.2 var(--ui-font-label); letter-spacing: 0.14em; }
 .public-shell .ui-status-content h1 { margin: 0; color: var(--ui-ink-950); font-size: clamp(3rem, 6vw, 5.5rem); line-height: 1.02; letter-spacing: -0.04em; }
 .public-shell .ui-status-content h1 + p { max-width: 40ch; margin: 1.5rem 0 2rem; color: var(--ui-ink-650); font-size: 1.1rem; line-height: 1.75; }
 

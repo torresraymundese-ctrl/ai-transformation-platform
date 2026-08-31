@@ -19,7 +19,7 @@
 
 .assessment-eyebrow {
   margin: 0 0 1rem;
-  color: var(--ui-signal-blue);
+  color: var(--ui-silver-200);
   font: 700 0.75rem/1.2 var(--ui-font-label);
   letter-spacing: 0.14em;
 }
@@ -192,7 +192,7 @@
 
 .privacy-card { padding: clamp(1.5rem, 4vw, 2.5rem); background: var(--ui-paper-050); border-top: 1px solid var(--ui-ink-950); border-bottom: 1px solid var(--ui-line-200); border-radius: 0; overflow-wrap: anywhere; }
 .privacy-card > p + p { margin-top: 0.5rem; }
-.privacy-card a { color: var(--ui-signal-blue); }
+.privacy-card a { color: var(--ui-ink-650); text-decoration-color: var(--ui-signal-blue); }
 .consent-field { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; align-items: start; margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--ui-line-200); }
 .consent-field input { width: 1.2rem; height: 1.2rem; margin-top: 0.15rem; accent-color: var(--ui-signal-blue); }
 .consent-field label { font-size: 0.9375rem; line-height: 1.65; }
