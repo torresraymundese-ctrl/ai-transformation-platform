@@ -434,12 +434,14 @@ def _mapped_legacy_article(admin_client, db, *, target_action="publish"):
 
 def test_navigation_matches_confirmed_information_architecture(client):
     page = _page(client.get("/"))
+    navigation = page.select_one("nav[data-public-navigation='silver-evidence']")
 
+    assert navigation is not None
     assert [
         link.get_text(" ", strip=True)
-        for link in page.select("[data-primary-navigation] > a")
+        for link in navigation.select("[data-primary-navigation] > a")
     ] == ["行业方案", "AI 场景", "服务与交付", "案例与资源", "关于我们"]
-    assert page.select_one('[data-primary-cta][href="/assessment"]') is not None
+    assert navigation.select_one('[data-primary-cta][href="/assessment"]') is not None
 
 
 def test_homepage_never_falls_back_to_unreviewed_legacy_content(client):

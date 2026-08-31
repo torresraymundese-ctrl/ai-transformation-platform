@@ -10,11 +10,12 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/design-tokens.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ui-components.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/public-pages.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/silver-evidence-public.css') }}">
 <style>{% block extra_css %}{% endblock %}</style>
 {% block head %}{% endblock %}
 </head>
 <body
-  class="{% block body_class %}{% endblock %}"
+  class="public-shell {% block body_class %}{% endblock %}"
   data-analytics-endpoint="{{ url_for('assessment_v2.analytics_event_create') }}"
   data-analytics-csrf-token="{{ csrf_token() }}"
   data-analytics-page="{% block analytics_page %}site{% endblock %}"
@@ -23,7 +24,7 @@
 <a class="skip-link" href="#main-content">跳到主要内容</a>
 {% include "components/navigation.html" %}
 
-<main id="main-content" tabindex="-1"{% block main_attributes %}{% endblock %}>
+<main id="main-content" tabindex="-1" aria-label="主要内容"{% block main_attributes %}{% endblock %}>
 {% block content %}{% endblock %}
 </main>
 
@@ -32,6 +33,7 @@
 {% include "components/sticky_cta.html" %}
 
 {% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='js/public_reveal.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 </body>
 </html>

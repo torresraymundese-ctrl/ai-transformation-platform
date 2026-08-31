@@ -40,15 +40,31 @@ def _contrast_ratio(foreground, background):
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def test_public_shell_loads_design_layers_after_legacy_css(client):
-    page = _page(client.get("/"))
+@pytest.mark.parametrize(
+    "path",
+    ("/", "/industries", "/scenarios", "/service-packages", "/cases", "/resources", "/about", "/assessment"),
+)
+def test_public_shell_uses_one_silver_evidence_navigation_layer(client, path):
+    page = _page(client.get(path))
     hrefs = [link["href"] for link in page.select('link[rel="stylesheet"]')]
-    assert hrefs[-5:] == [
-        "/static/css/app.css",
-        "/static/css/design-tokens.css",
-        "/static/css/ui-components.css",
-        "/static/css/public-pages.css",
-        "/static/css/dark-evidence-home.css",
+    public_pages_index = hrefs.index("/static/css/public-pages.css")
+
+    assert hrefs[public_pages_index + 1] == "/static/css/silver-evidence-public.css"
+    assert len(page.select("header > nav[data-public-navigation='silver-evidence']")) == 1
+    assert not page.select(".site-signal")
+    assert page.select_one("nav[data-public-navigation='silver-evidence']").get(
+        "data-navigation-tone"
+    ) == "dark"
+    assert len(page.select("main#main-content[aria-label='主要内容']")) == 1
+
+    footer = page.select_one("footer.footer")
+    assert footer is not None
+    assert not footer.select("[style]")
+    assert [heading.get_text(" ", strip=True) for heading in footer.select("h2")] == [
+        "企业AI转型平台",
+        "服务方案",
+        "资源中心",
+        "关于",
     ]
 
 
@@ -177,25 +193,14 @@ def test_legacy_brand_tokens_converge_on_single_signal_blue(client):
     assert "--ui-focus: #0f6fef" in css
 
 
-def test_shared_shell_has_truthful_signal_bar(client):
-    """Non-home routes remain visibly connected to the shared assessment shell."""
+def test_shared_shell_keeps_truthful_assessment_copy_without_a_signal_bar(client):
+    """The former second header row must not return as a standalone signal bar."""
     page = _page(client.get("/about"))
-    signal = page.select_one("[data-site-signal]")
+    navigation = page.select_one("nav[data-public-navigation='silver-evidence']")
 
-    assert signal is not None
-    assert signal.get("hidden") is None
-    assert signal.get_text(" ", strip=True) == "从评估到实施，建立可验证的 AI 转型路径"
-    assert signal.select_one('a[href="/assessment"]') is not None
-
-
-def test_signal_bar_anchor_keeps_a_full_touch_target(client):
-    """A line-height-only signal link would leave most of its 44px bar unclickable."""
-    css = client.get("/static/css/ui-components.css").get_data(as_text=True)
-    signal_anchor = _css_rule(css, ".site-signal a")
-
-    assert "display: inline-flex;" in signal_anchor
-    assert "min-height: 2.75rem;" in signal_anchor
-    assert "align-items: center;" in signal_anchor
+    assert navigation is not None
+    assert not page.select("[data-site-signal]")
+    assert navigation.select_one('[href="/assessment"]') is not None
 
 
 def test_story_product_heading_gets_panel_row_treatment(client):
@@ -489,7 +494,7 @@ def test_home_navigation_and_conversion_surfaces_follow_dark_evidence_contract(c
     home_nav_cta = navigation.select_one('[data-primary-cta][href="/assessment"]')
     assert home_nav_cta is not None
     assert home_nav_cta.has_attr("hidden")
-    assert home.select_one("[data-site-signal]").has_attr("hidden")
+    assert not home.select("[data-site-signal]")
     assert [link.get("href") for link in home.select(".home-hero-actions a")] == [
         "/assessment"
     ]
@@ -503,7 +508,7 @@ def test_home_navigation_and_conversion_surfaces_follow_dark_evidence_contract(c
     about = _page(client.get("/about"))
     assert about.select_one("nav.nav.nav--home-dark") is None
     assert about.select_one("nav.nav[data-home-navigation]") is None
-    assert not about.select_one("[data-site-signal]").has_attr("hidden")
+    assert not about.select("[data-site-signal]")
     about_nav_cta = about.select_one('nav [data-primary-cta][href="/assessment"]')
     assert about_nav_cta is not None
     assert not about_nav_cta.has_attr("hidden")
