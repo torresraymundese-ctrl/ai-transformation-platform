@@ -589,7 +589,7 @@ def _assert_home_technology_assets_contract(page):
             (1600, 1000),
         ),
         (
-            '#story-evidence [data-product-surface="evidence"]',
+            '#story-roadmap [data-product-surface="evidence"]',
             "/static/images/ui/enterprise-compute-space.webp",
             (1600, 900),
         ),

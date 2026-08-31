@@ -491,6 +491,49 @@ def test_home_exposes_five_truthful_guided_story_chapters(published_catalog):
     )
 
 
+def test_home_guided_story_sections_follow_the_bound_chapter_ownership(
+    published_catalog,
+):
+    """Each visual section belongs to the chapter named by the homepage spec."""
+    document = page(published_catalog.get("/"))
+    story = document.select_one("[data-guided-story]")
+    purpose = story.select_one("#story-purpose")
+    assessment = story.select_one("#story-assessment")
+    roadmap = story.select_one("#story-roadmap")
+    evidence = story.select_one("#story-evidence")
+
+    assert purpose.select_one(":scope > .home-positioning") is not None
+    assert assessment.select_one(".home-positioning") is None
+    assert assessment["data-capability"] == "assessment"
+    assert assessment.select_one(".home-capability-number").get_text(
+        " ", strip=True
+    ) == "01"
+    assert roadmap.select_one(
+        ':scope > [data-home-section="applications"]'
+    ) is not None
+    assert evidence.select_one('[data-home-section="applications"]') is None
+    assert evidence.select_one(':scope > [data-home-section]')[
+        "data-home-section"
+    ] == "proof"
+
+    chapters = story.select("[data-story-chapter]")
+    steps = story.select("[data-story-step]")
+    expected_ids = [
+        "story-purpose",
+        "story-assessment",
+        "story-matching",
+        "story-roadmap",
+        "story-evidence",
+    ]
+    assert [chapter["id"] for chapter in chapters] == expected_ids
+    assert len({chapter["id"] for chapter in chapters}) == 5
+    assert [step["data-story-step"] for step in steps] == expected_ids
+    assert [step["href"] for step in steps] == [
+        f"#{chapter_id}" for chapter_id in expected_ids
+    ]
+    assert len({step["data-story-step"] for step in steps}) == 5
+
+
 def test_home_labels_every_simulated_result_as_demo_data(published_catalog):
     document = page(published_catalog.get("/"))
     values = document.select("[data-demo-value]")
