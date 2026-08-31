@@ -106,7 +106,7 @@ test('the most visible chapter activates its matching progress step', () => {
   assert.equal(activeCount(view.chapters, 'storyActive'), 1);
   assert.equal(view.steps.filter((step) => step.getAttribute('aria-current') === 'step').length, 1);
   assert.deepEqual(view.observer.options.threshold, [0.05, 0.25, 0.5]);
-  assert.equal(view.observer.options.rootMargin, '-35% 0px -35% 0px');
+  assert.equal(view.observer.options.rootMargin, '-15% 0px -65% 0px');
   assert.deepEqual(view.observer.observed, view.chapters);
   assert.equal(result.observer, view.observer);
 });
