@@ -27,6 +27,52 @@ def _css_rule(css, selector):
     return match.group("declarations")
 
 
+def _css_blocks(css, opener):
+    """Return balanced CSS blocks for an at-rule without treating nested rules as text."""
+    blocks = []
+    search_from = 0
+    while True:
+        start = css.find(opener, search_from)
+        if start == -1:
+            return blocks
+        brace_start = css.find("{", start)
+        assert brace_start != -1, opener
+        depth = 0
+        for index in range(brace_start, len(css)):
+            if css[index] == "{":
+                depth += 1
+            elif css[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(css[brace_start + 1 : index])
+                    search_from = index + 1
+                    break
+        else:
+            raise AssertionError(f"unterminated CSS block: {opener}")
+
+
+def _css_rule_in_blocks(blocks, selector):
+    """Find one direct selector rule inside the parsed at-rule blocks."""
+    for block in blocks:
+        match = re.search(
+            rf"(?m)^\s*{re.escape(selector)}\s*\{{(?P<declarations>[^}}]*)\}}",
+            block,
+            re.DOTALL,
+        )
+        if match is not None:
+            return match.group("declarations")
+    raise AssertionError(selector)
+
+
+def _css_declarations(declarations):
+    return {
+        name.strip(): value.strip()
+        for declaration in declarations.split(";")
+        if ":" in declaration
+        for name, value in (declaration.split(":", 1),)
+    }
+
+
 def _contrast_ratio(foreground, background):
     def luminance(color):
         channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
@@ -325,13 +371,38 @@ def test_navigation_brand_text_overrides_the_legacy_span_color(client):
 
 
 def test_decision_detail_css_stacks_the_split_cover_and_fact_strip_on_narrow_screens(client):
-    """Decision detail has no sidebar to reorder: its cover and facts must stack naturally."""
+    """The 767px rules must beat the three-class desktop decision-detail selectors."""
     response = client.get("/static/css/silver-evidence-public.css")
     css = response.get_data(as_text=True)
+    mobile_blocks = _css_blocks(css, "@media (max-width: 767px)")
+    hero = _css_declarations(_css_rule_in_blocks(
+        mobile_blocks, ".public-shell .decision-detail .detail-hero__grid"
+    ))
+    facts = _css_declarations(_css_rule_in_blocks(
+        mobile_blocks, ".public-shell .decision-detail .detail-facts"
+    ))
+    fact_item = _css_declarations(_css_rule_in_blocks(
+        mobile_blocks, ".public-shell .decision-detail .detail-facts > div"
+    ))
+    desktop_fact_item = _css_declarations(_css_rule(
+        css, ".public-shell .decision-detail .detail-facts > div"
+    ))
+    desktop_fact_value = _css_declarations(_css_rule(
+        css, ".public-shell .decision-detail .detail-facts dd"
+    ))
 
     assert response.status_code == 200
-    assert ".detail-hero__grid { grid-template-columns: 1fr; }" in css
-    assert ".detail-facts { grid-template-columns: 1fr; }" in css
+    assert hero["grid-template-columns"] == "1fr"
+    assert facts["grid-template-columns"] == "1fr"
+    assert "!important" not in _css_rule_in_blocks(
+        mobile_blocks, ".public-shell .decision-detail .detail-hero__grid"
+    )
+    assert "!important" not in _css_rule_in_blocks(
+        mobile_blocks, ".public-shell .decision-detail .detail-facts"
+    )
+    assert fact_item["border-left"] == "0"
+    assert desktop_fact_item["min-width"] == "0"
+    assert desktop_fact_value["overflow-wrap"] == "anywhere"
 
 
 def test_decision_detail_css_numbers_primary_chapters(client):
