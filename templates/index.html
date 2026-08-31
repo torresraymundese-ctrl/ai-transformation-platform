@@ -36,9 +36,6 @@
           </div>
           <p class="home-audit-note">
             <span aria-hidden="true">✓</span> 基于已审核内容
-            {% if scenarios %}
-            · <a href="{{ url_for('public_catalog.scenario_detail', slug=scenarios[0].slug) }}">查看已发布场景</a>
-            {% endif %}
           </p>
         </div>
         <div class="story-product story-product--overview" data-product-surface="overview">

@@ -699,7 +699,7 @@ def test_rendered_server_links_follow_the_url_context_matrix(
     home = documents["public.home"]
     for chapter_id, href in (
         ("story-matching", f"/industries/{content['industry']['slug']}"),
-        ("story-purpose", f"/scenarios/{content['scenario']['slug']}"),
+        ("story-matching", f"/scenarios/{content['scenario']['slug']}"),
         ("story-roadmap", f"/service-packages/{content['service']['slug']}"),
         ("story-evidence", f"/cases/{content['case']['slug']}"),
         ("story-evidence", f"/resources/{content['resource']['slug']}"),
@@ -711,6 +711,16 @@ def test_rendered_server_links_follow_the_url_context_matrix(
         chapter = home.select_one(f'#{chapter_id}')
         assert chapter is not None
         assert chapter.select_one(f'a[href="{href}"]') is not None
+
+    purpose = home.select_one("#story-purpose")
+    assert purpose is not None
+    assert (
+        purpose.select_one(
+            f'a[href="/scenarios/{content["scenario"]["slug"]}"]'
+        )
+        is None
+    )
+    assert "查看已发布场景" not in purpose.get_text(" ", strip=True)
 
     policy = documents["public.assessment"].select_one("#privacy-policy-link")
     assert policy is not None and not policy.has_attr("href")
