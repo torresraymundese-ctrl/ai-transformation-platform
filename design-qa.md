@@ -1,34 +1,44 @@
-# Guided public experience design QA
+# Dark evidence homepage — blocking design QA
 
-## 1. Scope and evidence health
+## Scope and frozen target
 
-Audit scope: the five-chapter public homepage, scenario catalog, and manufacturing knowledge-assistant detail in a fresh deterministic local fixture. All eight saved browser captures were inspected after saving: no blank, loading, error, or anomalous crop state was accepted. Desktop captures used a 1440×1024 viewport (document client width 1425 with the browser scrollbar); the mobile capture used 390×844 (client width 375). Every captured viewport reported `scrollWidth === clientWidth`, so no page-level horizontal overflow was observed.
+- Frozen implementation base: `12ec7056a2cc1a952f5bec5ee7727ae2447fb318`.
+- Binding visual target: selected option 1, `C:/Users/zz/.codex/generated_images/01a03349-721a-7df2-b234-cd675d8d96d1/exec-adcdb983-d7e6-468e-ae5c-a847303e8c60.png`.
+- Scope: homepage only, exercised against a fresh deterministic SQLite/media fixture on `127.0.0.1:58443` with the Codex in-app Browser.
+- No production host, real database, external network, deployment surface, or full suite was used.
 
-## 2. Same-input Scale comparison
+## Same-input visual comparison
 
-The supplied Scale reference and the local purpose capture were opened together, then the five local chapter captures were opened together. The implementation takes the intended cues rather than cloning Scale: a dark task-first opening, unusually prominent product surface, restrained paper/graphite shifts, thin industrial borders, and editorial type scale. It remains recognizably this product through its Chinese task framing, actual published scenario data, platform navigation, and real internal routes.
+The selected reference and the fresh 1440×1024 implementation capture were inspected together in one image-comparison input. The 1024×900, 910×900, and 390×844 implementation captures were inspected together in a second input. The result preserves the selected direction at each responsive regime: black/white/electric-blue palette, editorial type scale, dark opening stage, right-weighted AI visual, low-radius thin-boundary components, large image crops, evidence/news sequence, and a quiet final conversion block.
 
-Strengths: the hero headline is decisive, the real product surface is the compositional counterweight, the five active progress states are clear, chapter spacing is consistently generous, generated art is correctly cropped as decorative imagery, and the scenario/detail screens continue the same grid and border language. The mobile screen stacks naturally and intentionally makes the chapter progress a horizontally scrollable local control rather than causing document overflow.
+No P0–P2 remained after recapture. The 1024 and 910 states retain a deliberate two-line heading and keep the fixed chapter rail outside both copy and artwork. The 390 state stacks the hero, keeps the chapter strip horizontally scrollable without causing page overflow, and preserves readable actions and evidence rows. A separate 320×844 boundary check reported `scrollWidth === clientWidth` and `scrollX=0` after an attempted horizontal scroll.
 
-P3 follow-up: the desktop chapter stage has substantial upper whitespace in chapters 2–5. It supports the editorial cadence but could be tightened after visual acceptance; it does not obscure content or interaction.
+The in-app Browser was set to the exact requested emulation states. Its PNG API captures the content surface rather than browser chrome/scrollbar gutter, so file pixels are respectively 1425×839, 1009×836, 895×834, and 375×811. At capture time the page itself reported exact `innerWidth`/`innerHeight` values of 1440×1024, 1024×900, 910×900, and 390×844, with `scrollWidth === clientWidth` in every state. This capture-surface difference is not document overflow.
 
-## 3. Findings and closure
+## Findings and closure
 
-| Severity | Screen/state | Finding | Closure |
+| Severity | State | Finding | Closure |
 |---|---|---|---|
-| P2 | Homepage purpose, desktop and mobile | The secondary `浏览 AI 场景` CTA inherited a paper background while its hero override made the text paper-colored, leaving the label visually absent. | Closed. Added RED regression `test_hero_secondary_action_keeps_a_visible_outline_label` (1 expected failure), made the hero outline background transparent, GREEN 1/1, then reran `tests/test_ui_foundations.py` (35 passed) and recaptured the purpose screen. |
-| P3 | Chapters 2–5 desktop | Large intentional upper whitespace may feel sparse on short laptop viewports. | Recorded for later visual-acceptance discussion; no usability, overflow, or information-loss evidence. |
+| P2 | Guided homepage content contract | Task 2 had moved industry/scenario links outside the chapters expected by the established URL matrix. | Closed in `a698f07`: restored published scenario evidence in the Hero and published industry/scenario links in matching; fresh scoped result `395 passed`. |
+| P2 | 1024/910/390 responsive states | The 910 rail overlapped the Hero artwork, the 1024 heading left a one-character final line, and mobile chapter labels collapsed into each other with a coarse scrollbar. | Closed in `620bc4a`: reserved rail space, corrected compact heading scale, and added unshrinking scrollbar-free mobile step slots; fresh UI responsibility result `39 passed`. |
+| P2 | Chapter 05 interaction | The very tall evidence chapter could not cross the observer's former 0.25 minimum, so its active state stayed on chapter 04 after navigation. | Closed in `ce026ae`: included a 0.05 observer threshold; fresh Node responsibility result `22 passed`, and Browser click proof showed matching hash/current/active state. |
+| P2 | 320px boundary | The root 20rem minimum created 15px of reachable page-level horizontal overflow. | Closed in `580a8ef`: root minimum is zero while children retain their own bounds; fresh UI responsibility result `39 passed`, Browser `scrollX=0`. |
+| P3 | Reference fidelity | The generated reference has slightly brighter abstract art and a duplicate-looking nav CTA; the implementation uses the approved darker local artwork and intentionally omits the duplicate root conversion action required by the navigation spec. | Accepted implementation distinction; no usability or information loss. |
 
-## 4. Combined UX and accessibility lenses
+## Interaction and accessibility evidence
 
-User goal: understand a defensible path from readiness to a scenario and begin assessment. The journey exposes a clear starting CTA, preserves published-only scenario information, labels deterministic output as `演示数据`, and offers a visible return path from detail to assessment. Native scroll, rapid scroll, reverse scroll, five chapter links, mobile menu open/Escape close, and browser find were exercised through the in-app browser. Native scrollbar dragging did not move in the available browser control surface and is therefore NOT PROVEN rather than inferred. No full WCAG conformance claim is made: no-JavaScript, media-query emulation, 200% zoom, and the complete native keyboard matrix require follow-up browser/environment coverage.
+- All five chapter controls reached their exact chapter IDs; chapter 05 finished with `hash`, current link, and active section all equal to `story-evidence`.
+- Fast downward and reverse scrolling updated the active chapter without wheel interception.
+- Hero and final assessment actions reached `/assessment`; scenario, service, verified case, and reviewed resource links reached their real local routes.
+- Mobile menu opened; Escape closed it and restored focus to its summary control. Its AI-scene link reached `/scenarios`.
+- Final CTA and footer were visible and unoverlapped at 1440, 1024, 910, and 390; console errors and warnings were both zero.
+- Native Tab traversal is **NOT PROVEN** because the in-app Browser key surface did not expose an observable focus advance. Escape behavior is proven.
+- Native reduced-motion emulation is **NOT PROVEN** in this Browser surface. The runtime test proves the reduced-motion branch remains static and does not create the observer.
+- Native 200% zoom is **NOT PROVEN** because repeated browser zoom keys did not change the observable viewport or device scale. A 720px half-width geometry proxy for a 1440px page passed without overflow, clipping, or action loss; it is recorded only as a proxy.
+- This is not a full WCAG conformance audit.
 
-## 5. Controller closure round 1
+## Evidence and cleanup
 
-The exact required ten-file pytest responsibility command was rerun with fresh basetemp `task6-final-scoped-011`, durable ignored log capture, and exit status. Result: `556 passed in 285.05s (0:04:45)`, exit 0. A new disposable `127.0.0.1:50992` fixture was launched for the dedicated native keyboard/scroll run and then cleaned up; its listener PID 21120 was stopped and the port was confirmed closed.
+Four viewport evidence PNGs are stored under `docs/design/evidence/`. The disposable browser tab was reset and closed. Exact fixture processes 23576 and 13616 were stopped; process count, listener count, and a direct TCP probe all independently reported zero/closed for `127.0.0.1:58443`.
 
-The in-app Browser session became unavailable before the dedicated native interaction actions could execute. Its required reconnection diagnostic reported zero available browser instances. Under the hard browser constraint no alternate automation surface was used. Therefore native scrollbar thumb drag and the Tab/Shift+Tab/Enter/Space/arrows/PageDown/200% matrix remain unproven, which blocks the completion gate.
-
-Controller supplemental evidence: a subsequent fresh fixture (`runtime-task6-controller-20260828-004`, 127.0.0.1:50993) was exercised in the user-specified visible Codex in-app Browser tab. The scenario filter path is now browser-proven: default 12 published scenarios; manufacturing + production + explore returned exactly `mfg_knowledge_assistant` and `共 1 个已发布场景`; marketing + collaborate returned zero and both empty-state messages plus reset; reset returned the default 12 with empty fields. Native CUA wheel scrolling changed Y 0 → 560 → 280. Pagination is not applicable because 12 is below the default 20 per page. This does not close the gate: CUA/DOM-CUA keypress and locator press did not move observed focus, Ctrl+Plus five times did not change the observable viewport, and the browser-owned scrollbar could not be located for native drag. These are NOT PROVEN, not product failures or passes.
-
-final result: blocked
+final result: passed
