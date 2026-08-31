@@ -35,5 +35,8 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { initializePublicReveal: initializePublicReveal };
   }
-  if (root && root.document) initializePublicReveal(root.document, root);
+  if (root) {
+    root.initializePublicReveal = initializePublicReveal;
+    if (root.document) initializePublicReveal(root.document, root);
+  }
 })(typeof window !== "undefined" ? window : null);

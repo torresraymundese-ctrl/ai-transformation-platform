@@ -23,11 +23,18 @@
 .public-shell .nav-inner { min-height: 4.5rem; }
 .public-shell .nav-logo .nav-brand-text { color: var(--ui-paper-000); }
 .public-shell .nav-brand-text strong { color: var(--ui-signal-blue); }
-.public-shell .nav-links a,
-.public-shell .mobile-navigation summary { color: var(--ui-silver-200); }
+.public-shell .nav-links a { color: var(--ui-silver-200); }
 .public-shell .nav-links a { position: relative; }
 .public-shell .nav-links a.active { box-shadow: inset 0 -2px 0 var(--ui-signal-blue); color: var(--ui-paper-000); }
 .public-shell .nav-cta { border: 1px solid var(--ui-signal-blue); color: var(--ui-paper-000); background: var(--ui-signal-blue); }
+
+.public-shell .mobile-navigation summary {
+  display: inline-flex;
+  min-inline-size: 2.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+  color: var(--ui-silver-200);
+}
 
 .public-shell .mobile-navigation-panel {
   border: 1px solid var(--ui-graphite-850);
