@@ -409,6 +409,29 @@ def test_resource_empty_states_keep_the_filtered_reset_route(client):
     assert filtered.select_one('[data-empty-state] a[href="/resources"]') is not None
 
 
+def test_single_published_resource_uses_a_full_width_reviewed_editorial_row(
+    admin_client, db
+):
+    draft = _create_resource(admin_client, db, slug="editorial-resource-row")
+    published = admin_client.post(
+        f"/admin/resources/{draft['id']}",
+        data=_edit_resource_form(db, draft["id"], action="publish"),
+    )
+    assert published.status_code == 302
+
+    document = BeautifulSoup(admin_client.get("/resources").data, "html.parser")
+    layout = document.select_one('[data-catalog-layout="editorial"]')
+    row = document.select_one('[data-resource-card] > article.editorial-result-row')
+
+    assert layout is not None
+    assert layout.get("data-catalog-width") == "full"
+    assert row is not None
+    assert row.select_one('[data-result-sequence]') is not None
+    assert row.select_one('h2 a.catalog-card-link[href="/resources/editorial-resource-row"]') is not None
+    assert row.select_one(".editorial-result-row__summary") is not None
+    assert row.select_one('dl.catalog-card-meta[data-resource-review]') is not None
+
+
 def test_resource_editor_is_choice_first_and_has_exact_schema(admin_client):
     response = admin_client.get("/admin/resources/new")
     assert response.status_code == 200

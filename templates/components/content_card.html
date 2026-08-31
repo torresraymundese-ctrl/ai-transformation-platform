@@ -1,19 +1,41 @@
-{% macro content_card(item, href, eyebrow='', heading_level=2) -%}
-<article class="catalog-card">
+{% macro content_card(item, href, eyebrow='', heading_level=2, sequence_label='', layout='card', metadata_kind='') -%}
+<article class="catalog-card{% if layout == 'editorial' %} editorial-result-row{% endif %}"{% if layout == 'editorial' %} data-result-layout="editorial" data-public-reveal{% endif %}>
+  {% if sequence_label %}<p class="editorial-result-row__sequence" data-result-sequence>{{ sequence_label }}</p>{% endif %}
+  <div class="editorial-result-row__body">
   {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
   {% if heading_level == 3 %}
     <h3><a class="catalog-card-link" href="{{ href }}">{{ item.title }}</a></h3>
   {% else %}
     <h2><a class="catalog-card-link" href="{{ href }}">{{ item.title }}</a></h2>
   {% endif %}
-  <p>{{ item.summary }}</p>
-  {% if item.industries is defined and item.departments is defined and item.maturity is defined %}
-  <dl class="catalog-card-meta">
+  <p class="editorial-result-row__summary">{{ item.summary }}</p>
+  </div>
+  {% if metadata_kind == 'scenario' %}
+  <dl class="catalog-card-meta editorial-result-row__meta" data-scenario-scope>
     <div><dt>行业</dt><dd>{{ item.industries|join('、') }}</dd></div>
     <div><dt>部门</dt><dd>{{ item.departments|join('、') }}</dd></div>
     <div><dt>成熟度</dt><dd>{{ item.maturity|join('、') }}</dd></div>
   </dl>
+  {% elif metadata_kind == 'industry' %}
+  <dl class="catalog-card-meta editorial-result-row__meta" data-industry-priority>
+    <div><dt>适用部门</dt><dd>{{ item.departments|join('、') }}</dd></div>
+    <div><dt>优先场景</dt><dd>{{ item.scenarios|map(attribute='title')|join('、') }}</dd></div>
+  </dl>
+  {% elif metadata_kind == 'service' %}
+  <dl class="catalog-card-meta editorial-result-row__meta" data-service-category>
+    <div><dt>交付类别</dt><dd>{{ item.category }}</dd></div>
+  </dl>
+  {% elif metadata_kind == 'case' %}
+  <dl class="catalog-card-meta editorial-result-row__meta" data-verification-status>
+    <div><dt>核验状态</dt><dd>{{ item.verification_label }}</dd></div>
+    <div><dt>核验时间</dt><dd>{{ item.verified_at }}</dd></div>
+  </dl>
+  {% elif metadata_kind == 'resource' %}
+  <dl class="catalog-card-meta editorial-result-row__meta" data-resource-review>
+    <div><dt>资源类型</dt><dd>{{ item.resource_type_label }}</dd></div>
+    <div><dt>审核范围</dt><dd>来源、版权与内容</dd></div>
+  </dl>
   {% endif %}
-  <span class="catalog-card-action" aria-hidden="true">查看详情</span>
+  <span class="catalog-card-action editorial-result-row__action" aria-hidden="true">查看详情</span>
 </article>
 {%- endmacro %}

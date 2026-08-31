@@ -5,9 +5,9 @@
 {% block title %}AI 场景目录{% endblock %}
 {% block analytics_page %}scenarios{% endblock %}
 {% block head %}<meta name="description" content="按行业、部门和成熟度浏览已发布的 AI 场景。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block main_attributes %} class="public-page public-scenarios"{% endblock %}
+{% block main_attributes %} class="public-page public-scenarios" data-page-family="catalog"{% endblock %}
 {% block content %}
-{{ page_header("AI 场景目录", "按行业、部门和成熟度浏览已发布的 AI 场景。") }}
+{{ page_header("AI 场景目录", "按行业、部门和成熟度浏览已发布的 AI 场景。", section_code="02 / SCENARIOS", art_url="/static/images/ui/public-industry-operations.webp") }}
 <section class="public-list">
   <div class="public-container">
     <div class="scenario-catalog-intro">
@@ -48,16 +48,16 @@
         {% if filters.industry or filters.department or filters.maturity or page.per_page != 20 %}<a class="btn btn-outline" href="/scenarios">清除筛选</a>{% endif %}
       </div>
     </form>
-    <div class="catalog-grid">
+    <div class="catalog-grid catalog-grid--editorial" data-catalog-layout="editorial">
       {% for scenario in page.items %}
       <div class="scenario-signal-row" data-scenario-code="{{ scenario.code }}">
-        {{ content_card(scenario, url_for('public_catalog.scenario_detail', slug=scenario.slug)) }}
+        {{ content_card(scenario, url_for('public_catalog.scenario_detail', slug=scenario.slug), sequence_label='%02d'|format(loop.index), layout='editorial', metadata_kind='scenario') }}
       </div>
       {% endfor %}
     </div>
     {% if not page.items %}{{ empty_state("没有符合条件的场景。", "/scenarios" if filters.industry or filters.department or filters.maturity or page.per_page != 20 else "") }}{% endif %}
     {{ pagination(page.page, page.total_pages, 'public_catalog.scenarios', {'industry': filters.industry, 'department': filters.department, 'maturity': filters.maturity, 'per_page': page.per_page}) }}
-    <p><a class="btn btn-primary" href="/assessment">免费评估</a></p>
+    <aside class="catalog-end-action" data-public-reveal><p>用已选筛选条件进入适配评估。</p><a class="btn btn-primary" href="/assessment">免费评估</a></aside>
   </div>
 </section>
 {% endblock %}

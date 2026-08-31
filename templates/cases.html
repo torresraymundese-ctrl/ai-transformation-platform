@@ -5,20 +5,21 @@
 {% block title %}已验证案例{% endblock %}
 {% block analytics_page %}cases{% endblock %}
 {% block head %}<meta name="description" content="浏览经真实性、授权、隐私与指标证据审核的企业 AI 实施案例。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block main_attributes %} class="public-page public-cases"{% endblock %}
+{% block main_attributes %} class="public-page public-cases" data-page-family="catalog"{% endblock %}
 {% block content %}
-{{ page_header("已验证案例", "仅展示已完成真实性、隐私与指标证据审核的 V2 案例。") }}
+{{ page_header("已验证案例", "仅展示已完成真实性、隐私与指标证据审核的 V2 案例。", section_code="04 / EVIDENCE", art_url="/static/images/ui/public-trust-evidence.webp") }}
 <section class="public-list">
   <div class="public-container">
-  <div class="catalog-grid">
+  <div class="catalog-grid catalog-grid--editorial" data-catalog-layout="editorial" data-catalog-width="full">
   {% for case in page.items %}
     <div data-case-card>
-      {{ content_card(case, url_for('public_catalog.case_detail', slug=case.slug), case.verification_label) }}
+      {{ content_card(case, url_for('public_catalog.case_detail', slug=case.slug), case.verification_label, sequence_label='%02d'|format(loop.index), layout='editorial', metadata_kind='case') }}
     </div>
   {% endfor %}
   </div>
   {% if not page.items %}{{ empty_state("暂无已验证案例。") }}{% endif %}
   {{ pagination(page.page, page.total_pages, 'public_catalog.cases_page', {'per_page': page.per_page}) }}
+  <aside class="catalog-end-action" data-public-reveal><p>从已核验的实施证据回到你的转型判断。</p><a class="btn btn-primary" href="/assessment">开始评估</a></aside>
   </div>
 </section>
 {% endblock %}

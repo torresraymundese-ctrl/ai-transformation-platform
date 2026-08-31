@@ -1,8 +1,16 @@
-{% macro page_header(title, summary, eyebrow='') -%}
-<header class="public-page-header">
-  {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
-  <h1>{{ title }}</h1>
-  <p>{{ summary }}</p>
+{% macro page_header(title, summary, eyebrow='', section_code='', art_url='', art_position='right') -%}
+<header class="public-page-header{% if art_url %} public-page-header--with-art{% endif %}"{% if art_position %} data-art-position="{{ art_position }}"{% endif %}>
+  <div class="public-page-header__copy">
+    {% if section_code %}<p class="public-page-header__code">{{ section_code }}</p>{% endif %}
+    {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
+    <h1>{{ title }}</h1>
+    <p>{{ summary }}</p>
+  </div>
+  {% if art_url %}
+  <div class="public-page-header__art" aria-hidden="true">
+    <img src="{{ art_url }}" alt="" width="1600" height="900" loading="eager">
+  </div>
+  {% endif %}
 </header>
 {%- endmacro %}
 

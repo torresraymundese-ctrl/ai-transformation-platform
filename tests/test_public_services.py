@@ -365,6 +365,13 @@ def test_service_list_uses_page_contract_shell_canonical_and_compatibility_redir
     projection = catalog.public_services(PageRequest(1, 20), NOW)
     assert tuple(item.code for item in projection.items) == tuple(SERVICE_MATURITY)
     assert len(document.select("[data-service-card]")) == len(SERVICE_MATURITY)
+    rows = document.select('[data-service-card] > article.editorial-result-row')
+    assert len(rows) == len(SERVICE_MATURITY)
+    assert all(row.select_one('[data-result-sequence]') is not None for row in rows)
+    assert all(row.select_one('h2 a.catalog-card-link[href]') is not None for row in rows)
+    assert all(row.select_one('.editorial-result-row__summary') is not None for row in rows)
+    assert all(row.select_one('dl.catalog-card-meta[data-service-category]') is not None for row in rows)
+    assert document.select_one('[data-catalog-layout="editorial"]') is not None
     assert document.select("[data-service-code]") == []
     for code in SERVICE_MATURITY:
         assert code not in response.get_data(as_text=True)

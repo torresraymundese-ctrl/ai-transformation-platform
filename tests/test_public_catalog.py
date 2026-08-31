@@ -348,9 +348,12 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
     assert document.select_one('#department[value="production"]') is not None
     assert document.select_one('#maturity option[selected][value="explore"]') is not None
 
-    cards = document.select('[data-scenario-code="mfg_knowledge_assistant"] > article.catalog-card')
-    assert len(cards) == 1
-    metadata = cards[0].select_one("dl.catalog-card-meta")
+    rows = document.select('[data-scenario-code="mfg_knowledge_assistant"] > article.editorial-result-row')
+    assert len(rows) == 1
+    assert rows[0].select_one('[data-result-sequence]') is not None
+    assert rows[0].select_one("h2 a.catalog-card-link[href]") is not None
+    assert rows[0].select_one(".editorial-result-row__summary") is not None
+    metadata = rows[0].select_one("dl.catalog-card-meta")
     assert metadata is not None
     assert [term.get_text(" ", strip=True) for term in metadata.select("dt")] == [
         "行业",
@@ -360,7 +363,7 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
     metadata_text = metadata.get_text(" ", strip=True)
     for published_label in ("制造业", "生产", "探索", "试点"):
         assert published_label in metadata_text
-    assert "mfg_knowledge_assistant" not in cards[0].get_text(" ", strip=True)
+    assert "mfg_knowledge_assistant" not in rows[0].get_text(" ", strip=True)
 
 
 def test_home_uses_guided_story_with_published_scenario_and_service(published_catalog, db):
@@ -599,12 +602,13 @@ def test_scenario_catalog_uses_signal_panel_and_editorial_rows(published_catalog
 
     panel = document.select_one('form.scenario-signal-panel[aria-label="筛选场景"]')
     assert panel is not None
-    rows = document.select("[data-scenario-code].scenario-signal-row > article.catalog-card")
+    rows = document.select("[data-scenario-code].scenario-signal-row > article.editorial-result-row")
     assert rows
     assert len(rows) == len(synthetic_page.items)
     assert synthetic_page.total != len(rows)
     assert panel.select_one("[data-result-count]").get_text(" ", strip=True) == f"共 {synthetic_page.total} 个已发布场景"
     assert rows[0].select_one("dl.catalog-card-meta") is not None
+    assert rows[0].select_one('[data-result-sequence]') is not None
     assert document.select_one('#industry[value="manufacturing"]') is not None
     assert document.select_one('#maturity option[selected][value="pilot"]') is not None
 

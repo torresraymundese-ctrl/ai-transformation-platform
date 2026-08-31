@@ -4,20 +4,20 @@
 {% block title %}行业 AI 应用方向{% endblock %}
 {% block analytics_page %}industries{% endblock %}
 {% block head %}<meta name="description" content="了解各行业 AI 场景的适用环节、准备条件和实施边界。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block main_attributes %} class="public-page public-industries"{% endblock %}
+{% block main_attributes %} class="public-page public-industries" data-page-family="catalog"{% endblock %}
 {% block content %}
-{{ page_header("行业 AI 应用方向", "了解各行业 AI 场景的适用环节、准备条件和实施边界。") }}
+{{ page_header("行业 AI 应用方向", "了解各行业 AI 场景的适用环节、准备条件和实施边界。", section_code="01 / INDUSTRIES", art_url="/static/images/ui/public-industry-operations.webp") }}
 <section class="public-list">
   <div class="public-container">
-    <div class="catalog-grid">
+    <div class="catalog-grid catalog-grid--editorial" data-catalog-layout="editorial">
       {% for industry in industries %}
       <div data-industry-code="{{ industry.code }}">
-        {{ content_card(industry, url_for('public_catalog.industry_detail', slug=industry.slug)) }}
+        {{ content_card(industry, url_for('public_catalog.industry_detail', slug=industry.slug), sequence_label='%02d'|format(loop.index), layout='editorial', metadata_kind='industry') }}
       </div>
       {% endfor %}
     </div>
     {% if not industries %}{{ empty_state("暂无已发布行业方向。") }}{% endif %}
-    <p><a class="btn btn-primary" href="/assessment">免费评估</a></p>
+    <aside class="catalog-end-action" data-public-reveal><p>从行业方向开始确认适配边界。</p><a class="btn btn-primary" href="/assessment">免费评估</a></aside>
   </div>
 </section>
 {% endblock %}

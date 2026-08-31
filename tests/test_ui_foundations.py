@@ -379,6 +379,29 @@ def test_catalog_lists_share_semantic_page_structure(client, path, page_class):
     assert main.select_one(".catalog-grid") is not None
 
 
+@pytest.mark.parametrize(
+    "path, page_class",
+    (
+        ("/industries", "public-industries"),
+        ("/scenarios", "public-scenarios"),
+        ("/service-packages", "public-services"),
+        ("/cases", "public-cases"),
+        ("/resources", "public-resources"),
+    ),
+)
+def test_silver_evidence_catalog_families_use_editorial_rows(client, path, page_class):
+    """Every catalog keeps the shared editorial shell even when no items are public."""
+    page = _page(client.get(path))
+    main = page.select_one(f"main#main-content.{page_class}")
+
+    assert main is not None
+    assert main["data-page-family"] == "catalog"
+    assert main.select_one('[data-catalog-layout="editorial"]') is not None
+    assert main.select_one(".public-page-header__copy h1") is not None
+    assert main.select_one('img[src^="/static/images/ui/"]') is not None
+    assert not main.select("[style]")
+
+
 def test_scenario_filters_keep_accessible_labels_and_selected_values(client):
     """Dropping a label, selected filter, or reset action would make filtering opaque."""
     page = _page(client.get("/scenarios?industry=manufacturing&maturity=pilot"))

@@ -151,6 +151,27 @@ def test_case_cutover_has_single_v2_owner_and_an_honest_empty_state(
     assert "/admin/cases/new" in admin_page.get_data(as_text=True)
 
 
+def test_single_published_case_uses_a_full_width_verified_editorial_row(admin_client, db):
+    draft = _create_case(admin_client, db, slug="editorial-case-row")
+    published = admin_client.post(
+        f"/admin/cases/{draft['id']}",
+        data=_edit_form(db, draft["id"], action="publish"),
+    )
+    assert published.status_code == 302
+
+    document = BeautifulSoup(admin_client.get("/cases").data, "html.parser")
+    layout = document.select_one('[data-catalog-layout="editorial"]')
+    row = document.select_one('[data-case-card] > article.editorial-result-row')
+
+    assert layout is not None
+    assert layout.get("data-catalog-width") == "full"
+    assert row is not None
+    assert row.select_one('[data-result-sequence]') is not None
+    assert row.select_one('h2 a.catalog-card-link[href="/cases/editorial-case-row"]') is not None
+    assert row.select_one(".editorial-result-row__summary") is not None
+    assert row.select_one('dl.catalog-card-meta[data-verification-status]') is not None
+
+
 def test_case_form_is_choice_first_and_exposes_all_seven_safe_block_types(admin_client):
     page = admin_client.get("/admin/cases/new")
     assert page.status_code == 200

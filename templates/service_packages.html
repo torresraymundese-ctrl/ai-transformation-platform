@@ -5,21 +5,21 @@
 {% block title %}服务包目录{% endblock %}
 {% block analytics_page %}services{% endblock %}
 {% block head %}<meta name="description" content="浏览已发布的企业 AI 转型服务包、交付周期和参考预算。"><link rel="canonical" href="{{ canonical }}">{% endblock %}
-{% block main_attributes %} class="public-page public-services"{% endblock %}
+{% block main_attributes %} class="public-page public-services" data-page-family="catalog"{% endblock %}
 {% block content %}
-{{ page_header("企业 AI 转型服务包", "从基础准备、试点验证到标准与集成交付，按实际需求选择。") }}
+{{ page_header("企业 AI 转型服务包", "从基础准备、试点验证到标准与集成交付，按实际需求选择。", section_code="03 / DELIVERY", art_url="/static/images/ui/public-delivery-system.webp") }}
 <section class="public-list">
   <div class="public-container">
-  <div class="catalog-grid">
+  <div class="catalog-grid catalog-grid--editorial" data-catalog-layout="editorial">
     {% for service in page.items %}
-    <div data-service-card>
-      {{ content_card(service, url_for('public_catalog.service_package_detail', slug=service.slug), service.category) }}
+    <div data-service-card data-service-category="{{ service.category }}">
+      {{ content_card(service, url_for('public_catalog.service_package_detail', slug=service.slug), service.category, sequence_label='%02d'|format(loop.index), layout='editorial', metadata_kind='service') }}
     </div>
     {% endfor %}
   </div>
   {% if not page.items %}{{ empty_state("暂无已发布服务包。") }}{% endif %}
   {{ pagination(page.page, page.total_pages, 'public_catalog.service_packages', {'per_page': page.per_page}) }}
-  <p><a class="btn btn-primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费评估</a></p>
+  <aside class="catalog-end-action" data-public-reveal><p>把交付边界带入一次可执行的适配讨论。</p><a class="btn btn-primary" href="/assessment" data-analytics-event="service_inquiry_clicked" data-analytics-source="service_packages">免费评估</a></aside>
   </div>
 </section>
 {% endblock %}
