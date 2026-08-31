@@ -131,22 +131,32 @@ def _css_declarations(css, selector):
 
 
 def _assert_decision_shell(document):
-    """Catch detail pages that drop the shared decision layout or assessment action."""
-    assert document.select_one("main#main-content.decision-detail") is not None
+    """Catch a decision page that loses its approved five-part reading structure."""
+    main = document.select_one('main#main-content.decision-detail[data-page-family="decision-detail"]')
+    assert main is not None
     assert len(document.select("main#main-content")) == 1
-    assert document.select_one(".detail-hero h1") is not None
-    assert document.select_one(".decision-main") is not None
-    assert document.select_one(
-        'aside.decision-summary[aria-labelledby="decision-summary-title"]'
-    ) is not None
-    assert document.select_one('.decision-summary a[href="/assessment"]') is not None
+    cover = main.select_one('.detail-hero.detail-hero--split')
+    assert cover is not None
+    assert cover.select_one("h1") is not None
+    assert cover.select_one('img[src^="/static/images/ui/"][alt=""]') is not None
+    assert main.select_one('[data-detail-facts]') is not None
+    chapters = main.select('.decision-document > [data-decision-chapter]')
+    assert len(chapters) == 5
+    assert [chapter["data-chapter-sequence"] for chapter in chapters] == [
+        "01", "02", "03", "04", "05",
+    ]
+    assert all(chapter.select_one(":scope > h2") is not None for chapter in chapters)
+    actions = main.select('[data-decision-final-action]')
+    assert len(actions) == 1
+    assert len(actions[0].select('[data-decision-primary-action][href="/assessment"]')) == 1
+    assert not main.select(".decision-summary")
 
 
 @pytest.mark.parametrize(
     "path, context_labels",
     (
-        ("/industries/manufacturing", ("适用部门", "企业规模", "优先场景")),
-        ("/scenarios/mfg-knowledge-assistant", ("适用行业", "相关部门", "适用痛点")),
+        ("/industries/manufacturing", ("适用部门", "企业规模")),
+        ("/scenarios/mfg-knowledge-assistant", ("适用行业", "相关部门", "适用痛点", "实施周期", "预算")),
     ),
 )
 def test_catalog_details_keep_verified_theme_context_and_numbered_sections(
@@ -160,13 +170,12 @@ def test_catalog_details_keep_verified_theme_context_and_numbered_sections(
     theme = themes[0]
     assert theme.select_one('.detail-breadcrumb[aria-label="面包屑"]') is not None
     assert theme.select_one(".detail-hero h1") is not None
-    context = theme.select_one("dl.detail-context")
+    context = theme.select_one("dl[data-detail-facts]")
     assert context is not None
     assert tuple(node.get_text(" ", strip=True) for node in context.select("dt")) == context_labels
 
-    main_sections = document.select(".decision-main > section:has(h2)")
-    assert main_sections
-    assert all("decision-section" in node.get("class", ()) for node in main_sections)
+    chapters = document.select(".decision-document > [data-decision-chapter]")
+    assert len(chapters) == 5
     assert len(document.select("main#main-content")) == 1
 
     if path.startswith("/scenarios/"):
@@ -180,83 +189,70 @@ def test_catalog_details_keep_verified_theme_context_and_numbered_sections(
         assert "mfg_knowledge_assistant" not in context_text
 
 
-def test_industry_detail_uses_real_decision_summary_and_return_link(published_catalog):
-    """Catch an industry detail that loses its published decision context or list return."""
+def test_industry_detail_keeps_truthful_context_and_terminal_return_link(published_catalog):
+    """Context remains in live facts while the list route stays available at the end."""
     document = page(published_catalog.get("/industries/manufacturing"))
 
     _assert_decision_shell(document)
-    summary = document.select_one(".decision-summary").get_text(" ", strip=True)
-    assert "适用部门" in summary
-    assert "优先场景" in summary
-    assert "周期" in summary
-    assert "预算" in summary
-    assert "评估后确认" in summary
-    assert document.select_one('.decision-summary a[href="/industries"]') is not None
+    facts = document.select_one("[data-detail-facts]").get_text(" ", strip=True)
+    assert "适用部门" in facts
+    assert "企业规模" in facts
+    final_action = document.select_one("[data-decision-final-action]")
+    assert final_action.select_one('a[href="/industries"]') is not None
 
 
-def test_scenario_detail_uses_real_decision_summary(published_catalog):
-    """Catch a scenario detail that substitutes unsupported decision claims for published fields."""
+def test_scenario_detail_keeps_truthful_facts_without_a_duplicate_sidebar(published_catalog):
+    """Published scenario context must not be replaced with unsupported decision claims."""
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
 
     _assert_decision_shell(document)
-    summary = document.select_one(".decision-summary").get_text(" ", strip=True)
-    assert "适用行业" in summary
-    assert "相关部门" in summary
-    assert "周期" in summary
-    assert "预算" in summary
-    assert "评估后确认" in summary or "周" in summary
-    assert "已评估" not in summary
-    assert "已覆盖" not in summary
-    assert document.select_one('.decision-summary a[href="/scenarios"]') is not None
+    facts = document.select_one("[data-detail-facts]").get_text(" ", strip=True)
+    assert "适用行业" in facts
+    assert "相关部门" in facts
+    assert "适用痛点" in facts
+    assert "已评估" not in facts
+    assert "已覆盖" not in facts
+    assert document.select_one('[data-decision-final-action] a[href="/scenarios"]') is not None
 
 
-def test_scenario_detail_composes_exactly_three_business_chapters(published_catalog):
-    """A storage-field section added back to the main column must break this contract."""
+def test_scenario_detail_composes_exactly_five_business_chapters(published_catalog):
+    """Adding a storage-field chapter or dropping a decision chapter must break this contract."""
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
-    chapters = document.select(".decision-main > .decision-section")
+    chapters = document.select(".decision-document > [data-decision-chapter]")
 
     assert [chapter.select_one(":scope > h2").get_text(" ", strip=True) for chapter in chapters] == [
-        "适用场景",
+        "问题与边界",
         "实施路径",
-        "关键输入、输出与风险",
+        "可衡量指标",
+        "风险与治理",
+        "匹配服务",
     ]
     for marker in SCENARIO_REQUIRED_SECTIONS:
         assert len(document.select(f'[data-content-section="{marker}"]')) == 1, marker
     assert document.select_one('.detail-theme [data-content-section="industries"]') is not None
     assert document.select_one('.detail-theme [data-content-section="departments"]') is not None
     assert document.select_one('.detail-theme [data-content-section="pains"]') is not None
-    assert document.select_one('.decision-summary [data-content-section="timeline"]') is not None
-    assert document.select_one('.decision-summary [data-content-section="budget"]') is not None
-    assert document.select('.decision-main [data-content-section="timeline"]') == []
-    assert document.select('.decision-main [data-content-section="budget"]') == []
+    assert document.select_one('[data-detail-facts] [data-content-section="timeline"]') is not None
+    assert document.select_one('[data-detail-facts] [data-content-section="budget"]') is not None
+    assert document.select('.decision-document [data-content-section="timeline"]') == []
+    assert document.select('.decision-document [data-content-section="budget"]') == []
 
 
-def test_scenario_summary_is_static_with_one_full_width_action_pair(published_catalog):
-    """Sticky, pill-shaped, duplicated, or raw-decimal summary actions must fail."""
+def test_scenario_has_one_terminal_assessment_action_pair(published_catalog):
+    """The final action is deliberate, accessible, and does not revive a sidebar."""
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
-    summaries = document.select("aside.decision-summary")
-    actions = summaries[0].select_one(":scope > .decision-summary-actions")
-    css = published_catalog.get("/static/css/public-pages.css").get_data(as_text=True)
+    actions = document.select("[data-decision-final-action]")
 
-    assert len(summaries) == 1
-    assert actions is not None
-    assert [link.get_text(" ", strip=True) for link in actions.select("a")] == [
+    assert len(actions) == 1
+    assert [link.get_text(" ", strip=True) for link in actions[0].select("a")] == [
         "获取适配建议",
         "返回场景列表",
     ]
-    assert [link.get("href") for link in actions.select("a")] == [
+    assert [link.get("href") for link in actions[0].select("a")] == [
         "/assessment",
         "/scenarios",
     ]
-    summary_rules = _css_declarations(css, ".public-scenario-detail .decision-summary")
-    action_rules = _css_declarations(css, ".decision-summary-actions .btn")
-    assert summary_rules["position"] == "static"
-    assert action_rules["width"] == "100%"
-    assert action_rules["border-radius"] == "var(--ui-radius-control)"
-    summary_text = summaries[0].get_text(" ", strip=True)
-    assert "50000.0" not in summary_text
-    assert "100000.0" not in summary_text
-    assert "¥5万" in summary_text
+    assert not document.select(".decision-summary")
 
 
 @pytest.mark.parametrize(
@@ -315,9 +311,7 @@ def test_scenario_summary_preserves_exact_published_budget_values(
         db.commit()
 
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
-    budget = document.select_one(
-        '.decision-summary [data-content-section="budget"] dd'
-    )
+    budget = document.select_one('[data-detail-facts] [data-content-section="budget"] dd')
 
     assert budget.get_text(" ", strip=True) == expected
 
@@ -613,16 +607,13 @@ def test_scenario_catalog_uses_signal_panel_and_editorial_rows(published_catalog
     assert document.select_one('#maturity option[selected][value="pilot"]') is not None
 
 
-def test_scenario_detail_uses_decision_cover_and_exact_three_chapters(published_catalog):
-    """Keep the decision cover while preserving the three published detail chapters."""
-    document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
-
-    assert document.select_one(".scenario-decision-cover h1") is not None
-    assert [h.get_text(" ", strip=True) for h in document.select(".decision-main > .decision-section > h2")] == [
-        "适用场景", "实施路径", "关键输入、输出与风险"
-    ]
-    assert len(document.select('[data-content-section="timeline"]')) == 1
-    assert len(document.select('[data-content-section="budget"]')) == 1
+def test_decision_details_use_split_cover_fact_strip_and_five_chapters(published_catalog):
+    """All decision families share the approved cover, facts, five chapters, and end action."""
+    for path in (
+        "/industries/manufacturing",
+        "/scenarios/mfg-knowledge-assistant",
+    ):
+        _assert_decision_shell(page(published_catalog.get(path)))
 
 
 @pytest.mark.parametrize("query", (
@@ -928,7 +919,7 @@ def _publish_all_governed_blocks(db):
             ContentBlock("metric", title="REVIEW-METRIC-TITLE", body_html="<p>REVIEW-METRIC-BODY</p>", settings={"value": "REVIEW-METRIC", "unit": "项"}),
             ContentBlock("steps", title="REVIEW-STEPS", body_html="<p>REVIEW-STEPS-BODY</p>", settings={"items": ("REVIEW-STEP-ONE", "REVIEW-STEP-TWO")}),
             ContentBlock("download", title="REVIEW-DOWNLOAD-TITLE", body_html="<p>REVIEW-DOWNLOAD-BODY</p>", settings={"label": "REVIEW-DOWNLOAD"}, media_asset_id=download_id),
-            ContentBlock("cta", title="REVIEW-CTA-TITLE", body_html="<p>REVIEW-CTA-BODY</p>", settings={"label": "REVIEW-CTA", "url": "/assessment", "style": "primary"}),
+            ContentBlock("cta", title="REVIEW-CTA-TITLE", body_html="<p>REVIEW-CTA-BODY</p>", settings={"label": "REVIEW-CTA", "url": "https://example.com/review-cta", "style": "primary"}),
         ),
     )
     lock_version = save_content_draft(row["id"], row["lock_version"], draft, actor="test-admin", now=NOW_DATETIME)
@@ -992,6 +983,9 @@ def test_formally_published_governed_block_types_render_through_safe_public_http
         assert document.select_one(
             f'[data-content-block="{block_type}"]{selector}'
         ) is not None
+        assert document.select_one(
+            f'[data-content-block="{block_type}"][data-content-block-presentation="{block_type}"]'
+        ) is not None
     for marker in (
         "REVIEW-HEADING", "REVIEW-HEADING-BODY", "REVIEW-RICH-TITLE", "REVIEW-RICH",
         "REVIEW-IMAGE", "REVIEW-IMAGE-BODY", "REVIEW-METRIC-TITLE", "REVIEW-METRIC",
@@ -1002,7 +996,12 @@ def test_formally_published_governed_block_types_render_through_safe_public_http
         assert marker.encode() in response.data
     assert document.select_one(f'img[src="/media/{image_id}/image"]')["alt"] == "REVIEW-ALT"
     assert document.select_one(f'a[href="/media/{download_id}/download"]') is not None
-    assert document.select_one('[data-content-block="cta"] a[href="/assessment"].btn-primary') is not None
+    external_cta = document.select_one(
+        '[data-content-block="cta"] a[href="https://example.com/review-cta"].btn-primary'
+    )
+    assert external_cta is not None
+    assert external_cta["target"] == "_blank"
+    assert set(external_cta["rel"]) == {"noopener", "noreferrer"}
 
 
 @pytest.mark.parametrize(("block_type", "mime"), (("image_text", "application/pdf"), ("download", "image/png")))

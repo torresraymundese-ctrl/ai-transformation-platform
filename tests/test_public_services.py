@@ -421,31 +421,28 @@ def test_every_public_service_detail_has_complete_delivery_structure_and_ctas(
         assert response.headers["Cache-Control"] == "private, no-store"
         assert document.select_one('body[data-analytics-page="services"]') is not None
         assert document.select_one("main#main-content.decision-detail") is not None
+        assert document.select_one('[data-page-family="decision-detail"]') is not None
         assert len(document.select("main#main-content")) == 1
         themes = document.select(".detail-theme")
         assert len(themes) == 1
         theme = themes[0]
         assert theme.select_one('.detail-breadcrumb[aria-label="面包屑"]') is not None
         assert theme.select_one(".detail-hero h1") is not None
-        context = theme.select_one("dl.detail-context")
+        context = theme.select_one("dl[data-detail-facts]")
         assert context is not None
         assert tuple(node.get_text(" ", strip=True) for node in context.select("dt")) == (
             "适用行业", "相关部门", "适用成熟度",
         )
-        assert document.select_one(".decision-main") is not None
-        main_sections = document.select(".decision-main > section:has(h2)")
-        assert main_sections
-        assert all("decision-section" in node.get("class", ()) for node in main_sections)
-        summary = document.select_one(
-            'aside.decision-summary[aria-labelledby="decision-summary-title"]'
-        )
-        assert summary is not None
-        assert "适用行业" in summary.get_text(" ", strip=True)
-        assert "相关部门" in summary.get_text(" ", strip=True)
-        assert "周期" in summary.get_text(" ", strip=True)
-        assert "预算" in summary.get_text(" ", strip=True)
-        assert summary.select_one('a[href="/assessment"]') is not None
-        assert summary.select_one('a[href="/service-packages"]') is not None
+        chapters = document.select(".decision-document > [data-decision-chapter]")
+        assert len(chapters) == 5
+        assert [chapter["data-chapter-sequence"] for chapter in chapters] == [
+            "01", "02", "03", "04", "05",
+        ]
+        assert not document.select(".decision-summary")
+        final_action = document.select_one("[data-decision-final-action]")
+        assert final_action is not None
+        assert final_action.select_one('[data-service-cta="primary"][href="/assessment"]') is not None
+        assert final_action.select_one('a[href="/service-packages"]') is not None
 
 
 @pytest.mark.parametrize("surface", ("list", "detail"))

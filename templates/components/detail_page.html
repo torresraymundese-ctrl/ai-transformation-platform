@@ -6,19 +6,27 @@
 </nav>
 {%- endmacro %}
 
-{% macro detail_hero(title, summary, eyebrow='') -%}
-<header class="detail-hero">
-  <div class="public-container">
-    {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
-    <h1>{{ title }}</h1>
-    <p>{{ summary }}</p>
+{% macro detail_hero(title, summary, eyebrow='', image_url='', image_alt='') -%}
+<header class="detail-hero{% if image_url %} detail-hero--split{% endif %}">
+  <div class="public-container detail-hero__grid">
+    <div class="detail-hero__copy">
+      {% if eyebrow %}<p class="public-eyebrow">{{ eyebrow }}</p>{% endif %}
+      <h1>{{ title }}</h1>
+      <p>{{ summary }}</p>
+    </div>
+    {% if image_url %}
+    <div class="detail-hero__media">
+      <img src="{{ image_url }}" alt="{{ image_alt }}">
+    </div>
+    {% endif %}
   </div>
 </header>
 {%- endmacro %}
 
-{% macro decision_item(label, value) -%}
-<div class="decision-item">
-  <dt>{{ label }}</dt>
-  <dd>{{ value }}</dd>
+{% macro detail_facts() -%}
+<div class="detail-facts-band">
+  <div class="public-container">
+    <dl class="detail-facts" data-detail-facts>{{ caller() }}</dl>
+  </div>
 </div>
 {%- endmacro %}

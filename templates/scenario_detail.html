@@ -1,20 +1,17 @@
 {% extends "base.html" %}
 {% from "components/content_blocks.html" import render as render_blocks %}
-{% from "components/detail_page.html" import breadcrumb, decision_item, detail_hero %}
+{% from "components/detail_page.html" import breadcrumb, detail_facts, detail_hero %}
 {% block title %}{{ scenario.seo_title }}{% endblock %}
 {% block analytics_page %}scenario_detail{% endblock %}
-{% block main_attributes %} class="public-page decision-detail public-scenario-detail"{% endblock %}
+{% block main_attributes %} class="public-page decision-detail public-scenario-detail" data-page-family="decision-detail"{% endblock %}
 {% block head %}<meta name="description" content="{{ scenario.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
 {% set timeline_value %}{% if scenario.timeline %}{% for minimum, maximum in scenario.timeline %}{{ minimum }}—{{ maximum }} 周{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
 {% set budget_value %}{% if scenario.budget %}{% for minimum, maximum in scenario.budget %}{{ format_cny_amount(minimum) }}—{{ format_cny_amount(maximum) }}{% if not loop.last %}；{% endif %}{% endfor %}{% else %}评估后确认{% endif %}{% endset %}
 <div class="detail-theme">
   <div class="public-container">{{ breadcrumb('/scenarios', '返回场景列表', scenario.title) }}</div>
-  <div class="scenario-decision-cover">
-    {{ detail_hero(scenario.title, scenario.summary, 'AI 场景') }}
-  </div>
-  <div class="public-container">
-    <dl class="detail-context">
+  {{ detail_hero(scenario.title, scenario.summary, 'AI SCENARIO / 01', '/static/images/ui/public-industry-operations.webp', '') }}
+  {% call detail_facts() %}
       <div data-content-section="industries">
         <dt>适用行业</dt>
         <dd><ul class="detail-context-values">{% for value in scenario.industries %}<li>{{ value }}</li>{% endfor %}</ul></dd>
@@ -27,77 +24,43 @@
         <dt>适用痛点</dt>
         <dd><ul class="detail-context-values">{% for value in scenario.pains %}<li>{{ value }}</li>{% endfor %}</ul></dd>
       </div>
-    </dl>
-  </div>
+      <div data-content-section="timeline"><dt>实施周期</dt><dd>{{ timeline_value }}</dd></div>
+      <div data-content-section="budget"><dt>预算</dt><dd>{{ budget_value }}</dd></div>
+  {% endcall %}
 </div>
-<div class="public-container decision-layout">
-  <div class="decision-main">
-    <section class="decision-section">
-      <h2>适用场景</h2>
-      <div class="decision-chapter-intro" data-content-section="problem-boundary">{{ render_blocks(scenario.blocks) }}</div>
-      <div class="decision-subsection-grid">
-        <section class="decision-subsection" data-content-section="maturity">
-          <h3>成熟度</h3>
-          <ul>{% for value in scenario.maturity %}<li>{{ value }}</li>{% endfor %}</ul>
-        </section>
-        <section class="decision-subsection" data-content-section="prerequisites">
-          <h3>前置条件</h3>
-          <ul>{% for value in scenario.prerequisites %}<li>{{ value }}</li>{% endfor %}</ul>
-        </section>
-      </div>
-    </section>
-
-    <section class="decision-section">
-      <h2>实施路径</h2>
-      <ol class="implementation-path" data-content-section="steps">
-        {% for value in scenario.steps %}<li>{{ value }}</li>{% endfor %}
-      </ol>
-      <section class="decision-subsection decision-supporting-group" data-content-section="services">
-        <h3>服务</h3>
-        <ul>{% for item in scenario.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul>
-      </section>
-    </section>
-
-    <section class="decision-section">
-      <h2>关键输入、输出与风险</h2>
-      <div class="decision-subsection-grid decision-evidence-grid">
-        <section class="decision-subsection" data-content-section="inputs">
-          <h3>关键输入</h3>
-          <ul>{% for value in scenario.inputs %}<li>{{ value }}</li>{% endfor %}</ul>
-        </section>
-        <section class="decision-subsection" data-content-section="outputs">
-          <h3>预期输出</h3>
-          <ul>{% for value in scenario.outputs %}<li>{{ value }}</li>{% endfor %}</ul>
-        </section>
-      </div>
-      <section class="decision-subsection" data-content-section="metrics">
-        <h3>评测指标</h3>
-        <ul class="decision-evidence-rows">{% for metric in scenario.metrics %}<li><strong>{{ metric.label }}</strong><span>{{ metric.value }}</span></li>{% endfor %}</ul>
-      </section>
-      <section class="decision-subsection decision-risk-group" data-content-section="risks">
-        <h3>风险与注意事项</h3>
-        <ul class="decision-evidence-rows">{% for risk in scenario.risks %}<li><strong>{{ risk.label }}</strong><span>{{ risk.description }}</span></li>{% endfor %}</ul>
-      </section>
-      {% if scenario.resources %}
-      <section class="decision-subsection" data-content-section="related-resources">
-        <h3>相关资源</h3>
-        <ul>{% for item in scenario.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul>
-      </section>
-      {% endif %}
-    </section>
-  </div>
-  <aside class="decision-summary" aria-labelledby="decision-summary-title">
-    <h2 id="decision-summary-title">决策摘要</h2>
-    <dl>
-      {{ decision_item('适用行业', scenario.industries|join('、')) }}
-      {{ decision_item('相关部门', scenario.departments|join('、')) }}
-      <div class="decision-item" data-content-section="timeline"><dt>周期</dt><dd>{{ timeline_value }}</dd></div>
-      <div class="decision-item" data-content-section="budget"><dt>预算</dt><dd>{{ budget_value }}</dd></div>
-    </dl>
-    <div class="decision-summary-actions">
-      <section data-content-section="assessment-cta"><a class="btn btn-primary" href="/assessment">获取适配建议</a></section>
-      <a class="btn btn-outline" href="/scenarios">返回场景列表</a>
+<div class="public-container decision-document">
+  <section class="decision-chapter" data-decision-chapter data-chapter-sequence="01" data-public-reveal>
+    <p class="decision-chapter__sequence">01</p><p class="decision-chapter__eyebrow">ISSUE &amp; BOUNDARY</p><h2>问题与边界</h2>
+    <section class="decision-chapter-intro" data-content-section="problem-boundary">{{ render_blocks(scenario.blocks) }}</section>
+    <div class="decision-subsection-grid">
+      <section class="decision-subsection" data-content-section="maturity"><h3>成熟度</h3><ul>{% for value in scenario.maturity %}<li>{{ value }}</li>{% endfor %}</ul></section>
+      <section class="decision-subsection" data-content-section="prerequisites"><h3>前置条件</h3><ul>{% for value in scenario.prerequisites %}<li>{{ value }}</li>{% endfor %}</ul></section>
     </div>
-  </aside>
+  </section>
+  <section class="decision-chapter" data-decision-chapter data-chapter-sequence="02" data-public-reveal>
+    <p class="decision-chapter__sequence">02</p><p class="decision-chapter__eyebrow">IMPLEMENTATION PATH</p><h2>实施路径</h2>
+    <ol class="decision-path" data-content-section="steps">{% for value in scenario.steps %}<li>{{ value }}</li>{% endfor %}</ol>
+  </section>
+  <section class="decision-chapter" data-decision-chapter data-chapter-sequence="03" data-public-reveal>
+    <p class="decision-chapter__sequence">03</p><p class="decision-chapter__eyebrow">MEASURABLE INDICATORS</p><h2>可衡量指标</h2>
+    <div class="decision-subsection-grid decision-evidence-grid">
+      <section class="decision-subsection" data-content-section="inputs"><h3>关键输入</h3><ul>{% for value in scenario.inputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
+      <section class="decision-subsection" data-content-section="outputs"><h3>预期输出</h3><ul>{% for value in scenario.outputs %}<li>{{ value }}</li>{% endfor %}</ul></section>
+    </div>
+    <section class="decision-subsection" data-content-section="metrics"><h3>评测指标</h3><ul class="decision-evidence-rows">{% for metric in scenario.metrics %}<li><strong>{{ metric.label }}</strong><span>{{ metric.value }}</span></li>{% endfor %}</ul></section>
+  </section>
+  <section class="decision-chapter" data-decision-chapter data-chapter-sequence="04" data-public-reveal>
+    <p class="decision-chapter__sequence">04</p><p class="decision-chapter__eyebrow">RISK &amp; GOVERNANCE</p><h2>风险与治理</h2>
+    <section class="decision-subsection decision-risk-group" data-content-section="risks"><h3>风险与注意事项</h3><ul class="decision-governance-table">{% for risk in scenario.risks %}<li><strong>{{ risk.label }}</strong><span>{{ risk.description }}</span></li>{% endfor %}</ul></section>
+  </section>
+  <section class="decision-chapter" data-decision-chapter data-chapter-sequence="05" data-public-reveal>
+    <p class="decision-chapter__sequence">05</p><p class="decision-chapter__eyebrow">MATCHING SERVICES</p><h2>匹配服务</h2>
+    <section class="decision-subsection decision-supporting-group" data-content-section="services"><h3>服务</h3><ul>{% for item in scenario.services %}<li>{{ item.public_name }}</li>{% endfor %}</ul></section>
+    {% if scenario.resources %}<section class="decision-subsection" data-content-section="related-resources"><h3>相关资源</h3><ul>{% for item in scenario.resources %}<li data-related-kind="resource"><a href="{{ url_for('public_catalog.resource_detail', slug=item.slug) }}">{{ item.title }}</a></li>{% endfor %}</ul></section>{% endif %}
+    <section class="decision-final-action" data-decision-final-action>
+      <div><p class="public-eyebrow">NEXT DECISION</p><h3>确认场景的适配路径</h3></div>
+      <div class="decision-final-action__links"><section data-content-section="assessment-cta"><a class="btn btn-primary" data-decision-primary-action href="/assessment">获取适配建议</a></section><a class="btn btn-outline" href="/scenarios">返回场景列表</a></div>
+    </section>
+  </section>
 </div>
 {% endblock %}

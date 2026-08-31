@@ -270,14 +270,14 @@ def test_footer_has_no_inline_layout_styles(client):
     ("/industries/manufacturing", "/scenarios/mfg-knowledge-assistant"),
 )
 def test_decision_cta_accessible_name_matches_its_visible_label(client, db, path):
-    """A replacement aria-label must not make the CTA name differ from its visible text."""
+    """The terminal assessment action keeps its visible accessible name."""
     db.execute(
         "UPDATE content_items SET status='published', published_at='2026-08-24 10:00:00' "
         "WHERE entry_type IN ('industry', 'scenario') AND status='draft'"
     )
     db.commit()
     page = _page(client.get(path))
-    cta = page.select_one('.decision-summary a[href="/assessment"]')
+    cta = page.select_one('[data-decision-primary-action][href="/assessment"]')
 
     assert cta is not None
     assert cta.get_text(" ", strip=True) == "获取适配建议"
@@ -324,27 +324,26 @@ def test_navigation_brand_text_overrides_the_legacy_span_color(client):
     assert ".nav-brand-text strong { color: var(--ui-blue-600); }" in css
 
 
-def test_decision_detail_css_keeps_the_summary_before_content_on_narrow_screens(client):
-    """Catch a narrow decision layout that leaves the summary after the main content."""
-    response = client.get("/static/css/public-pages.css")
+def test_decision_detail_css_stacks_the_split_cover_and_fact_strip_on_narrow_screens(client):
+    """Decision detail has no sidebar to reorder: its cover and facts must stack naturally."""
+    response = client.get("/static/css/silver-evidence-public.css")
     css = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert ".decision-layout { grid-template-columns: 1fr; }" in css
-    assert ".decision-summary { position: static; grid-row: 1; }" in css
-    assert ".decision-main { grid-row: 2; }" in css
+    assert ".detail-hero__grid { grid-template-columns: 1fr; }" in css
+    assert ".detail-facts { grid-template-columns: 1fr; }" in css
 
 
 def test_decision_detail_css_numbers_primary_chapters(client):
     """Dropping the chapter counter would remove the report-like decision hierarchy."""
-    response = client.get("/static/css/public-pages.css")
+    response = client.get("/static/css/silver-evidence-public.css")
     css = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert ".decision-main { counter-reset: decision-section; }" in css
-    assert ".decision-section > h2::before" in css
-    assert "counter-increment: decision-section;" in css
-    assert "counter(decision-section, decimal-leading-zero)" in css
+    assert ".decision-document { counter-reset: decision-chapter; }" in css
+    assert ".decision-detail [data-decision-chapter]" in css
+    assert ".decision-chapter__sequence" in css
+    assert "font-variant-numeric: tabular-nums;" in css
 
 
 def test_mobile_sticky_cta_css_reserves_its_compact_fixed_row(client):
