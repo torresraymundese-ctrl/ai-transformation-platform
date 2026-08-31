@@ -129,3 +129,21 @@ continue to own their normal minimum sizes.
 - Ledger: duplicate tail records were consolidated with `apply_patch`; preserved history now ends in one full-plan re-review/fix2 gate.
 - Required same-input comparison: selected reference + desktop evidence sheet, then 1024 + 910 + mobile sheets. All four expose Hero, positioning/three capabilities, applications, proof/case, news, final CTA, and footer; no horizontal overflow, overlap, bad crop, broken asset, or new P0—P2 was found. Segment overlap remains visibly and explicitly an anchor-by-anchor evidence sheet rather than a seamless page claim.
 - Cleanup: controller reset/closed the in-app Browser; exact PIDs `7356`/`4572` stopped; `remaining_count=0`, `listener_count=0`, `port_open=False` on `127.0.0.1:52537`; all 37 `fix2-*.raw` captures and the temporary assembly helper were removed after validation.
+
+## Full-plan review Fix round 3/5 — bind DOM ownership and active state
+
+- Review base/HEAD: `84dd24bc8556c8cd58d3f3a3d600ed64d65ae340`.
+- Reviewer finding verified: `.home-positioning` was nested in `story-assessment` and applications in `story-evidence`, while the binding spec assigns them to `story-purpose` and `story-roadmap`; `story-evidence` must begin with proof.
+- TDD RED: the new BeautifulSoup ownership contract failed at `story-purpose > .home-positioning`: `1 failed in 1.27s`, exit `1`.
+- Minimal DOM GREEN: moved only existing section boundaries; copy, links, class names, IDs, visual order, and product data remained unchanged. Exact test: `1 passed in 1.11s`, exit `0`; the updated asset-parent pair: `2 passed in 1.61s`, exit `0`.
+- Fresh DOM responsibility: homepage/UI/navigation `350 passed in 170.94s`, exit `0`; app/guided Node `19 passed`, syntax and diff checks exit `0`.
+- DOM code/test commit: `9eb57070e391cf162ad8115f42736503cb076f1b` (`fix: align homepage story chapter ownership`), exactly `templates/index.html`, `tests/test_public_catalog.py`, and `tests/test_ui_foundations.py`.
+- Fresh Browser residual: with the corrected boundaries, the central `-35%/-35%` observer band still activated the next short chapter at desktop positioning/assessment/matching anchors.
+- Active-state RED: guided runtime expected the upper-band observer and produced `14 passed, 1 failed`, exit `1`, on the old root margin.
+- Active-state GREEN: `-15% 0px -65% 0px` forms an upper 20% observer band without wheel/touch/keyboard interception. App/guided Node `19 passed`, affected Python `3 passed`, JS syntax and diff checks exit `0`; long evidence, reduced motion, reverse scroll, and no-wheel coverage remain green.
+- Active-state code/test commit: `ea470aeef75271e8e7fb4103cf1756593e3848a5` (`fix: align homepage chapter activation band`), exactly `static/js/guided_story.js` and `tests/js/guided_story_runtime.test.js`.
+- Fresh fixture: `.superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-browser-fix3-20260831-001`, `127.0.0.1:57561`, launcher/listener PIDs `27212`/`11788`; four required route probes returned 200.
+- Browser active matrix: at 1440, 1024, 910, and 390, Hero/positioning → purpose, capability 01 → assessment, capability 02 → matching, capability 03/applications → roadmap, and proof/news/final/footer → evidence. No chapter remained one step ahead.
+- Fresh evidence sheets use eight 1:1 Browser segments at desktop/1024/910 and ten at mobile, separated only by 12px `#0b0f15`: desktop `1425×6796`, 2,790,060 bytes, SHA-256 `f5fe56d41a166278dfd6dd84d7ae839babbdb600a23a0c1ec0383191a295c64c`; 1024 `1009×6772`, 2,235,090 bytes, `b03eec9037985a42a554c3578a3acf0cff6a83dc8826595b4abf0c981b38cdef`; 910 `895×6756`, 2,125,094 bytes, `51a716ed56abc6a072384688095d837eb753578f035d3462b156c3bcc0442821`; mobile `375×8218`, 1,246,738 bytes, `47f9bd3440955deb348b6d91f17bcca4a877172ca8d6ad861a15a71a994a3dab`.
+- Required same-input comparison: selected reference + fresh desktop sheet, then fresh 1024 + 910 + mobile sheets. Controller and implementer both inspected the complete journey; no new P0—P2, overlap, bad crop, broken asset, or ownership/active mismatch remained.
+- Cleanup: controller reset/closed the in-app Browser; exact PIDs `27212`/`11788` stopped; `remaining_count=0`, `listener_count=0`, `port_open=False` on `127.0.0.1:57561`; all 40 raw captures and the temporary assembly helper were removed after validation.
