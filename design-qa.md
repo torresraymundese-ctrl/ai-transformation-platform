@@ -4,12 +4,12 @@
 
 - Frozen implementation base: `12ec7056a2cc1a952f5bec5ee7727ae2447fb318`.
 - Binding visual target: selected option 1, `C:/Users/zz/.codex/generated_images/01a03349-721a-7df2-b234-cd675d8d96d1/exec-adcdb983-d7e6-468e-ae5c-a847303e8c60.png`.
-- Scope: homepage only, exercised against a fresh deterministic SQLite/media fixture on `127.0.0.1:58443` with the Codex in-app Browser.
+- Scope: homepage only, exercised against a fresh deterministic SQLite/media fixture on `127.0.0.1:60052` with the Codex in-app Browser.
 - No production host, real database, external network, deployment surface, or full suite was used.
 
 ## Same-input visual comparison
 
-The selected reference and the fresh 1440×1024 implementation capture were inspected together in one image-comparison input. The 1024×900, 910×900, and 390×844 implementation captures were inspected together in a second input. The result preserves the selected direction at each responsive regime: black/white/electric-blue palette, editorial type scale, dark opening stage, right-weighted AI visual, low-radius thin-boundary components, large image crops, evidence/news sequence, and a quiet final conversion block.
+The selected reference and the fresh post-Fix1 1440×1024 implementation capture were inspected together in one image-comparison input. The post-Fix1 1024×900, 910×900, and 390×844 implementation captures were inspected together in a second input. The result preserves the selected direction at each responsive regime: black/white/electric-blue palette, editorial type scale, dark opening stage, right-weighted AI visual, low-radius thin-boundary components, large image crops, evidence/news sequence, and a quiet final conversion block. The Hero now contains exactly one action and a plain audited-content note, with no scenario catalog entry.
 
 No P0–P2 remained after recapture. The 1024 and 910 states retain a deliberate two-line heading and keep the fixed chapter rail outside both copy and artwork. The 390 state stacks the hero, keeps the chapter strip horizontally scrollable without causing page overflow, and preserves readable actions and evidence rows. A separate 320×844 boundary check reported `scrollWidth === clientWidth` and `scrollX=0` after an attempted horizontal scroll.
 
@@ -19,7 +19,7 @@ The in-app Browser was set to the exact requested emulation states. Its PNG API 
 
 | Severity | State | Finding | Closure |
 |---|---|---|---|
-| P2 | Guided homepage content contract | Task 2 had moved industry/scenario links outside the chapters expected by the established URL matrix. | Closed in `a698f07`: restored published scenario evidence in the Hero and published industry/scenario links in matching; fresh scoped result `395 passed`. |
+| P2 | Hero catalog-entry boundary | The first Task 4 evidence round exposed a published scenario link in `story-purpose`, conflicting with the binding one-action Hero and later-chapter catalog-entry contract. | Closed in `e0e3619`: the Hero is again a non-interactive `基于已审核内容` note; the scenario URL contract now points to `story-matching` and explicitly forbids a Hero scenario href/label. Fresh scoped result `395 passed`. |
 | P2 | 1024/910/390 responsive states | The 910 rail overlapped the Hero artwork, the 1024 heading left a one-character final line, and mobile chapter labels collapsed into each other with a coarse scrollbar. | Closed in `620bc4a`: reserved rail space, corrected compact heading scale, and added unshrinking scrollbar-free mobile step slots; fresh UI responsibility result `39 passed`. |
 | P2 | Chapter 05 interaction | The very tall evidence chapter could not cross the observer's former 0.25 minimum, so its active state stayed on chapter 04 after navigation. | Closed in `ce026ae`: included a 0.05 observer threshold; fresh Node responsibility result `22 passed`, and Browser click proof showed matching hash/current/active state. |
 | P2 | 320px boundary | The root 20rem minimum created 15px of reachable page-level horizontal overflow. | Closed in `580a8ef`: root minimum is zero while children retain their own bounds; fresh UI responsibility result `39 passed`, Browser `scrollX=0`. |
@@ -39,6 +39,6 @@ The in-app Browser was set to the exact requested emulation states. Its PNG API 
 
 ## Evidence and cleanup
 
-Four viewport evidence PNGs are stored under `docs/design/evidence/`. The disposable browser tab was reset and closed. Exact fixture processes 23576 and 13616 were stopped; process count, listener count, and a direct TCP probe all independently reported zero/closed for `127.0.0.1:58443`.
+Four post-Fix1 viewport evidence PNGs are stored under `docs/design/evidence/`. The disposable browser tab was reset and closed. Exact fixture processes 26740 and 26500 were stopped; process count, listener count, and a direct TCP probe all independently reported zero/closed for `127.0.0.1:60052`.
 
 final result: passed

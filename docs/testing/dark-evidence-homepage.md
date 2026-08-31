@@ -8,9 +8,10 @@ Frozen implementation base: `12ec7056a2cc1a952f5bec5ee7727ae2447fb318`
 | Commit | Exact scope | Reason |
 |---|---|---|
 | `a698f07` | `templates/index.html` | Restore published industry/scenario links to the guided chapter URL matrix. |
-| `620bc4a` | `static/css/dark_evidence_home.css`, `tests/test_ui_foundations.py` | Close 1024/910 rail/title and 390 chapter-strip responsive gaps. |
+| `620bc4a` | `static/css/dark-evidence-home.css`, `tests/test_ui_foundations.py` | Close 1024/910 rail/title and 390 chapter-strip responsive gaps. |
 | `ce026ae` | `static/js/guided_story.js`, `tests/js/guided_story_runtime.test.js` | Activate the tall chapter 05 at a reachable observer threshold. |
-| `580a8ef` | `static/css/dark_evidence_home.css`, `tests/test_ui_foundations.py` | Remove reachable document overflow at 320px. |
+| `580a8ef` | `static/css/dark-evidence-home.css`, `tests/test_ui_foundations.py` | Remove reachable document overflow at 320px. |
+| `e0e3619` | `templates/index.html`, `tests/test_content_navigation.py` | Keep the Hero free of catalog entry links and bind the published scenario entry to matching. |
 
 All commits were made with explicit pathspecs. Pre-existing Task 12 dirty paths were preserved and excluded.
 
@@ -22,10 +23,10 @@ All Python runs used the assigned interpreter, command-scoped offline dependenci
 $env:PYTHONPATH=(Resolve-Path '.superpowers\sdd\2026-08-24-content-catalog-publishing\local-deps').Path
 $py='D:\Codex干活\企业AI转型平台2.0升级\V0.2-server-snapshot-20260819\.venv\Scripts\python.exe'
 
-& $py -m pytest tests/test_ui_foundations.py tests/test_public_catalog.py tests/test_content_navigation.py tests/test_smoke.py tests/test_security_gaps.py tests/test_validation_and_errors.py -q -p no:cacheprovider --basetemp .superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-guided-links-green-008
+& $py -m pytest tests/test_ui_foundations.py tests/test_public_catalog.py tests/test_content_navigation.py tests/test_smoke.py tests/test_security_gaps.py tests/test_validation_and_errors.py -q -p no:cacheprovider --basetemp .superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-fix1-final-scoped-021
 ```
 
-Result: `395 passed in 216.40s`, exit `0`. The preceding genuine RED was `1 failed, 394 passed`; its exact failure was `tests/test_content_navigation.py::test_rendered_server_links_follow_the_url_context_matrix`.
+Fix round 1 result: `395 passed in 206.26s`, exit `0`. Its preceding exact RED updated the URL matrix first and failed because `story-purpose` still contained the fixture scenario href: `1 failed in 1.83s`, exit `1`. The minimal Hero correction then produced `1 passed in 1.50s`, exit `0`, before this responsibility run.
 
 Responsive TDD evidence:
 
@@ -53,13 +54,13 @@ No full suite was run. The run did not access the network or install/update depe
 
 ## Disposable fixture
 
-- Root: `.superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-browser-20260831-001`
+- Root: `.superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-browser-fix1-20260831-001`
 - Database/media: `platform.db` and an isolated media directory under that root.
 - Manifest: the root's `manifest.json`; 12 published scenarios, 6 services, 4 industries, one verified case, one reviewed resource, and explicitly deterministic demonstration data.
-- Address: `127.0.0.1:58443` only.
-- Launcher/listener PIDs: 13616/23576.
+- Address: `127.0.0.1:60052` only.
+- Launcher/listener PIDs: 26500/26740.
 - Interpreter: Python 3.12.13; Flask 3.1.3; Werkzeug 3.1.8; beautifulsoup4 4.15.0; Pillow 12.3.0; pypdf 6.16.2.
-- Route probes before QA: `/` 200, `/assessment` 200, `/scenarios` 200, `/scenarios/mfg-knowledge-assistant` 200.
+- Route probes before QA: `/` 200 (14244 bytes), `/assessment` 200 (8158), `/scenarios` 200 (13901), `/scenarios/mfg-knowledge-assistant` 200 (8866).
 
 ## Exact viewport evidence
 
@@ -67,16 +68,16 @@ The in-app Browser used exact requested emulation states. PNGs contain the page 
 
 | Requested viewport | PNG | PNG pixels | SHA-256 |
 |---|---|---:|---|
-| 1440×1024 | `docs/design/evidence/2026-08-28-dark-evidence-home-desktop.png` | 1425×839 | `65164cc4ce06a72b75d3c0d168f4fe4044ab51ad5856c59a33af80553727c00b` |
-| 1024×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-1024.png` | 1009×836 | `ecc3bc61cd1965eaf5706ca3b51cd98e1e09dc13aa1da71ee365e8b14982c754` |
-| 910×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-910.png` | 895×834 | `754de9157b8d62f59a84f5dcb1b022e8b4ae327eb458c382dd27e82d198a734b` |
-| 390×844 | `docs/design/evidence/2026-08-28-dark-evidence-home-mobile.png` | 375×811 | `0e0f74f56b496506a1d7645da9c81010bed8e823e8f5a4affef93bec4644afdc` |
+| 1440×1024 | `docs/design/evidence/2026-08-28-dark-evidence-home-desktop.png` | 1425×839 | `bd91e2aa6e66a6dd980d589cc24710cbed9e64f7d2d732ed30bb578d11cf1198` |
+| 1024×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-1024.png` | 1009×836 | `bc28677ac9fb33340a21b5a719b77868ee79f0f59138da9ed707dd7774a69c5b` |
+| 910×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-910.png` | 895×834 | `90a1d6795d0b16ce4d3fa573f586de7fc27e4c133dfcdeded59de247ec501384` |
+| 390×844 | `docs/design/evidence/2026-08-28-dark-evidence-home-mobile.png` | 375×811 | `9b7b0c15aaed6703a61f425f5e2c3c4b93c4d0d75d607e21482a439b13402616` |
 
 A 320×844 boundary pass additionally reported `innerWidth=320`, `clientWidth=305`, `scrollWidth=305`, and `scrollX=0` after an attempted horizontal scroll.
 
 ## Visual comparison result
 
-The selected option-1 reference and final 1440 implementation capture were opened together in one comparison input. The 1024, 910, and mobile captures were opened together in a second input. No P0–P2 remained: typography, chapter rhythm, art crop, capability bands, application image, evidence/news region, final CTA, and footer form a consistent black/white/electric-blue system across all regimes. The approved local artwork is darker than the generated reference; omission of a duplicate nav CTA follows the binding interaction spec and is recorded as an accepted P3 distinction.
+The selected option-1 reference and fresh post-Fix1 1440 implementation capture were opened together in one comparison input. The fresh 1024, 910, and mobile captures were opened together in a second input. No P0–P2 remained: the Hero has its required single assessment action and non-interactive audit note; typography, chapter rhythm, art crop, capability bands, application image, evidence/news region, final CTA, and footer form a consistent black/white/electric-blue system across all regimes. The approved local artwork is darker than the generated reference; omission of a duplicate nav CTA follows the binding interaction spec and is recorded as an accepted P3 distinction.
 
 ## Browser interaction matrix
 
@@ -97,7 +98,7 @@ This is a responsive and interaction QA record, not a full WCAG conformance audi
 
 ## Cleanup
 
-The Browser viewport was reset and the disposable tab closed. Only the exact fixture process IDs were stopped. Final cleanup checks reported:
+The Browser viewport was reset and the disposable tab closed. Only exact fresh-fixture PIDs 26740 and 26500 were stopped. Final cleanup checks for `127.0.0.1:60052` reported:
 
 ```text
 remaining_count=0
