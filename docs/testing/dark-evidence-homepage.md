@@ -52,32 +52,36 @@ node --test tests/js/app_runtime.test.js tests/js/guided_story_runtime.test.js t
 
 No full suite was run. The run did not access the network or install/update dependencies.
 
+Fix round 2 changed evidence and control documents only, so it did not rerun product tests or alter the verified implementation.
+
 ## Disposable fixture
 
-- Root: `.superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-browser-fix1-20260831-001`
+- Root: `.superpowers/sdd/2026-08-28-dark-evidence-homepage/test-tmp/task4-browser-fix2-20260831-001`
 - Database/media: `platform.db` and an isolated media directory under that root.
 - Manifest: the root's `manifest.json`; 12 published scenarios, 6 services, 4 industries, one verified case, one reviewed resource, and explicitly deterministic demonstration data.
-- Address: `127.0.0.1:60052` only.
-- Launcher/listener PIDs: 26500/26740.
+- Address: `127.0.0.1:52537` only.
+- Launcher/listener PIDs: 7356/4572.
 - Interpreter: Python 3.12.13; Flask 3.1.3; Werkzeug 3.1.8; beautifulsoup4 4.15.0; Pillow 12.3.0; pypdf 6.16.2.
 - Route probes before QA: `/` 200 (14244 bytes), `/assessment` 200 (8158), `/scenarios` 200 (13901), `/scenarios/mfg-knowledge-assistant` 200 (8866).
 
-## Exact viewport evidence
+## Exact-viewport full-page evidence sheets
 
-The in-app Browser used exact requested emulation states. PNGs contain the page content surface, which excludes the Browser-owned scrollbar/chrome gutter; therefore file dimensions are slightly smaller than `innerWidth`/`innerHeight`. At every state `scrollWidth === clientWidth`.
+The in-app Browser used the exact requested emulation states. Its one-shot full-page compositor visibly duplicated sticky sections, so that raw output was rejected. The accepted evidence is built only from real viewport screenshots at named anchors: Hero, assessment, matching, roadmap, applications, proof/case, news, final CTA, and footer. Desktop/1024/910 use seven captures because their final capture contains news, CTA, and footer together; mobile uses all nine captures.
 
-| Requested viewport | PNG | PNG pixels | SHA-256 |
-|---|---|---:|---|
-| 1440×1024 | `docs/design/evidence/2026-08-28-dark-evidence-home-desktop.png` | 1425×839 | `bd91e2aa6e66a6dd980d589cc24710cbed9e64f7d2d732ed30bb578d11cf1198` |
-| 1024×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-1024.png` | 1009×836 | `bc28677ac9fb33340a21b5a719b77868ee79f0f59138da9ed707dd7774a69c5b` |
-| 910×900 | `docs/design/evidence/2026-08-28-dark-evidence-home-910.png` | 895×834 | `90a1d6795d0b16ce4d3fa573f586de7fc27e4c133dfcdeded59de247ec501384` |
-| 390×844 | `docs/design/evidence/2026-08-28-dark-evidence-home-mobile.png` | 375×811 | `9b7b0c15aaed6703a61f425f5e2c3c4b93c4d0d75d607e21482a439b13402616` |
+The Browser API returns JPEG screenshot bytes and has no format option. Offline Pillow therefore decoded every accepted segment and encoded a true PNG evidence sheet, preserving every pixel at 1:1 with no crop or scale. Adjacent captures are separated only by 12px of `#0b0f15`. Every final file starts `89504e470d0a1a0a`, and Pillow independently reports `format=PNG`.
+
+| Requested viewport | Segments | PNG pixels | Bytes | SHA-256 |
+|---|---:|---:|---:|---|
+| 1440×1024 | 7 | 1425×5945 | 2,508,137 | `d60a86aae617b331768d5a7e436ac76c0e6c258f6c29a1d324078802bf584245` |
+| 1024×900 | 7 | 1009×5924 | 2,084,669 | `8b2087e8255a60d6878e8b5b512a32f817396ccfcadfd24069fef4802aa42531` |
+| 910×900 | 7 | 895×5910 | 1,962,411 | `9dd263e8ca20e4d90f9cd126338201c7e51de0b35206979689fc298378d2e959` |
+| 390×844 | 9 | 375×7395 | 1,111,292 | `982aa40ad9f93320ecfa84f73f63b2486997dea63885bd7b7af58cbf0693c5f3` |
 
 A 320×844 boundary pass additionally reported `innerWidth=320`, `clientWidth=305`, `scrollWidth=305`, and `scrollX=0` after an attempted horizontal scroll.
 
 ## Visual comparison result
 
-The selected option-1 reference and fresh post-Fix1 1440 implementation capture were opened together in one comparison input. The fresh 1024, 910, and mobile captures were opened together in a second input. No P0–P2 remained: the Hero has its required single assessment action and non-interactive audit note; typography, chapter rhythm, art crop, capability bands, application image, evidence/news region, final CTA, and footer form a consistent black/white/electric-blue system across all regimes. The approved local artwork is darker than the generated reference; omission of a duplicate nav CTA follows the binding interaction spec and is recorded as an accepted P3 distinction.
+The selected option-1 reference and the fresh 1440 full-page evidence sheet were opened together in one comparison input. The fresh 1024, 910, and mobile sheets were opened together in a second input. All four were also read end-to-end in the image viewer. No P0–P2 remained: the Hero has its required single assessment action and non-interactive audit note; capability chapters, applications, proof/case, news, final CTA, and footer are all visible; typography, chapter rhythm, art crop, and boundary discipline form a consistent black/white/electric-blue system across all regimes. The approved local artwork is darker than the generated reference; omission of a duplicate nav CTA follows the binding interaction spec and remains an accepted P3 distinction.
 
 ## Browser interaction matrix
 
@@ -98,7 +102,7 @@ This is a responsive and interaction QA record, not a full WCAG conformance audi
 
 ## Cleanup
 
-The Browser viewport was reset and the disposable tab closed. Only exact fresh-fixture PIDs 26740 and 26500 were stopped. Final cleanup checks for `127.0.0.1:60052` reported:
+The Browser viewport was reset and the disposable tab closed. Only exact fresh-fixture PIDs 4572 and 7356 were stopped. Final cleanup checks for `127.0.0.1:52537` reported:
 
 ```text
 remaining_count=0
