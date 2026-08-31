@@ -731,6 +731,10 @@
 }
 
 @media (min-width: 768px) and (max-width: 1099px) {
+  .home-dark-evidence .guided-story {
+    padding-inline-end: 2.75rem;
+  }
+
   .home-dark-evidence .nav-inner {
     width: calc(100% - 3rem);
   }
@@ -787,7 +791,7 @@
   }
 
   .home-dark-evidence .home-hero-copy h1 {
-    font-size: clamp(3.75rem, 7vw, 4.75rem);
+    font-size: clamp(3.25rem, 6vw, 4rem);
   }
 
   .home-dark-evidence .story-product--overview {
@@ -852,10 +856,15 @@
     border-bottom: 1px solid var(--home-line);
     background: var(--home-graphite-950);
     white-space: nowrap;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+  }
+
+  .home-dark-evidence .guided-story-progress::-webkit-scrollbar {
+    display: none;
   }
 
   .home-dark-evidence .guided-story-progress a {
+    flex: 0 0 auto;
     min-width: 2.75rem;
     min-height: 2.75rem;
     display: inline-flex;

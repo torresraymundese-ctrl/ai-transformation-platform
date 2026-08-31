@@ -488,6 +488,18 @@ def test_home_responsive_shell_declares_three_safe_layout_regimes(client):
     assert "@media (min-width: 768px) and (max-width: 1099px)" in css
     assert "@media (max-width: 767px)" in css
     assert "@media (prefers-reduced-motion: reduce)" in css
+    compact_css = css.split(
+        "@media (min-width: 768px) and (max-width: 1099px)", 1
+    )[1].split("@media (max-width: 767px)", 1)[0]
+    compact_css = re.sub(r"(?m)^  ", "", compact_css)
+    compact_story = _css_rule(
+        compact_css, ".home-dark-evidence .guided-story"
+    )
+    assert "padding-inline-end: 2.75rem" in compact_story
+    compact_hero_title = _css_rule(
+        compact_css, ".home-dark-evidence .home-hero-copy h1"
+    )
+    assert "font-size: clamp(3.25rem, 6vw, 4rem)" in compact_hero_title
     mobile_css = css.split("@media (max-width: 767px)", 1)[1].split(
         "@media (prefers-reduced-motion: reduce)", 1
     )[0]
@@ -499,8 +511,15 @@ def test_home_responsive_shell_declares_three_safe_layout_regimes(client):
         mobile_css, ".home-dark-evidence .guided-story-progress a"
     )
     assert "overflow-x: auto" in mobile_progress
+    assert "scrollbar-width: none" in mobile_progress
+    assert "flex: 0 0 auto" in mobile_step
     assert "min-width: 2.75rem" in mobile_step
     assert "min-height: 2.75rem" in mobile_step
+    mobile_scrollbar = _css_rule(
+        mobile_css,
+        ".home-dark-evidence .guided-story-progress::-webkit-scrollbar",
+    )
+    assert "display: none" in mobile_scrollbar
     assert "transform: scale(1.02)" in css
     assert "[data-story-mode=\"enhanced\"]" in css
 
