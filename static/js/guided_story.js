@@ -82,7 +82,7 @@
       if (candidate) activateStoryChapter(story, candidate.target.id);
     };
     const observer = new environment.IntersectionObserver(handleEntries, {
-      threshold: [0.25, 0.5, 0.75],
+      threshold: [0.05, 0.25, 0.5],
       rootMargin: "-35% 0px -35% 0px",
     });
     parts.chapters.forEach(function (chapter) {

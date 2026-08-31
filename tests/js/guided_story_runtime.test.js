@@ -105,10 +105,22 @@ test('the most visible chapter activates its matching progress step', () => {
   assert.equal(view.chapters[2].dataset.storyActive, 'true');
   assert.equal(activeCount(view.chapters, 'storyActive'), 1);
   assert.equal(view.steps.filter((step) => step.getAttribute('aria-current') === 'step').length, 1);
-  assert.deepEqual(view.observer.options.threshold, [0.25, 0.5, 0.75]);
+  assert.deepEqual(view.observer.options.threshold, [0.05, 0.25, 0.5]);
   assert.equal(view.observer.options.rootMargin, '-35% 0px -35% 0px');
   assert.deepEqual(view.observer.observed, view.chapters);
   assert.equal(result.observer, view.observer);
+});
+
+test('a long final chapter can activate at its compact intersection ratio', () => {
+  const view = guidedStoryFixture();
+  guided.initializeGuidedStory(view.document, view.environment);
+
+  view.observer.callback([
+    { target: view.chapters[4], isIntersecting: true, intersectionRatio: 0.08 },
+  ]);
+
+  assert.equal(view.story.dataset.activeChapter, 'story-evidence');
+  assert.equal(view.steps[4].getAttribute('aria-current'), 'step');
 });
 
 test('reduced motion keeps the complete story static and does not create an observer', () => {
