@@ -122,8 +122,9 @@ def test_shared_focus_rules_make_the_skip_link_and_focus_visible(client):
 
     tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
     focus = _css_custom_color(tokens, "--ui-focus")
+    graphite = _css_custom_color(tokens, "--ui-graphite-1000")
     assert _contrast_ratio(focus, "#ffffff") >= 3
-    assert _contrast_ratio(focus, "#061b46") >= 3
+    assert _contrast_ratio(focus, graphite) >= 3
 
 
 def test_design_tokens_are_served_with_approved_values(client):
@@ -131,11 +132,6 @@ def test_design_tokens_are_served_with_approved_values(client):
     css = response.get_data(as_text=True)
     assert response.status_code == 200
     for token in (
-        "--ui-navy-950: #061b46",
-        "--ui-blue-600: #0f5fef",
-        "--ui-blue-700: #0b49bf",
-        "--ui-teal-700: #007c91",
-        "--ui-amber-700: #9a5b00",
         "--ui-ink-950: #111827",
         "--ui-ink-650: #556070",
         "--ui-line-200: #dde4ee",
@@ -146,13 +142,39 @@ def test_design_tokens_are_served_with_approved_values(client):
         "--ui-paper-000: #fbfaf7",
         "--ui-silver-200: #d8dee6",
         "--ui-signal-blue: #0f6fef",
-        "--ui-signal-cyan: #5bd9e8",
         '--ui-font-sans: "noto sans sc", "source han sans sc", "microsoft yahei ui", "microsoft yahei", sans-serif',
         "--ui-font-label: inter, arial, sans-serif",
         "--ui-container-wide: 85rem",
     ):
         assert token in css.lower()
     assert "prefers-reduced-motion: reduce" in css
+
+
+def test_legacy_brand_tokens_converge_on_single_signal_blue(client):
+    """Compatibility aliases must not preserve a second public accent palette."""
+    css = client.get("/static/css/design-tokens.css").get_data(as_text=True).lower()
+
+    for deprecated_color in (
+        "#5bd9e8",
+        "#061b46",
+        "#0f5fef",
+        "#0b49bf",
+        "#007c91",
+        "#9a5b00",
+    ):
+        assert deprecated_color not in css
+
+    for alias in (
+        "--ui-signal-cyan",
+        "--ui-blue-600",
+        "--ui-blue-700",
+        "--ui-teal-700",
+        "--ui-amber-700",
+    ):
+        assert f"{alias}: var(--ui-signal-blue)" in css
+
+    assert "--ui-navy-950: var(--ui-graphite-1000)" in css
+    assert "--ui-focus: #0f6fef" in css
 
 
 def test_shared_shell_has_truthful_signal_bar(client):
@@ -199,13 +221,14 @@ def test_public_buttons_and_story_tokens_use_industrial_contract(client):
 
     assert "background: var(--ui-signal-blue);" in primary
     assert "color: var(--ui-surface-000);" in primary
-    assert "background: var(--ui-signal-cyan);" in primary_hover
-    assert "background: var(--ui-signal-cyan);" in primary_focus
     assert "border-color: var(--ui-signal-blue);" in outline
     assert "color: var(--ui-graphite-950);" in outline
     assert "background: var(--ui-paper-050);" in outline
-    assert "background: var(--ui-signal-cyan);" in outline_hover
-    assert "background: var(--ui-signal-cyan);" in outline_focus
+    for state in (primary_hover, primary_focus, outline_hover, outline_focus):
+        assert re.search(
+            r"background:\s*var\(--ui-signal-(?:blue|cyan)\);",
+            state,
+        )
     assert "--ui-motion-story: 680ms;" in token_css
 
     for token in ("--ui-radius-control", "--ui-radius-panel"):
