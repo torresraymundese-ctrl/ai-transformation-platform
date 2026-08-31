@@ -1,7 +1,7 @@
 # 企业 AI 转型平台 2.0：银灰证据系统公共页面视觉规格
 
 - 日期：2026-08-31
-- 状态：待用户审阅书面规格
+- 状态：用户已通过书面规格（2026-08-31）
 - 上游功能规格：`docs/superpowers/specs/2026-08-24-content-operations-design.md`
 - 上游首页规格：`docs/superpowers/specs/2026-08-28-dark-evidence-homepage-design.md`
 - 首页视觉基准：`docs/design/references/2026-08-31-silver-evidence-homepage-reference.png`
