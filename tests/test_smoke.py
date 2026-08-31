@@ -76,9 +76,12 @@ def test_missing_public_page_keeps_its_404_status_and_text_only_recovery(client)
     page = BeautifulSoup(response.data, "html.parser")
 
     assert response.status_code == 404
-    assert page.select_one("main#main-content.ui-status-page") is not None
+    assert page.select_one(
+        'main#main-content.ui-status-page[data-page-family="status-page"]'
+    ) is not None
     assert "⚠️" not in page.get_text(" ", strip=True)
-    assert page.select_one('main a[href="/"]').get_text(" ", strip=True) == "返回首页"
+    recovery = page.select_one('main a[data-status-recovery][href="/"]')
+    assert recovery.get_text(" ", strip=True) == "返回首页"
 
 
 def test_admin_redirects_unauthenticated_requests_to_login(client):

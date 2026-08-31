@@ -2,14 +2,22 @@
 {% from "components/content_blocks.html" import render as render_blocks %}
 {% block title %}{{ announcement.seo_title }}{% endblock %}
 {% block analytics_page %}announcements{% endblock %}
-{% block main_attributes %} class="public-page editorial-detail public-announcement-detail"{% endblock %}
+{% block main_attributes %} class="public-page editorial-detail public-announcement-detail" data-page-family="dynamic-article"{% endblock %}
 {% block head %}<meta name="description" content="{{ announcement.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<div class="public-container public-reading">
-  <h1>{{ announcement.title }}</h1>
-  <p>{{ announcement.summary }}</p>
-  <dl class="editorial-meta"><div><dt>有效期</dt><dd data-announcement-validity>{{ announcement.valid_from }} 至 {{ announcement.valid_until }}</dd></div></dl>
-  <section aria-label="公告正文">{{ render_blocks(announcement.blocks) }}</section>
-  {% if announcement.cta_url %}<p><a class="btn btn-primary" data-announcement-cta href="{{ announcement.cta_url }}"{% if announcement.cta_url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>查看相关信息</a></p>{% endif %}
+<header class="editorial-cover editorial-cover--announcement">
+  <div class="public-container editorial-cover__grid">
+    <div class="editorial-cover__copy">
+      <p class="public-eyebrow">平台动态</p>
+      <h1>{{ announcement.title }}</h1>
+      <p>{{ announcement.summary }}</p>
+    </div>
+    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-delivery-system.webp') }}" alt="" width="1600" height="900"></figure>
+  </div>
+</header>
+<section class="announcement-validity-band" data-public-reveal><div class="public-container"><dl class="editorial-meta editorial-meta--band"><div><dt>有效期</dt><dd data-announcement-validity>{{ announcement.valid_from }} 至 {{ announcement.valid_until }}</dd></div></dl></div></section>
+<div class="public-container public-reading editorial-document">
+  <section class="editorial-content-flow" aria-label="公告正文" data-public-reveal>{{ render_blocks(announcement.blocks) }}</section>
+  {% if announcement.cta_url %}<p class="editorial-end-action" data-public-reveal><a class="btn btn-primary" data-announcement-cta href="{{ announcement.cta_url }}"{% if announcement.cta_url.startswith('https://') %} target="_blank" rel="noopener noreferrer"{% endif %}>查看相关信息</a></p>{% endif %}
 </div>
 {% endblock %}

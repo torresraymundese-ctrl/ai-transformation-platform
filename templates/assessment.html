@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}企业 AI 就绪度评估 - 企业AI转型平台{% endblock %}
 {% block body_class %}assessment-route{% endblock %}
+{% block main_attributes %} class="assessment-conversion" data-page-family="assessment-conversion"{% endblock %}
 {% block analytics_page %}assessment{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/assessment.css') }}">
 {% endblock %}
 {% block content %}
-<header class="assessment-hero">
+<header class="assessment-hero" data-public-reveal>
   <div class="assessment-hero__inner">
     <p class="assessment-eyebrow">免费企业诊断</p>
     <h1>企业 AI 就绪度评估</h1>
@@ -14,7 +15,7 @@
   </div>
 </header>
 
-<div class="assessment-main">
+<div class="assessment-main" data-public-reveal>
   <section
     id="assessment-wizard"
     class="assessment-wizard"

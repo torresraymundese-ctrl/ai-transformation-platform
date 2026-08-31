@@ -16,6 +16,9 @@ def test_assessment_page_loads_external_v2_wizard_assets(client):
     page = BeautifulSoup(response.data, "html.parser")
 
     assert response.status_code == 200
+    assert page.select_one(
+        'main#main-content[data-page-family="assessment-conversion"]'
+    ) is not None
     assert page.select_one('link[href="/static/css/assessment.css"]')
     script = page.select_one('script[src="/static/js/assessment.js"]')
     assert script is not None and script.has_attr("defer")
@@ -27,6 +30,8 @@ def test_assessment_page_loads_external_v2_wizard_assets(client):
     assert page.select_one('#assessment-error[role="alert"]')
     assert page.select_one('#assessment-back[type="button"]')
     assert page.select_one('#assessment-continue[type="button"]')
+    assert not page.select("main [style]")
+    assert len(page.select("main h1")) == 1
 
     template_source = TEMPLATE.read_text(encoding="utf-8")
     assert "const INDUSTRIES" not in template_source

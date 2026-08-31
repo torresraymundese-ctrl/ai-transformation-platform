@@ -324,8 +324,12 @@ def test_authorized_case_publishes_metrics_and_never_leaks_private_evidence(
     detail_text = detail.get_data(as_text=True)
     detail_document = BeautifulSoup(detail.data, "html.parser")
     assert detail_document.select_one("main#main-content.editorial-detail") is not None
+    assert detail_document.select_one(
+        'main#main-content[data-page-family="evidence-article"]'
+    ) is not None
     assert detail_document.select_one(".editorial-meta") is not None
     assert detail_document.select_one("[data-case-verification]") is not None
+    assert detail_document.select_one("[data-verified-at]") is not None
     assert detail_document.select_one("[data-case-metric]") is not None
     assert "经授权匿名案例" in listing_text
     assert "经授权匿名案例" in detail_text

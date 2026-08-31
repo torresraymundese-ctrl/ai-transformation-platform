@@ -1,3 +1,6 @@
+from datetime import datetime
+import hashlib
+
 from bs4 import BeautifulSoup
 from jinja2 import ChoiceLoader, DictLoader
 from pathlib import Path
@@ -5,10 +8,137 @@ from PIL import Image
 import pytest
 import re
 
+from content_clock import SHANGHAI
+from content_contracts import CaseMetric, ContentBlock, ContentDraft
+from publishing_service import create_content_draft, publish_content
+
 
 def _page(response):
     assert response.status_code == 200
     return BeautifulSoup(response.get_data(as_text=True), "html.parser")
+
+
+@pytest.fixture()
+def editorial_public_routes(client, db):
+    """Publish only the truthful fixture values needed by the public documents."""
+    now = datetime(2026, 8, 25, 10, 0, tzinfo=SHANGHAI)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: now
+
+    attachment_id = db.execute(
+        "INSERT INTO media_assets (storage_name,display_name,detected_mime,byte_size,sha256,"
+        "status,created_at,updated_at) VALUES (?,?,?,?,?,'pending',?,?)",
+        (
+            "editorial-review.pdf",
+            "审核材料.pdf",
+            "application/pdf",
+            1,
+            hashlib.sha256(b"editorial-review").hexdigest(),
+            "2026-08-25 10:00:00",
+            "2026-08-25 10:00:00",
+        ),
+    ).lastrowid
+    db.execute(
+        "UPDATE media_assets SET status='ready',scan_result_code='safe',"
+        "scan_checked_at='2026-08-25 10:00:00',ready_at='2026-08-25 10:00:00',"
+        "updated_at='2026-08-25 10:00:00' WHERE id=?",
+        (attachment_id,),
+    )
+    db.commit()
+
+    case = ContentDraft(
+        entry_type="case",
+        slug="editorial-evidence-case",
+        title="经授权匿名的证据案例",
+        summary="经人工审核的实施过程与量化结果。",
+        seo_title="经授权匿名的证据案例",
+        seo_description="查看经审核的企业实施案例与统计指标。",
+        extension={
+            "verification_code": "authorized_anonymous",
+            "is_anonymized": 1,
+            "basis_type": "internal_delivery_record",
+            "private_basis_reference": "internal-editorial-reference",
+            "source_url": None,
+            "source_url_sha256": None,
+            "source_check_code": None,
+            "source_checked_at": None,
+            "source_check_expires_at": None,
+            "source_check_url_sha256": None,
+            "is_verified": 1,
+            "review_confirmed": 1,
+            "verified_at": "2026-08-25 10:00:00",
+        },
+        blocks=(ContentBlock("rich_text", "实施过程", "<p>已验证实施过程。</p>"),),
+        metrics=(
+            CaseMetric(
+                "报表处理时间",
+                "8",
+                "2",
+                "小时",
+                "连续 30 天",
+                "依据交付记录中的人工与自动化时长对比。",
+            ),
+        ),
+    )
+    resource_url = "https://example.com/editorial-review"
+    resource = ContentDraft(
+        entry_type="resource",
+        slug="editorial-review-dossier",
+        title="经审核的资源档案",
+        summary="只展示经来源、版权与附件审核的真实资源。",
+        seo_title="经审核的资源档案",
+        seo_description="查看经审核的公开资源档案。",
+        extension={
+            "resource_type": "report",
+            "is_original": 0,
+            "source_name": "公开研究机构",
+            "source_url": resource_url,
+            "source_url_sha256": hashlib.sha256(resource_url.encode()).hexdigest(),
+            "source_check_code": None,
+            "source_checked_at": None,
+            "source_check_expires_at": None,
+            "source_check_url_sha256": None,
+            "original_published_at": "2026-08-20 09:30:00",
+            "copyright_notice": "原文版权归公开研究机构所有。",
+            "attachment_media_id": attachment_id,
+        },
+        blocks=(ContentBlock("rich_text", "正文", "<p>已审核资源正文。</p>"),),
+    )
+    announcement = ContentDraft(
+        entry_type="announcement",
+        slug="editorial-dynamic-announcement",
+        title="当前有效的公开公告",
+        summary="仅在已验证有效期内公开。",
+        seo_title="当前有效的公开公告",
+        seo_description="查看当前有效的平台公告。",
+        extension={
+            "valid_from": "2026-08-25 09:00:00",
+            "valid_until": "2026-08-26 09:00:00",
+            "cta_url": "https://example.com/editorial-notice",
+        },
+        blocks=(ContentBlock("rich_text", "公告正文", "<p>已审核公告正文。</p>"),),
+    )
+    for draft in (case, announcement):
+        content_id = create_content_draft(draft, actor="test-admin", now=now)
+        publish_content(content_id, 1, actor="test-admin", now=now)
+    resource_id = create_content_draft(resource, actor="test-admin", now=now)
+    db.execute(
+        "UPDATE resource_content SET source_check_code='https_ok',"
+        "source_checked_at='2026-08-25 10:00:00',"
+        "source_check_expires_at='2099-01-01 00:00:00',"
+        "source_check_url_sha256=? WHERE content_item_id=?",
+        (hashlib.sha256(resource_url.encode()).hexdigest(), resource_id),
+    )
+    db.commit()
+    publish_content(resource_id, 1, actor="test-admin", now=now)
+
+    return {
+        "case": "/cases/editorial-evidence-case",
+        "resource": "/resources/editorial-review-dossier",
+        "announcement": "/announcements/editorial-dynamic-announcement",
+        "about": "/about",
+        "assessment": "/assessment",
+        "error": "/missing-editorial-page",
+    }
 
 
 def _css_custom_color(css, name):
@@ -491,6 +621,85 @@ def test_static_public_pages_use_named_main_and_no_inline_layout(client, path):
 
     assert page.select_one("main#main-content") is not None
     assert not page.select("main [style]")
+
+
+@pytest.mark.parametrize(
+    ("route_key", "family", "required_selector"),
+    (
+        ("case", "evidence-article", "[data-case-verification]"),
+        (
+            "resource",
+            "review-dossier",
+            "[data-resource-authorship]",
+        ),
+        ("announcement", "dynamic-article", "[data-announcement-validity]"),
+        ("about", "manifesto", "[data-manifesto-chapter]"),
+        ("assessment", "assessment-conversion", "#assessment-wizard"),
+        ("error", "status-page", "[data-status-recovery]"),
+    ),
+)
+def test_silver_evidence_editorial_and_conversion_families_keep_live_contracts(
+    client, editorial_public_routes, route_key, family, required_selector
+):
+    """Editorial presentation may change hierarchy, never published data or wizard behavior."""
+    response = client.get(editorial_public_routes[route_key])
+    page = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+    main = page.select_one("main#main-content")
+
+    assert response.status_code == (404 if route_key == "error" else 200)
+    assert main is not None
+    assert main["data-page-family"] == family
+    assert main.select_one(required_selector) is not None
+    assert len(main.select("h1")) == 1
+    assert not main.select("[style]")
+    assert not any(
+        asset.get("src", "").startswith(("http://", "https://"))
+        for asset in page.select("img[src], script[src]")
+    )
+    assert not any(
+        asset.get("href", "").startswith(("http://", "https://"))
+        for asset in page.select('link[rel="stylesheet"][href]')
+    )
+    assert not any(symbol in page.get_text(" ", strip=True) for symbol in ("⚠", "🚀", "✨"))
+
+    if route_key == "case":
+        assert main.select_one("[data-verified-at]") is not None
+        assert main.select_one("[data-case-metric]") is not None
+        assert "internal-editorial-reference" not in main.get_text(" ", strip=True)
+    elif route_key == "resource":
+        source = main.select_one("[data-resource-source]")
+        attachment = main.select_one("[data-resource-attachment]")
+        assert source["href"] == "https://example.com/editorial-review"
+        assert source["target"] == "_blank"
+        assert source["rel"] == ["noopener", "noreferrer"]
+        assert attachment["href"].startswith("/media/")
+    elif route_key == "announcement":
+        cta = main.select_one("[data-announcement-cta]")
+        assert "2026-08-25 09:00:00 至 2026-08-26 09:00:00" in main.get_text(
+            " ", strip=True
+        )
+        assert cta["target"] == "_blank"
+        assert cta["rel"] == ["noopener", "noreferrer"]
+    elif route_key == "about":
+        assert len(main.select("[data-manifesto-chapter]")) == 4
+    elif route_key == "assessment":
+        wizard = main.select_one("#assessment-wizard")
+        assert wizard["data-config-base"] == "/api/v2/assessment/config"
+        assert wizard["data-preview-url"] == "/api/v2/assessment/preview"
+        assert wizard["data-complete-url"] == "/api/v2/assessment/complete"
+        assert {field.get("name") for field in main.select("form input[name]")} == {
+            "company_name",
+            "contact_name",
+            "phone",
+            "email",
+            "wechat",
+            "privacy_consent",
+        }
+        assert main.select_one("#assessment-progress") is not None
+        assert main.select_one("#assessment-error[role='alert']") is not None
+        assert main.select_one("#assessment-live-status[aria-live='polite']") is not None
+    else:
+        assert main.select_one("[data-status-recovery][href='/']") is not None
 
 
 def test_home_preserves_real_content_sections_and_single_primary_action(client):

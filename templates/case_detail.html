@@ -2,23 +2,43 @@
 {% from "components/content_blocks.html" import render as render_blocks %}
 {% block title %}{{ case.seo_title }}{% endblock %}
 {% block analytics_page %}cases{% endblock %}
-{% block main_attributes %} class="public-page editorial-detail public-case-detail"{% endblock %}
+{% block main_attributes %} class="public-page editorial-detail public-case-detail" data-page-family="evidence-article"{% endblock %}
 {% block head %}<meta name="description" content="{{ case.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
-<div class="public-container public-reading">
-  <p><a href="{{ url_for('public_catalog.cases_page') }}">返回已验证案例</a></p>
-  <h1>{{ case.title }}</h1>
-  <p>{{ case.summary }}</p>
-  <dl class="editorial-meta">
-    <div><dt>核验状态</dt><dd data-case-verification>{{ case.verification_label }}</dd></div>
-    <div><dt>核验时间</dt><dd>{{ case.verified_at }}</dd></div>
-  </dl>
-  <section aria-labelledby="case-metrics-title">
+<header class="editorial-cover editorial-cover--evidence">
+  <div class="public-container editorial-cover__grid">
+    <div class="editorial-cover__copy">
+      <p class="public-eyebrow">已验证案例</p>
+      <p class="editorial-back-link"><a href="{{ url_for('public_catalog.cases_page') }}">返回已验证案例</a></p>
+      <h1>{{ case.title }}</h1>
+      <p>{{ case.summary }}</p>
+    </div>
+    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-trust-evidence.webp') }}" alt="" width="1600" height="900"></figure>
+  </div>
+</header>
+<section class="editorial-meta-band" data-public-reveal>
+  <div class="public-container">
+    <dl class="editorial-meta editorial-meta--band">
+      <div><dt>核验状态</dt><dd data-case-verification>{{ case.verification_label }}</dd></div>
+      <div><dt>核验时间</dt><dd data-verified-at>{{ case.verified_at }}</dd></div>
+    </dl>
+  </div>
+</section>
+<div class="public-container public-reading editorial-document">
+  <section class="editorial-evidence" aria-labelledby="case-metrics-title" data-public-reveal>
+    <p class="public-eyebrow">量化证据</p>
     <h2 id="case-metrics-title">量化结果与证据说明</h2>
-    {% for metric in case.metrics %}
-    <article class="editorial-metric" data-case-metric><h3>{{ metric.name }}</h3><p>{{ metric.before_value }} {{ metric.unit }} → {{ metric.after_value }} {{ metric.unit }}</p><p>统计周期：{{ metric.statistical_period }}</p><p>证据说明：{{ metric.evidence_explanation }}</p></article>
-    {% endfor %}
+    <div class="evidence-metric-rows">
+      {% for metric in case.metrics %}
+      <article class="editorial-metric evidence-metric-row" data-case-metric>
+        <h3>{{ metric.name }}</h3>
+        <p class="evidence-metric-row__values">{{ metric.before_value }} {{ metric.unit }} → {{ metric.after_value }} {{ metric.unit }}</p>
+        <p><span>统计周期</span>{{ metric.statistical_period }}</p>
+        <p><span>证据说明</span>{{ metric.evidence_explanation }}</p>
+      </article>
+      {% endfor %}
+    </div>
   </section>
-  <section aria-labelledby="case-process-title"><h2 id="case-process-title">实施过程</h2>{{ render_blocks(case.blocks) }}</section>
+  <section class="editorial-content-flow" aria-labelledby="case-process-title" data-public-reveal><h2 id="case-process-title">实施过程</h2>{{ render_blocks(case.blocks) }}</section>
 </div>
 {% endblock %}

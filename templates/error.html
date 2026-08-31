@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% block analytics_page %}error{% endblock %}
 {% block title %}{{ title }} - 企业AI转型平台{% endblock %}
-{% block main_attributes %} class="ui-status-page"{% endblock %}
+{% block main_attributes %} class="ui-status-page" data-page-family="status-page"{% endblock %}
 {% block content %}
 <section class="public-container ui-status-content" aria-labelledby="error-title">
   <div>
     <p class="public-eyebrow">页面状态</p>
     <h1 id="error-title">{{ title }}</h1>
     <p>{{ message }}</p>
-    <a class="btn btn-primary" href="/">返回首页</a>
+    <a class="btn btn-primary" data-status-recovery href="/">返回首页</a>
   </div>
 </section>
 {% endblock %}

@@ -1,27 +1,18 @@
 {% extends "base.html" %}
 {% block analytics_page %}about{% endblock %}
 {% block title %}关于我们 - 企业AI转型平台{% endblock %}
-{% block main_attributes %} class="public-page about-page"{% endblock %}
+{% block main_attributes %} class="public-page about-page" data-page-family="manifesto"{% endblock %}
 {% block content %}
-<section class="public-section">
-  <div class="public-container public-reading">
-    <header class="about-header"><h1>关于我们</h1><p>帮企业低成本、私有化、可落地完成 AI 转型</p></header>
-    <section class="about-section"><h2>公司信息</h2>
-      <p><strong>苏州苏采易购信息技术有限公司</strong>，专注于企业 AI 转型一站式服务。我们提供从<strong>数据治理</strong>、<strong>本地大模型部署</strong>到<strong>RAG 知识库</strong>、<strong>AI 智能体</strong>的完整解决方案，帮企业以低成本、私有化、可落地的方式完成 AI 转型。</p>
-      <p>海外站点：<strong>OpenBridge Inc.</strong>，总部位于加拿大温哥华，汇聚多位人工智能领域的权威专家，为北美及全球企业提供 AI 战略咨询服务。</p>
-    </section>
-    <section class="about-section"><h2>核心原则</h2>
-    <div class="about-principles">
-      <div><strong>私有安全：</strong>数据不出内网，大模型本地部署，满足金融/医疗等强监管行业合规要求。</div>
-      <div><strong>务实落地：</strong>不做不落地的战略报告，只做可交付、可运行的系统。</div>
-      <div><strong>渐进式转型：</strong>从 RAG 知识库开始（90% 企业的最佳起点），逐步扩展到 Agent 和全流程自动化。</div>
-      <div><strong>技术开放：</strong>优先推荐开源方案（Qwen/DeepSeek/ChromaDB/Milvus），降低企业长期依赖风险。</div>
-    </div></section>
-    <section class="about-section"><h2>联系与合作</h2>
-      <p>我们正在寻找第一批合作客户和行业伙伴。</p>
-      <p><strong>全国服务热线：400-180-3358</strong></p>
-      <p><a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估</a></p>
-    </section>
+<header class="manifesto-cover">
+  <div class="public-container manifesto-cover__grid">
+    <div class="manifesto-cover__copy"><p class="public-eyebrow">企业 AI 转型平台</p><h1>关于我们</h1><p>帮企业低成本、私有化、可落地完成 AI 转型</p></div>
+    <figure class="manifesto-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-delivery-system.webp') }}" alt="" width="1600" height="900"></figure>
   </div>
-</section>
+</header>
+<div class="manifesto-document">
+  <section class="manifesto-chapter" data-manifesto-chapter data-public-reveal aria-labelledby="about-positioning-title"><div class="public-container public-reading"><p class="manifesto-chapter__sequence">01</p><h2 id="about-positioning-title">平台定位</h2><p><strong>苏州苏采易购信息技术有限公司</strong>，专注于企业 AI 转型一站式服务。</p></div></section>
+  <section class="manifesto-chapter" data-manifesto-chapter data-public-reveal aria-labelledby="about-principles-title"><div class="public-container public-reading"><p class="manifesto-chapter__sequence">02</p><h2 id="about-principles-title">核心原则</h2><div class="about-principles"><p><strong>私有安全：</strong>数据不出内网，大模型本地部署，满足金融/医疗等强监管行业合规要求。</p><p><strong>务实落地：</strong>不做不落地的战略报告，只做可交付、可运行的系统。</p><p><strong>渐进式转型：</strong>从 RAG 知识库开始（90% 企业的最佳起点），逐步扩展到 Agent 和全流程自动化。</p><p><strong>技术开放：</strong>优先推荐开源方案（Qwen/DeepSeek/ChromaDB/Milvus），降低企业长期依赖风险。</p></div></div></section>
+  <section class="manifesto-chapter" data-manifesto-chapter data-public-reveal aria-labelledby="about-boundary-title"><div class="public-container public-reading"><p class="manifesto-chapter__sequence">03</p><h2 id="about-boundary-title">能力边界</h2><p>我们提供从<strong>数据治理</strong>、<strong>本地大模型部署</strong>到<strong>RAG 知识库</strong>、<strong>AI 智能体</strong>的完整解决方案，帮企业以低成本、私有化、可落地的方式完成 AI 转型。</p><p>海外站点：<strong>OpenBridge Inc.</strong>，总部位于加拿大温哥华，汇聚多位人工智能领域的权威专家，为北美及全球企业提供 AI 战略咨询服务。</p></div></section>
+  <section class="manifesto-chapter manifesto-chapter--action" data-manifesto-chapter data-public-reveal aria-labelledby="about-action-title"><div class="public-container public-reading"><p class="manifesto-chapter__sequence">04</p><h2 id="about-action-title">联系与合作</h2><p>我们正在寻找第一批合作客户和行业伙伴。</p><p><strong>全国服务热线：400-180-3358</strong></p><p class="editorial-end-action"><a href="/assessment" class="btn btn-primary">免费 AI 就绪度评估</a></p></div></section>
+</div>
 {% endblock %}
