@@ -5,7 +5,7 @@
 - Frozen plan base: `d5d8445f0ac1b4425db905062a63330e4764e165`.
 - Verification date: 2026-09-01 (Asia/Shanghai).
 - Surface: Codex in-app Browser only. Chrome, Computer Use, Playwright CLI, production, deployment, external networking, and the repository-wide full suite were not used.
-- Initial fixture: `127.0.0.1:51838`; launcher PID `3792`; child listener PID `17188`. Fix1 used a fresh fixture at `127.0.0.1:55844`, PID `30340`, with the same ignored database/media paths and mock-only source transport.
+- Initial fixture: `127.0.0.1:51838`; launcher PID `3792`; child listener PID `17188`. Fix1 used `127.0.0.1:55844`, PID `30340`. The final-review fixture is `127.0.0.1:65353`, PID `6928`; every fixture used the same ignored database/media paths and mock-only source transport.
 - Disposable database/media: `.superpowers/sdd/2026-08-31-silver-evidence-public-ui/task6-browser.db` and `task6-media`.
 - All source checks used `MockSourceTransport`; the content clock was fixed to `2026-08-31T10:00:00+08:00`.
 - Runtime: Python `3.12.13`, Flask `3.1.3`, Werkzeug `3.1.8`, Pillow `12.3.0`, beautifulsoup4 `4.15.0`.
@@ -34,13 +34,15 @@ node --test tests/js/app_runtime.test.js tests/js/guided_story_runtime.test.js t
 
 The P2 typography contract was demonstrably test-first: its isolated RED failed with `KeyError: 'text-wrap'` (`1 failed in 1.66s`, exit `1`), then GREEN passed (`1 passed in 0.84s`, exit `0`) after the minimal shared CSS correction. Browser verification proved the affected scenario, services, case, and assessment headings/metric no longer leave isolated Chinese characters or horizontal overflow.
 
+The final whole-branch review's 14px auxiliary-type finding was also closed test-first. The parsed plan-CSS RED enumerated 30 visible subminimum occurrences (`1 failed in 1.17s`), then the shared `--ui-font-size-aux:0.875rem` token and scoped consumers produced GREEN (`1 passed in 0.95s`). A real-cascade IAB audit then exposed legacy `app.css` navigation/footer/sticky values at 11–13px; the stylesheet-order/specificity RED failed and its public-shell overrides passed (`1 passed in 0.98s`). Final mobile visual inspection caught the desktop CTA restored beside the mobile menu; media-cascade RED failed and the narrow-screen silver override passed (`1 passed in 0.74s`). Final focused Python is `71 passed in 40.65s` using `task6-final-review-focused-034`; the three focused Node syntax checks exited `0`, and runtime is `27/27` pass in `233.79ms`.
+
 ## Browser evidence method
 
 The in-app Browser's `fullPage:true` compositor was rejected because it duplicated sticky/reveal layers and introduced false mobile gaps. DOM counts proved that the duplication was not present in the page. A CDP full-page experiment hung, was aborted, and wrote no file; it was not used again.
 
-Final evidence consists of genuine `fullPage:false` viewport frames captured with native CUA scrolling after `1100ms` initial settle and at least `1050ms` after every scroll. Every frame reported `scrollWidth === clientWidth`; actual scroll positions were within `1px` of their targets. Frames were preserved 1:1, without crop or scale, and placed vertically with a 12px `#0B1016` separator. The separator explicitly identifies frame boundaries; repeated sticky navigation/CTA/rails and overlap are expected evidence-sheet behavior, not claimed seamless page content. Fix1 recovered the original desktop frames only at those exact separator boundaries, inserted one new 1425×802 Browser frame for industry chapter 02 and one for service chapter 05, and left every original 1425×842 viewport frame unchanged.
+Final evidence consists of genuine `fullPage:false` IAB/CDP viewport frames captured after `1100ms` initial settle and at least `1050ms` after every scroll. Every final-review route manifest reported `scrollWidth === clientWidth`; actual scroll positions were within `1px` of their targets. Frames were preserved 1:1, without crop or scale, and placed vertically with a 12px `#0B1016` separator. The separator explicitly identifies frame boundaries; repeated sticky navigation/CTA/rails and overlap are expected evidence-sheet behavior, not claimed seamless page content.
 
-The initial Browser viewport was set to `1440×1024` or `390×844`; its saved bitmaps were `1425×842` and `375×842`. During Fix1 the IAB desktop tab's physical capture surface remained 1425×802, so the two supplemental desktop frames retain that truthful height. The corrected mobile catalog was recaptured through the same IAB CDP session as eight genuine `Page.captureScreenshot` viewport images at 390×896, never as a full-page compositor image. Full-height footer coverage is present in every evidence sheet. Five centered supplemental frames now make the resource filter, case audit metadata band, About chapter 01, industry chapter 02, and service chapter 05 wholly reviewable.
+The final thirteen desktop sheets use 1440×1024 source frames from the clean v2 capture. Industry frame `02a` and service-detail frame `05a` are deliberate centered supplemental viewports that keep chapters 03 and 05 fully reviewable. The three mobile sheets use 390×844 source frames from the clean v3 recapture after the mobile desktop-CTA cascade was fixed. Full footer coverage is present in every sheet; no rejected v1/v2-mobile frame entered the final outputs.
 
 ## Route and evidence matrix
 
@@ -54,35 +56,35 @@ The initial Browser viewport was set to `1440×1024` or `390×844`; its saved bi
 | `/service-packages` | 1440×1024 | 5 | `2026-08-31-silver-services-desktop.png` |
 | `/service-packages/foundation-workshop` | 1440×1024 | 8 | `2026-08-31-silver-service-detail-desktop.png` |
 | `/cases` | 1440×1024 | 2 | `2026-08-31-silver-cases-desktop.png` |
-| `/cases/verified-automation-case` | 1440×1024 | 5 | `2026-08-31-silver-case-detail-desktop.png` |
-| `/resources` | 1440×1024 | 4 | `2026-08-31-silver-resources-desktop.png` |
+| `/cases/verified-automation-case` | 1440×1024 | 4 | `2026-08-31-silver-case-detail-desktop.png` |
+| `/resources` | 1440×1024 | 3 | `2026-08-31-silver-resources-desktop.png` |
 | `/resources/external-evidence-dossier` | 1440×1024 | 3 | `2026-08-31-silver-resource-detail-desktop.png` |
 | `/assessment` | 1440×1024 | 3 | `2026-08-31-silver-assessment-desktop.png` |
-| `/about` | 1440×1024 | 5 | `2026-08-31-silver-about-desktop.png` |
-| `/scenarios` | 390×896 Fix1 capture | 8 | `2026-08-31-silver-scenarios-mobile.png` |
-| `/scenarios/mfg-knowledge-assistant` | 390×844 | 9 | `2026-08-31-silver-scenario-detail-mobile.png` |
+| `/about` | 1440×1024 | 4 | `2026-08-31-silver-about-desktop.png` |
+| `/scenarios` | 390×844 | 9 | `2026-08-31-silver-scenarios-mobile.png` |
+| `/scenarios/mfg-knowledge-assistant` | 390×844 | 10 | `2026-08-31-silver-scenario-detail-mobile.png` |
 | `/assessment` | 390×844 | 4 | `2026-08-31-silver-assessment-mobile.png` |
 
 ## Evidence files
 
 | File | Dimensions | Bytes | SHA-256 |
 |---|---:|---:|---|
-| `2026-08-31-silver-about-desktop.png` | 1425×4258 | 1,324,753 | `C98F8700559F52E3573A366B0BE1C002C1A04742A7AA4B716152C53534810E58` |
-| `2026-08-31-silver-assessment-desktop.png` | 1425×2550 | 427,805 | `35D2DB5C1C9D9E8076B80B644C0A4A3EF3FDDDE7770B687FBAF4A093BB9A4E89` |
-| `2026-08-31-silver-assessment-mobile.png` | 375×3280 | 374,203 | `3F66A98FED2885135D15A06E580BEB1C697B2C7E445F600C4290FDC3168A9400` |
-| `2026-08-31-silver-case-detail-desktop.png` | 1425×4258 | 1,233,003 | `15460C1D1553071FD4916F18900BC62EAFD7D1C5FCACF393350C3F1D41E4AC89` |
-| `2026-08-31-silver-cases-desktop.png` | 1425×1696 | 500,543 | `B9C6D49A14F014692C4D99EABC2958B771CFA2CC302288F335D575A289115334` |
-| `2026-08-31-silver-home-desktop.png` | 1425×5112 | 2,276,932 | `86FFECF1AE445CB01936B3125A099458F4DBC6E67E468CE86437A1B10B3E0839` |
-| `2026-08-31-silver-industries-desktop.png` | 1425×2550 | 1,013,944 | `901BBC1BF46B195A98315B191C935C36A7E133E5319AA0CD04EF056FF45DFD0B` |
-| `2026-08-31-silver-industry-detail-desktop.png` | 1425×5072 | 1,293,382 | `B87B3F253A94FF6BA3D1BD89365442411CE21EDDEAF70271E32FBDCE9E3ED23A` |
-| `2026-08-31-silver-resource-detail-desktop.png` | 1425×2550 | 655,436 | `9C07C99E9ECCB13410CA7FF0CC68A8A639674BA1B50AF1A97E6B17179215F0C4` |
-| `2026-08-31-silver-resources-desktop.png` | 1425×3404 | 1,059,816 | `5B7B9479FD08C60043B9B19B8B1D830EB2415749089B645687387B274C019484` |
-| `2026-08-31-silver-scenario-detail-desktop.png` | 1425×5112 | 1,347,779 | `041F494B261AB06F54BABB4BE72CD4FBA6591DDF8FC9E350BD85C3170D4FCF8C` |
-| `2026-08-31-silver-scenario-detail-mobile.png` | 375×7395 | 1,158,140 | `606A592E37F7F7EEFC0ECD5288075ACE156039D627D3292200F7AFBD12531E3C` |
-| `2026-08-31-silver-scenarios-desktop.png` | 1425×5112 | 1,519,334 | `B508A73FE577A85D12591F75B016EC9C954F522BD913D952945AF6B40CE53EBF` |
-| `2026-08-31-silver-scenarios-mobile.png` | 390×7252 | 637,380 | `1D3D8C7C53FB084169853728213CF1131F80302FE985862D308AF1C29125BEE4` |
-| `2026-08-31-silver-service-detail-desktop.png` | 1425×6780 | 1,598,188 | `B4DACCEA5748E22DAB36783BA3E6726D0FD4547187D615E47DA6A181D87F18C9` |
-| `2026-08-31-silver-services-desktop.png` | 1425×4258 | 1,126,933 | `444B488B645C8D5B7640525150EBC15660E36D615A1C909C6FB31E6FFF5AE28C` |
+| `2026-08-31-silver-about-desktop.png` | 1440×4132 | 809,989 | `5E1493C2AE3F550EB281BEE0A56F065700EEB9DF0A1A6F32CC23EF2B4BA10F94` |
+| `2026-08-31-silver-assessment-desktop.png` | 1440×3096 | 258,029 | `0F7AB27DD61749B0460EB2AD1E5B6C634D392EDDB4509C48497510C8611A7774` |
+| `2026-08-31-silver-assessment-mobile.png` | 390×3412 | 183,304 | `E1C4F928E1EF50A7A2DA0087C7C02A3FF81134CB8DC9D647BB3FD148A45136A3` |
+| `2026-08-31-silver-case-detail-desktop.png` | 1440×4132 | 832,059 | `B875D419CE494964F33F0012ECB003F7D8F112AC73FF7BF124BDB257AF7486C2` |
+| `2026-08-31-silver-cases-desktop.png` | 1440×2060 | 411,898 | `8B9C08CD3B0E6C8E319BE4343C288F78D3A6326DBDD67A39B4C914011357BB5B` |
+| `2026-08-31-silver-home-desktop.png` | 1440×6204 | 2,525,485 | `EE5AF06364CFB78BF325095A169429A516C11958486FB2FEB7C72104127F7B9B` |
+| `2026-08-31-silver-industries-desktop.png` | 1440×3096 | 638,297 | `884CE5B309ACC90BA0D78BC2C8D5B2DC9574CD434B6B0B379AA4908307095D8E` |
+| `2026-08-31-silver-industry-detail-desktop.png` | 1440×6204 | 913,105 | `00A42BDF5279DB7CC0D60F4E46ACF02D8F30B03EB18B6015E00C3C6C314A4665` |
+| `2026-08-31-silver-resource-detail-desktop.png` | 1440×3096 | 582,580 | `03458134E89C919E21FED2311FC2F2DB99525AFE9DCEC20D6FF66F45FADCC22A` |
+| `2026-08-31-silver-resources-desktop.png` | 1440×3096 | 522,515 | `6F8ABBEE509E6615E5A6154169571229E669F3FF755EF463DBE61FECB21E0C7C` |
+| `2026-08-31-silver-scenario-detail-desktop.png` | 1440×6204 | 977,911 | `BADC13F5A522F785F1BC1C07CB6A1A0F392294253CB076347C95CBC6718C78EB` |
+| `2026-08-31-silver-scenario-detail-mobile.png` | 390×8548 | 738,369 | `E64F2F2790B7A77EA73A7C14D080B4C1BD6A183374345B8C4224253ED474ABDA` |
+| `2026-08-31-silver-scenarios-desktop.png` | 1440×6204 | 976,532 | `B83B177F5074FE1DA5970035851135533F8A1E24E63BECE89BB13DD7834ABA96` |
+| `2026-08-31-silver-scenarios-mobile.png` | 390×7692 | 681,593 | `012041A0A76103A554A9DB7F3219778CF51575D08162589074B12528FE5631F8` |
+| `2026-08-31-silver-service-detail-desktop.png` | 1440×8276 | 1,080,411 | `C3C0D6D6F094774935D357DB93860E6F03B104D671625E309E1B74123F865E2E` |
+| `2026-08-31-silver-services-desktop.png` | 1440×5168 | 783,860 | `E2385F9232CA9FD2F471D8206BDF9731DDA17264D569C8CE70DCF28D3265F4B7` |
 
 All sixteen files have a PNG signature and were opened and inspected after final compositing.
 
@@ -94,7 +96,8 @@ All sixteen files have a PNG signature and were opened and inspected after final
 - Industry/scenario/service decision details were compared together. All retain truthful fact strips and five numbered alternating chapters while allowing content-specific density and imagery.
 - Case/resource details, assessment, and About were compared together. Their review dossier, conversion wizard, and manifesto structures remain distinct but coherent through the same palette, typography, spacing, and line discipline.
 - Fix1 closed two further P2s through fresh RED/GREEN and IAB evidence. Industry, scenario, and service primary decision CTAs compute to white `rgb(255,255,255)` text on signal-blue `rgb(15,111,239)` backgrounds. Scenario metadata at 390px occupies 298.4px with 210.4px `dd` values; at 320px it occupies 220.8px with 132.8px `dd` values. Both use `horizontal-tb`, naturally wrap, and keep `scrollWidth === clientWidth`.
-- Final judgment: no open P0, P1, or P2. The title/metric, CTA cascade, mobile metadata, and incomplete-frame P2s were closed through RED/GREEN plus fresh same-viewport and full-route evidence.
+- Final-review IAB computed audits find no visible sub-14px text on representative homepage, resource-detail, assessment-mobile, and scenario-detail-mobile routes. The only homepage sub-14 match is the real `aria-hidden=true` check glyph. At 390px, navigation/footer/footer-bottom/sticky text/button and assessment eyebrow/progress all compute to 14px, the desktop CTA is `display:none`, the mobile summary is `inline-flex` at 14px, and `scrollWidth === clientWidth === 375`.
+- Final judgment: no open P0, P1, or P2. The title/metric, CTA cascade, mobile metadata, incomplete-frame, auxiliary-type, and mobile-navigation cascade findings were closed through RED/GREEN plus fresh same-viewport and full-route evidence.
 
 ## Native interaction and accessibility truth
 
@@ -104,12 +107,12 @@ All sixteen files have a PNG signature and were opened and inspected after final
 | Desktop navigation and real link journey | PASS | Scenario nav → `/scenarios` → title link → `/scenarios/mfg-knowledge-assistant`; service nav → `/service-packages`; case nav → `/cases` → title link → `/cases/verified-automation-case`; header assessment action → `/assessment`. These were real clicks, separate from the direct-navigation viewport matrix. |
 | Detail-to-assessment link | PASS | Scenario detail `获取适配建议` was clicked to `/assessment`, where the landing `h1` was `企业 AI 就绪度评估`. |
 | Decision CTA contrast | PASS | Industry, scenario, and service primary CTAs each compute to white text on signal-blue and remain approximately 157×46px with no horizontal overflow. |
-| Scenario mobile metadata | PASS | At 390 and 320, metadata occupies the body column, uses horizontal writing, retains useful `dd` width, and no longer forms per-character vertical columns. The eight-frame 390 sheet reaches the complete footer. |
+| Scenario mobile metadata | PASS | At 390 and 320, metadata occupies the body column, uses horizontal writing, retains useful `dd` width, and no longer forms per-character vertical columns. The final nine-frame 390 sheet reaches the complete footer. |
 | Scenario filter | PASS | `manufacturing + pilot` returned 3 real rows. |
 | Scenario empty state and reset | PASS | `manufacturing + marketing + collaborate` returned 0 with the real empty state; clear/reset restored 12 rows. |
 | Resource filter | PASS | `guide` returned 3 real rows. |
 | External resource safety | PASS | The HTTPS source link exposes `target="_blank"` and `rel="noopener noreferrer"`. |
-| Mobile navigation | PASS | The menu expanded and its real About link reached `/about`. |
+| Mobile navigation | PASS | The desktop CTA is hidden at 390px; the single 14px `菜单` summary remains. The menu expanded and its real About link reached `/about`. |
 | Fast/reverse scroll and chapter state | PASS | Fast downward scroll to `y=2800` activated chapter `04`; reverse scroll to `y=1100` reactivated chapter `02`. |
 | Image hover | PASS | Native hover changed the image transform to a scale matrix of approximately `1.02`. |
 | Mobile footer arrival | PASS | The footer was reachable with all four groups complete and no content overlap. |
@@ -133,6 +136,7 @@ The keyboard and zoom entries are capability limitations, not PASS claims. Autom
 - Fix1 cleanup: IAB `Emulation.clearDeviceMetricsOverride` returned `{}`, the QA tab returned `tab closed`, and no acceptance tab/override remained. `netstat` identified only `127.0.0.1:55844 LISTENING 30340`; that exact PID was stopped. Final proof was `ProcessAlive=False`, `ListenerPresent=False`, and HTTP refused the connection.
 - Exact plan-owned scratch paths were checked to resolve below `.superpowers/sdd/2026-08-31-silver-evidence-public-ui/`, then removed: `task6-browser.db` (plus absent `-wal`/`-shm` companions), `task6-media`, `task6-raw`, and `test-tmp`. Every target reports `exists_after=False`.
 - Fix1 also removed only the exact plan-owned `task6-browser` raw-capture directory after the three accepted evidence sheets were written and inspected. Helpers, reports, references, and accepted evidence were preserved.
+- Final-review cleanup: CDP `Emulation.clearDeviceMetricsOverride` succeeded and acceptance tab `4` was closed at `/assessment`. Before stop, only `127.0.0.1:65353 LISTENING 6928` matched the fixture. Exact PID `6928` was stopped; final proof is `process_alive=False`, `listener_present=False`, and HTTP refused/unavailable. The resolved, inside-plan paths `task6-browser.db` (with absent WAL/SHM), `task6-media`, `final-review-browser`, `final-review-browser-v2`, `final-review-browser-v3`, and `test-tmp` were removed individually and all report `exists_after=False`.
 - Accepted `docs/design/evidence/*.png`, testing documentation, and the ignored Task 6 report/helpers were preserved. No broad deletion or production/external state was touched.
 
 ## Limitations

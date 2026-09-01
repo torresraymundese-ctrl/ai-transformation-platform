@@ -168,6 +168,31 @@ def _css_member_rule(css, selector):
     raise AssertionError(selector)
 
 
+def _css_member_rules(css, selector):
+    """Read every occurrence of a selector, including rules nested in media blocks."""
+    rules = []
+    for match in re.finditer(
+        r"(?ms)^(?P<selectors>[^{}]+)\{(?P<declarations>[^{}]*)\}", css
+    ):
+        selectors = [item.strip() for item in match.group("selectors").split(",")]
+        if selector in selectors:
+            rules.append(match.group("declarations"))
+    assert rules, selector
+    return rules
+
+
+def _css_font_size_rem(declarations, token_declarations):
+    """Resolve the rem font size from a parsed font-size or font shorthand."""
+    parsed = _css_declarations(declarations)
+    value = parsed.get("font-size", parsed.get("font"))
+    assert value is not None, declarations
+    for name, token_value in token_declarations.items():
+        value = value.replace(f"var({name})", token_value)
+    match = re.search(r"(?<![\w-])(\d*\.?\d+)rem(?=/|\s|$)", value)
+    assert match is not None, value
+    return float(match.group(1))
+
+
 def _css_token_color(tokens, declaration_value):
     match = re.fullmatch(r"var\((--ui-[a-z0-9-]+)\)", declaration_value)
     assert match is not None, declaration_value
@@ -230,6 +255,166 @@ def _css_specificity(selector):
         re.findall(r"(?:^|[\s>+~(])([a-zA-Z][a-zA-Z0-9_-]*)", without_not)
     )
     return ids, class_like, elements
+
+
+def test_public_auxiliary_labels_never_render_below_fourteen_pixels(client):
+    """Every visible public code, label, sequence, and help selector stays at least 14px."""
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    token_declarations = _css_declarations(_css_rule(tokens, ":root"))
+    stylesheets = {
+        "home": client.get("/static/css/dark-evidence-home.css").get_data(as_text=True),
+        "public": client.get("/static/css/silver-evidence-public.css").get_data(as_text=True),
+        "assessment": client.get("/static/css/assessment.css").get_data(as_text=True),
+    }
+    auxiliary_selectors = {
+        "home": (
+            ".home-dark-evidence .public-eyebrow",
+            ".home-dark-evidence .home-audit-note",
+            ".home-dark-evidence .home-inline-links a",
+            ".home-dark-evidence [data-demo-label]",
+            ".home-dark-evidence .home-case-links > a > span:first-child",
+            ".home-dark-evidence .home-news-row time",
+            ".home-dark-evidence .guided-story-progress a",
+        ),
+        "public": (
+            ".public-shell .footer h2",
+            ".public-shell .public-page-header__code",
+            ".public-shell .editorial-result-row__sequence",
+            ".public-shell .editorial-result-row__meta dt",
+            ".public-shell .decision-detail .detail-hero .public-eyebrow",
+            ".public-shell .decision-detail .decision-final-action .public-eyebrow",
+            ".public-shell .decision-detail .detail-facts dt",
+            ".decision-chapter__eyebrow",
+            ".decision-detail .decision-path li::before",
+            ".decision-detail .content-block--steps li::before",
+            ".decision-detail .content-block--download strong::before",
+            ".public-shell .editorial-cover .public-eyebrow",
+            ".public-shell .manifesto-cover .public-eyebrow",
+            ".public-shell .editorial-evidence > .public-eyebrow",
+            ".public-shell .review-dossier .public-eyebrow",
+            ".public-shell .editorial-meta dt",
+            ".public-shell .evidence-metric-row p span",
+            ".public-shell .editorial-content-flow .content-block--steps li::before",
+            ".public-shell .ui-status-content .public-eyebrow",
+        ),
+        "assessment": (
+            ".assessment-eyebrow",
+            ".assessment-progress-text",
+            ".assessment-time",
+            ".choice-copy small",
+            ".preview-summary dt",
+            ".field-optional",
+        ),
+    }
+
+    failures = []
+    for stylesheet_name, selectors in auxiliary_selectors.items():
+        css = stylesheets[stylesheet_name]
+        for selector in selectors:
+            font_rules = [
+                declarations
+                for declarations in _css_member_rules(css, selector)
+                if "font-size" in declarations
+                or re.search(r"(?:^|;)\s*font\s*:", declarations)
+            ]
+            assert font_rules, selector
+            for declarations in font_rules:
+                size = _css_font_size_rem(declarations, token_declarations)
+                if size < 0.875:
+                    failures.append(f"{stylesheet_name}: {selector} = {size}rem")
+
+    home = _page(client.get("/"))
+    audit_icon = home.select_one(".home-audit-note span")
+    assert audit_icon is not None and audit_icon.get("aria-hidden") == "true"
+    excluded_non_text_selectors = {".home-dark-evidence .home-audit-note span"}
+    classified_auxiliary_selectors = {
+        selector
+        for selectors in auxiliary_selectors.values()
+        for selector in selectors
+    }
+    for stylesheet_name, css in stylesheets.items():
+        for match in re.finditer(
+            r"(?ms)^(?P<selectors>[^{}]+)\{(?P<declarations>[^{}]*)\}", css
+        ):
+            declarations = match.group("declarations")
+            if "font-size" not in declarations and not re.search(
+                r"(?:^|;)\s*font\s*:", declarations
+            ):
+                continue
+            try:
+                size = _css_font_size_rem(declarations, token_declarations)
+            except AssertionError:
+                continue
+            if size >= 0.875:
+                continue
+            for selector in (item.strip() for item in match.group("selectors").split(",")):
+                if (
+                    selector not in excluded_non_text_selectors
+                    and selector not in classified_auxiliary_selectors
+                ):
+                    failures.append(f"{stylesheet_name}: unclassified {selector} = {size}rem")
+
+    if token_declarations.get("--ui-font-size-aux") != "0.875rem":
+        failures.append("tokens: --ui-font-size-aux must resolve to 0.875rem")
+    assert not failures, "\n".join(failures)
+
+
+def test_public_shell_overrides_legacy_navigation_footer_and_sticky_cta_type(client):
+    """The final public cascade must lift shared visible chrome to the 14px floor."""
+    page = _page(client.get("/assessment"))
+    hrefs = [link["href"] for link in page.select('link[rel="stylesheet"]')]
+    assert hrefs.index("/static/css/app.css") < hrefs.index(
+        "/static/css/silver-evidence-public.css"
+    )
+
+    tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
+    token_declarations = _css_declarations(_css_rule(tokens, ":root"))
+    legacy = client.get("/static/css/app.css").get_data(as_text=True)
+    public = client.get("/static/css/silver-evidence-public.css").get_data(as_text=True)
+    legacy_for_parse = re.sub(r"/\*.*?\*/", "", legacy, flags=re.DOTALL)
+    cascade_contracts = {
+        ".public-shell .nav-links a": ".nav-links a",
+        ".public-shell .nav-cta": ".nav-cta",
+        ".public-shell .mobile-navigation summary": ".mobile-navigation summary",
+        ".public-shell .mobile-navigation-panel a": ".mobile-navigation-panel a",
+        ".public-shell .footer": ".footer",
+        ".public-shell .footer a": ".footer a",
+        ".public-shell .footer-bottom": ".footer-bottom",
+        ".public-shell .sticky-cta .cta-text": ".sticky-cta .cta-text",
+        ".public-shell .sticky-cta .btn.btn-sm": ".btn-sm",
+    }
+
+    for public_selector, legacy_selector in cascade_contracts.items():
+        legacy_rules = [
+            declarations
+            for declarations in _css_member_rules(legacy_for_parse, legacy_selector)
+            if "font-size" in declarations
+        ]
+        assert legacy_rules, legacy_selector
+        public_rules = [
+            declarations
+            for declarations in _css_member_rules(public, public_selector)
+            if "font-size" in declarations
+            or re.search(r"(?:^|;)\s*font\s*:", declarations)
+        ]
+        assert public_rules, public_selector
+        assert _css_specificity(public_selector) >= _css_specificity(legacy_selector)
+        for declarations in public_rules:
+            assert _css_font_size_rem(declarations, token_declarations) >= 0.875
+
+    legacy_mobile_nav_cta = _css_declarations(
+        _css_rule_in_blocks(
+            _css_blocks(legacy, "@media (max-width: 768px)"), ".nav-cta"
+        )
+    )
+    assert legacy_mobile_nav_cta.get("display") == "none"
+    public_mobile_nav_cta = _css_declarations(
+        _css_rule_in_blocks(
+            _css_blocks(public, "@media (max-width: 767px)"),
+            ".public-shell .nav-cta",
+        )
+    )
+    assert public_mobile_nav_cta.get("display") == "none"
 
 
 def _contrast_ratio(foreground, background):

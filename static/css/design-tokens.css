@@ -39,6 +39,7 @@
   --ui-motion-story: 680ms;
   --ui-font-sans: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --ui-font-label: Inter, Arial, sans-serif;
+  --ui-font-size-aux: 0.875rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
