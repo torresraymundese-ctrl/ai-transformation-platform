@@ -32,6 +32,7 @@
   font-weight: 700;
   line-height: 1.02;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
 .assessment-hero__inner > p:last-child {

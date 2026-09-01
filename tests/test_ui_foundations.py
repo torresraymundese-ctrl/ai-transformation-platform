@@ -576,6 +576,42 @@ def test_decision_detail_css_stacks_the_split_cover_and_fact_strip_on_narrow_scr
     assert desktop_fact_value["overflow-wrap"] == "anywhere"
 
 
+def test_public_display_titles_balance_lines_and_widen_split_covers_at_large_viewports(client):
+    """Catch single-character title lines and squeezed 1440px split-cover copy."""
+    response = client.get("/static/css/silver-evidence-public.css")
+    css = response.get_data(as_text=True)
+    assessment_css = client.get("/static/css/assessment.css").get_data(as_text=True)
+
+    assert response.status_code == 200
+    for selector in (
+        ".public-shell .public-page-header h1",
+        ".public-shell .decision-detail .detail-hero h1",
+        ".public-shell .editorial-cover h1,\n.public-shell .manifesto-cover h1",
+    ):
+        assert _css_declarations(_css_rule(css, selector))["text-wrap"] == "balance"
+    assert _css_declarations(_css_rule(assessment_css, ".assessment-hero h1"))[
+        "text-wrap"
+    ] == "balance"
+
+    large_blocks = _css_blocks(css, "@media (min-width: 1280px)")
+    assert _css_declarations(_css_rule_in_blocks(
+        large_blocks, ".public-shell .public-page-header--with-art"
+    ))["grid-template-columns"] == "minmax(0, 1.1fr) minmax(18rem, 0.72fr)"
+    for selector in (
+        ".public-shell .decision-detail .detail-hero__grid",
+        ".public-shell .editorial-cover__grid,\n  .public-shell .manifesto-cover__grid",
+    ):
+        assert _css_declarations(_css_rule_in_blocks(large_blocks, selector))[
+            "grid-template-columns"
+        ] == "minmax(0, 1.12fr) minmax(22rem, 0.88fr)"
+
+    metric = _css_declarations(_css_rule_in_blocks(
+        large_blocks,
+        ".public-shell .evidence-metric-row .evidence-metric-row__values",
+    ))
+    assert metric["white-space"] == "nowrap"
+
+
 def test_decision_detail_css_numbers_primary_chapters(client):
     """Dropping the chapter counter would remove the report-like decision hierarchy."""
     response = client.get("/static/css/silver-evidence-public.css")

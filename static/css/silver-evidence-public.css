@@ -130,6 +130,7 @@
   font-size: clamp(3.5rem, 5.2vw, 4.5rem);
   line-height: 1.02;
   letter-spacing: -0.035em;
+  text-wrap: balance;
 }
 
 .public-shell .public-page-header__copy > p:last-child {
@@ -343,6 +344,7 @@
   font-weight: 700;
   line-height: 1.02;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
 .public-shell .decision-detail .detail-hero__copy > p:last-child {
@@ -590,6 +592,15 @@
 .decision-detail .content-block--cta .btn { min-height: 2.75rem; }
 .decision-detail [data-content-block-body="cta"] { max-width: 72ch; margin-top: 0.75rem; }
 
+@media (min-width: 1280px) {
+  .public-shell .public-page-header--with-art {
+    grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.72fr);
+  }
+  .public-shell .decision-detail .detail-hero__grid {
+    grid-template-columns: minmax(0, 1.12fr) minmax(22rem, 0.88fr);
+  }
+}
+
 @media (max-width: 1023px) {
   .public-shell .decision-detail .detail-hero__grid { grid-template-columns: minmax(0, 0.88fr) minmax(17rem, 0.82fr); }
   .public-shell .decision-detail .detail-hero__copy { padding-right: 2rem; }
@@ -707,6 +718,7 @@
   font-weight: 700;
   line-height: 1.02;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
 .public-shell .editorial-cover__copy > p:last-child,
@@ -845,6 +857,15 @@
 .public-shell .editorial-content-flow .content-block--metric { display: grid; grid-template-columns: auto auto 1fr; gap: 0.5rem 0.75rem; align-items: end; padding: clamp(1.5rem, 3vw, 2.5rem) 0; border-bottom: 1px solid var(--ui-line-200); }
 .public-shell .editorial-content-flow .content-block--metric h3 { grid-column: 1 / -1; margin: 0; }
 .public-shell .editorial-content-flow .content-block--metric strong { color: var(--ui-signal-blue); font: 500 clamp(3rem, 6vw, 5.25rem)/0.95 var(--ui-font-label); font-variant-numeric: tabular-nums; letter-spacing: -0.06em; }
+
+@media (min-width: 1280px) {
+  .public-shell .editorial-cover__grid,
+  .public-shell .manifesto-cover__grid {
+    grid-template-columns: minmax(0, 1.12fr) minmax(22rem, 0.88fr);
+  }
+  .public-shell .evidence-metric-row .evidence-metric-row__values { white-space: nowrap; }
+}
+
 .public-shell .editorial-content-flow .content-block--steps ol { margin: 1.25rem 0 0; padding: 0; list-style: none; counter-reset: editorial-step; border-top: 1px solid var(--ui-line-200); }
 .public-shell .editorial-content-flow .content-block--steps li { position: relative; padding: 1rem 0 1rem 3.5rem; border-bottom: 1px solid var(--ui-line-200); }
 .public-shell .editorial-content-flow .content-block--steps li::before { position: absolute; left: 0; counter-increment: editorial-step; content: counter(editorial-step, decimal-leading-zero); color: var(--ui-ink-650); font: 700 0.8rem/1.2 var(--ui-font-label); letter-spacing: 0.08em; }

@@ -1,47 +1,57 @@
-# Dark evidence homepage — blocking design QA
+# Silver Evidence public UI — blocking design QA
 
-## Scope and frozen target
+## Scope and gate
 
-- Frozen implementation base: `12ec7056a2cc1a952f5bec5ee7727ae2447fb318`.
-- Binding visual target: selected option 1, `C:/Users/zz/.codex/generated_images/01a03349-721a-7df2-b234-cd675d8d96d1/exec-adcdb983-d7e6-468e-ae5c-a847303e8c60.png`.
-- Scope: homepage only, exercised against a fresh deterministic SQLite/media fixture on `127.0.0.1:57561` with the Codex in-app Browser.
-- No production host, real database, external network, deployment surface, or full suite was used.
+- Frozen plan base: `d5d8445f0ac1b4425db905062a63330e4764e165`.
+- Bound inputs: the Silver Evidence public UI spec, exact homepage/detail reference PNGs, and deterministic published local content.
+- Surface: Codex in-app Browser at desktop and mobile responsive states; no Chrome, Computer Use, Playwright CLI, production, network, deployment, admin/Task12, Stage 5B, or repository-wide full suite.
+- Final evidence: sixteen inspected true-PNG evidence sheets covering each route through its footer.
 
-## Same-input visual comparison
+## Blocking visual verdict
 
-The selected reference and the fresh Fix3 1440×1024 full-page evidence sheet were inspected together in one image-comparison input. The fresh 1024×900, 910×900, and 390×844 full-page evidence sheets were inspected together in a second input. Unlike the rejected viewport-only evidence, each sheet now exposes the complete journey from Hero through chapters 02—05, applications, proof/case, news, final CTA, and footer. The result preserves the selected direction at every responsive regime: black/white/electric-blue palette, editorial type scale, dark opening stage, right-weighted AI visual, low-radius thin-boundary components, large image crops, evidence/news sequence, and a quiet final conversion block. The Hero contains exactly one action and a plain audited-content note, with no scenario catalog entry.
+Homepage/detail reference pairs were inspected in same-input native-pixel comparisons. Five list pages, three decision-detail pages, and four editorial/conversion pages were also compared as families.
 
-No P0–P2 remained after recapture. The 1024 and 910 states retain a deliberate two-line heading and keep the fixed chapter rail outside both copy and artwork. The 390 state stacks the hero, keeps the chapter strip horizontally scrollable without causing page overflow, and preserves readable actions and evidence rows. A separate 320×844 boundary check reported `scrollWidth === clientWidth` and `scrollX=0` after an attempted horizontal scroll.
-
-The in-app Browser was set to the exact requested emulation states. Because its full-page compositor visibly duplicated sticky sections and its screenshot bytes are JPEG, that output was rejected. Instead, genuine viewport captures were taken at named page anchors. Desktop/1024/910 use eight captures; mobile uses ten. Offline Pillow decoded each capture and assembled it 1:1—without crop or scale—with only a 12px `#0b0f15` separator, then encoded the sheet as PNG. The final PNGs are 1425×6796, 1009×6772, 895×6756, and 375×8218; every file has the PNG signature and Pillow reports `format=PNG`.
+- The homepage retains the binding bright silver subject, near-black opening stage, warm-white hierarchy, one blue action, large editorial type, and disciplined lines/radii. Its larger local crop and intentional omission of a competing header CTA are accepted P3 distinctions.
+- Scenario detail retains the binding split cover, truthful five-part fact strip, bright industrial subject, single-line 1440px title, five numbered chapters, restrained blue, and dark/light rhythm. Its local production image replaces the reference mock's augmented overlay without losing content truth.
+- List pages share the same cover, 1280px alignment, editorial rows, filter language, thin rules, and action treatment without becoming identical: scenarios/resources preserve filters, services preserve category boundaries, and the single case remains a full-width result rather than a sparse card grid.
+- Industry/scenario/service details share fact strips and five-chapter decision structure. Case/resource details, assessment, and About remain distinct review, conversion, and manifesto experiences inside the same typographic and color system.
+- Desktop/mobile stacking, footer arrival, horizontal overflow, image legibility, content truth, and reveal completion were inspected. Final captures use at least 1050ms post-scroll settle; no transition-gray frames remain.
 
 ## Findings and closure
 
 | Severity | State | Finding | Closure |
 |---|---|---|---|
-| P2 | Hero catalog-entry boundary | The first Task 4 evidence round exposed a published scenario link in `story-purpose`, conflicting with the binding one-action Hero and later-chapter catalog-entry contract. | Closed in `e0e3619`: the Hero is again a non-interactive `基于已审核内容` note; the scenario URL contract now points to `story-matching` and explicitly forbids a Hero scenario href/label. Fresh scoped result `395 passed`. |
-| P2 | 1024/910/390 responsive states | The 910 rail overlapped the Hero artwork, the 1024 heading left a one-character final line, and mobile chapter labels collapsed into each other with a coarse scrollbar. | Closed in `620bc4a`: reserved rail space, corrected compact heading scale, and added unshrinking scrollbar-free mobile step slots; fresh UI responsibility result `39 passed`. |
-| P2 | Chapter 05 interaction | The very tall evidence chapter could not cross the observer's former 0.25 minimum, so its active state stayed on chapter 04 after navigation. | Closed in `ce026ae`: included a 0.05 observer threshold; fresh Node responsibility result `22 passed`, and Browser click proof showed matching hash/current/active state. |
-| P2 | 320px boundary | The root 20rem minimum created 15px of reachable page-level horizontal overflow. | Closed in `580a8ef`: root minimum is zero while children retain their own bounds; fresh UI responsibility result `39 passed`, Browser `scrollX=0`. |
-| P2 | Evidence format and page coverage | The first evidence files used `.png` names for viewport-only JFIF/JPEG bytes, so later chapters and the footer could not be independently reviewed. | Closed in Fix2: four true-PNG same-viewport evidence sheets now expose Hero, chapters 02—05, applications, proof/case, news, final CTA, and footer; dimensions, bytes, hashes, and assembly method are recorded. |
-| P2 | Chapter ownership and active-state alignment | Full-plan review found `.home-positioning` nested in assessment and applications nested in evidence. After those DOM boundaries were corrected, the central observer band still advanced short desktop chapters one step early. | Closed in Fix3: `9eb5707` binds positioning to purpose, applications to roadmap, and proof-first evidence; `ea470ae` moves the native-scroll observer to an upper 20% band without adding wheel interception. Fresh Browser anchors at 1440/1024/910/390 now activate purpose, assessment, matching, roadmap, and evidence according to the corrected ownership. |
-| P3 | Reference fidelity | The generated reference has slightly brighter abstract art and a duplicate-looking nav CTA; the implementation uses the approved darker local artwork and intentionally omits the duplicate root conversion action required by the navigation spec. | Accepted implementation distinction; no usability or information loss. |
+| P2 | Closed | Scenario detail `制造知识助手` left an isolated `手` at desktop. | Shared balanced-title contract plus widened `>=1280px` split cover; Browser proves single line at 1440 and 390 with no overflow. |
+| P2 | Closed | Services title left `包` alone. | Same shared title contract; Browser proves balanced two-line desktop result. |
+| P2 | Closed | Case title left `例` alone and `8 小时 → 2 小时` isolated its last `时`. | Balanced editorial cover plus desktop-only metric nowrap; Browser proves balanced heading and one-line value. |
+| P2 | Closed | Assessment title produced an unbalanced final word/character at desktop/mobile. | Shared balanced title treatment; Browser proves two balanced lines at desktop and 390. |
+| Evidence quality | Closed | Full-page compositor duplicated sticky/reveal regions and produced false mobile blanks. | Rejected compositor output. Genuine Browser viewport frames are preserved 1:1 with explicit 12px separators and overlap. |
+| Evidence quality | Closed | First segment round caught 700–800ms reveal transitions at 650ms. | All sixteen routes recaptured after 1100ms load and at least 1050ms per scroll; centered frames make resource filter, case meta, and About 01 fully visible. |
 
-## Interaction and accessibility evidence
+The shared P2 correction was test-first: isolated RED `KeyError: 'text-wrap'`, then GREEN `1 passed`; the final full responsibility set is `579 passed`, and Node runtime is `34/34` pass. No open P0, P1, or P2 remains.
 
-- All five chapter controls reached their exact chapter IDs; chapter 05 finished with `hash`, current link, and active section all equal to `story-evidence`.
-- Anchor-by-anchor active-state evidence follows the bound DOM ownership: Hero/positioning → purpose, capability 01 → assessment, capability 02 → matching, capability 03/applications → roadmap, and proof/news/final/footer → evidence at all four requested widths.
-- Fast downward and reverse scrolling updated the active chapter without wheel interception.
-- Hero and final assessment actions reached `/assessment`; scenario, service, verified case, and reviewed resource links reached their real local routes.
-- Mobile menu opened; Escape closed it and restored focus to its summary control. Its AI-scene link reached `/scenarios`.
-- Final CTA and footer were visible and unoverlapped at 1440, 1024, 910, and 390; console errors and warnings were both zero.
-- Native Tab traversal is **NOT PROVEN** because the in-app Browser key surface did not expose an observable focus advance. Escape behavior is proven.
-- Native reduced-motion emulation is **NOT PROVEN** in this Browser surface. The runtime test proves the reduced-motion branch remains static and does not create the observer.
-- Native 200% zoom is **NOT PROVEN** because repeated browser zoom keys did not change the observable viewport or device scale. A 720px half-width geometry proxy for a 1440px page passed without overflow, clipping, or action loss; it is recorded only as a proxy.
-- This is not a full WCAG conformance audit.
+## Interaction and accessibility truth
 
-## Evidence and cleanup
+PASS:
 
-Four post-Fix3 full-page evidence-sheet PNGs are stored under `docs/design/evidence/`. Each sheet was visually inspected from Hero to footer; the rejected compositor output is not evidence. The disposable Browser and exact fixture cleanup are recorded in the testing report.
+- 25 responsive route/viewport checks across 1440, 1024, 910, 390, and 320 retained one `h1`, `main`, and `nav` with no horizontal overflow.
+- Real clicks cover desktop nav, list-to-detail, detail-to-assessment, header assessment, and mobile menu-to-About journeys.
+- Scenario filters returned a 3-row valid result and a real 0-row empty state; clear restored 12. Resource guide filter returned 3.
+- HTTPS external resource links expose `_blank` plus `noopener noreferrer`.
+- Fast downward and reverse scrolling updated guided-story chapters from 04 back to 02. Native hover scaled the detail image.
+- Mobile footer arrival exposes all four groups without overlap.
+- Assessment empty-selection validation and selected-industry retention passed; the disposable fixture's recoverable option-load error was visible.
+- Reduced-motion emulation made the media query true, left the story static, removed the image transition, preserved no overflow, and was reset afterward.
+
+NOT PROVEN:
+
+- Native Tab, Shift+Tab, Enter, and Space: the IAB keypress surface produced no observable focus/action movement, so no programmatic substitute is claimed.
+- Native 200% zoom: the IAB surface exposes no browser-zoom API; responsive geometry is not mislabeled as zoom proof.
+- Pagination: the deterministic fixture has 12 scenarios and the UI minimum page size is 20, so a second page does not exist.
+- Complete six-step assessment next/back: after industry selection the disposable fixture returned `评估选项暂时无法加载`; validation, recoverable error, and retained selection are proven, but the full journey is not.
+
+This is a blocking design and interaction audit, not a full WCAG conformance claim. Exact commands, image hashes/dimensions, capture method, interaction evidence, limitations, and cleanup are recorded in `docs/testing/silver-evidence-public-ui.md`.
+
+Browser/fixture cleanup completed precisely: the media override and viewport were reset, the acceptance tab closed, PID `3792` stopped, PID `17188` confirmed absent, `:51838` lost its listener, HTTP refused the connection, and only plan-owned scratch data was removed.
 
 final result: passed
