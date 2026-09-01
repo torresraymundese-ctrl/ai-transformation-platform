@@ -207,6 +207,8 @@ git commit -m "feat: review fetched content into drafts"
 - Create: `templates/admin/_pagination.html`
 - Create: `tests/test_operations_pagination.py`
 - Modify: `tests/test_app_factory_and_migrations.py`
+- Modify: `tests/test_content_migrations.py`
+- Modify: `tests/test_v2_migrations.py`
 - Modify: `pagination.py`
 - Modify: `blueprints/admin/leads.py`
 - Modify: `blueprints/admin/catalog.py`
@@ -268,14 +270,14 @@ def query_appointments(filters: AppointmentFilters,
 
 - [ ] **Step 4: Update routes/templates and run related tests**
 
-Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_operations_pagination.py tests/test_lead_operations.py tests/test_appointments.py tests/test_catalog_content_admin.py tests/test_verified_cases.py tests/test_resources_announcements.py tests/test_media_http.py tests/test_content_ingestion.py tests/test_app_factory_and_migrations.py -q`
+Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_operations_pagination.py tests/test_lead_operations.py tests/test_appointments.py tests/test_catalog_content_admin.py tests/test_verified_cases.py tests/test_resources_announcements.py tests/test_media_http.py tests/test_content_ingestion.py tests/test_app_factory_and_migrations.py tests/test_content_migrations.py tests/test_v2_migrations.py -q`
 
 Expected: PASS with existing lead/appointment state transitions unchanged.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/012_operations_query_indexes.sql pagination.py lead_repository.py appointment_repository.py catalog_content_repository.py case_repository.py resource_repository.py ingestion_repository.py media_service.py blueprints/admin/leads.py blueprints/admin/catalog.py blueprints/admin/cases.py blueprints/admin/resources.py blueprints/admin/ingestion.py blueprints/admin/media.py templates/admin/_pagination.html templates/admin/leads.html templates/admin/appointments.html templates/admin/data_requests.html templates/admin/catalog_list.html templates/admin/case_list_v2.html templates/admin/resource_list_v2.html templates/admin/ingestion.html templates/admin/media.html tests/test_operations_pagination.py tests/test_app_factory_and_migrations.py
+git add migrations/012_operations_query_indexes.sql pagination.py lead_repository.py appointment_repository.py catalog_content_repository.py case_repository.py resource_repository.py ingestion_repository.py media_service.py blueprints/admin/leads.py blueprints/admin/catalog.py blueprints/admin/cases.py blueprints/admin/resources.py blueprints/admin/ingestion.py blueprints/admin/media.py templates/admin/_pagination.html templates/admin/leads.html templates/admin/appointments.html templates/admin/data_requests.html templates/admin/catalog_list.html templates/admin/case_list_v2.html templates/admin/resource_list_v2.html templates/admin/ingestion.html templates/admin/media.html tests/test_operations_pagination.py tests/test_app_factory_and_migrations.py tests/test_content_migrations.py tests/test_v2_migrations.py
 git commit -m "feat: paginate operations lists"
 ```
 
