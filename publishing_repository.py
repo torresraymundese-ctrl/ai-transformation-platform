@@ -6,6 +6,7 @@ from html import unescape
 import json
 import re
 import sqlite3
+from urllib.parse import urlsplit
 
 from assessment.reporting import RISK_EXPLANATIONS, RISK_LABELS
 from content_clock import format_shanghai
@@ -234,8 +235,12 @@ def _replace_children(db, content_id, draft, *, delete_existing):
         )
 
 
-def _insert_content_draft(db, draft, *, actor, now, event_code):
-    validated = validate_content_draft(draft)
+def _insert_content_draft(
+    db, draft, *, actor, now, event_code, allow_private_http_source=False
+):
+    validated = validate_content_draft(
+        draft, allow_private_http_source=allow_private_http_source
+    )
     if validated.entry_type in {"case", "resource"} and any(
         value is not None for value in _source_tuple(validated.extension)
     ):
@@ -275,10 +280,22 @@ def _insert_content_draft(db, draft, *, actor, now, event_code):
     return content_id
 
 
-def insert_content_draft(db: sqlite3.Connection, draft: ContentDraft, *, actor: str, now) -> int:
+def insert_content_draft(
+    db: sqlite3.Connection,
+    draft: ContentDraft,
+    *,
+    actor: str,
+    now,
+    allow_private_http_source=False,
+) -> int:
     """Insert a complete aggregate without committing the caller's transaction."""
     return _insert_content_draft(
-        db, draft, actor=actor, now=now, event_code="content_created"
+        db,
+        draft,
+        actor=actor,
+        now=now,
+        event_code="content_created",
+        allow_private_http_source=allow_private_http_source,
     )
 
 
@@ -420,7 +437,9 @@ def load_content_draft(db, content_id):
 def _load_validated_publication_draft(db, content_id):
     raw_draft = load_content_draft(db, content_id)
     try:
-        draft = validate_content_draft(raw_draft)
+        draft = validate_content_draft(
+            raw_draft, allow_private_http_source=True
+        )
     except ContentValidationError as error:
         if raw_draft.entry_type == "service" and error.code == "maturity_invalid":
             raise ContentValidationError("service_public_incomplete") from error
@@ -486,7 +505,8 @@ def _validate_required_source(draft, now):
     now_text = format_shanghai(now)
     freshness_floor = format_shanghai(now - timedelta(days=7))
     if (
-        draft.extension.get("source_check_code") != "https_ok"
+        urlsplit(draft.extension.get("source_url") or "").scheme != "https"
+        or draft.extension.get("source_check_code") != "https_ok"
         or draft.extension.get("source_check_url_sha256") != source_hash
         or not checked_at
         or checked_at < freshness_floor

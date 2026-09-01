@@ -82,7 +82,9 @@ def test_ingestion_schema_is_appended_after_009_without_publishing_content(db):
         "unique_ingestion_candidate_canonical_url",
         "unique_ingestion_candidate_content_sha256",
     } <= unique_indexes
-    assert versions[-2:] == ["009_case_basis_types", "010_ingestion_operations"]
+    assert versions.index("010_ingestion_operations") == (
+        versions.index("009_case_basis_types") + 1
+    )
     assert db.execute("SELECT COUNT(*) FROM ingestion_candidates").fetchone()[0] == 0
     assert (
         db.execute(
@@ -937,7 +939,13 @@ def test_migration_upgrades_exact_001_through_009_and_preserves_sentinel(
         )
         connection.commit()
 
-        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", project_root / "migrations")
+        task13_dir = tmp_path / "task13-migration-only"
+        task13_dir.mkdir()
+        shutil.copy2(
+            project_root / "migrations" / "010_ingestion_operations.sql",
+            task13_dir / "010_ingestion_operations.sql",
+        )
+        monkeypatch.setattr(migrations, "MIGRATIONS_DIR", task13_dir)
         migrations.apply_migrations(connection)
         migrations.apply_migrations(connection)
         versions = [

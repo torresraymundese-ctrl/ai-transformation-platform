@@ -279,9 +279,9 @@ def protect_admin_routes():
         return redirect(url_for("admin.admin_login", next=request.path))
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not csrf_is_valid():
         abort(403)
-    if request.path == "/admin/scrape" and request.method == "POST":
+    if request.endpoint == "admin.admin_scrape" and request.method == "POST":
         if not consume_rate_limit(
-            "admin_scrape",
+            "admin_ingestion_fetch",
             current_app.config["SCRAPE_RATE_LIMIT"],
             current_app.config["SCRAPE_RATE_WINDOW"],
         ):

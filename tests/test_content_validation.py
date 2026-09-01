@@ -240,6 +240,15 @@ def _external_resource(**extension_changes):
     )
 
 
+def test_ordinary_resource_validation_keeps_http_source_rejected():
+    with pytest.raises(ContentValidationError) as error:
+        validate_content_draft(
+            _external_resource(source_url="http://example.com/private-report")
+        )
+
+    assert error.value.code == "source_url_invalid"
+
+
 def _industry_draft(*, relations):
     return ContentDraft(
         entry_type="industry",

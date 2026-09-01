@@ -173,6 +173,21 @@ def _normalize_https_url(value):
     return normalized
 
 
+def _normalize_reviewed_resource_url(value):
+    """Permit reviewed HTTP only while the resource remains a private draft."""
+    if type(value) is not str or len(value) > MAX_PUBLIC_URL_LENGTH:
+        raise ContentValidationError("source_url_invalid")
+    normalized, error = normalize_source_url(value)
+    if (
+        error
+        or not normalized
+        or len(normalized) > MAX_PUBLIC_URL_LENGTH
+        or urlsplit(normalized).scheme not in {"http", "https"}
+    ):
+        raise ContentValidationError("source_url_invalid")
+    return normalized
+
+
 def _safe_cta(value):
     if (
         type(value) is not str
@@ -299,7 +314,7 @@ def _validate_block(block, index):
     )
 
 
-def _validate_extension(draft):
+def _validate_extension(draft, *, allow_private_http_source=False):
     extension = dict(draft.extension)
     entry_type = draft.entry_type
     if entry_type in {"industry", "scenario", "service"}:
@@ -359,7 +374,11 @@ def _validate_extension(draft):
             extension["source_name"] = _require_text(
                 extension["source_name"], 200, "source_required"
             )
-            extension["source_url"] = _normalize_https_url(extension["source_url"])
+            extension["source_url"] = (
+                _normalize_reviewed_resource_url(extension["source_url"])
+                if allow_private_http_source
+                else _normalize_https_url(extension["source_url"])
+            )
             import hashlib
 
             extension["source_url_sha256"] = hashlib.sha256(extension["source_url"].encode()).hexdigest()
@@ -560,7 +579,9 @@ def _validate_metrics(draft):
     return tuple(validated)
 
 
-def validate_content_draft(draft: ContentDraft) -> ContentDraft:
+def validate_content_draft(
+    draft: ContentDraft, *, allow_private_http_source=False
+) -> ContentDraft:
     if (
         not isinstance(draft, ContentDraft)
         or type(draft.entry_type) is not str
@@ -614,7 +635,9 @@ def validate_content_draft(draft: ContentDraft) -> ContentDraft:
             raise ContentValidationError("maturity_invalid")
     elif draft.maturity_codes:
         raise ContentValidationError("maturity_invalid")
-    extension = _validate_extension(draft)
+    extension = _validate_extension(
+        draft, allow_private_http_source=allow_private_http_source is True
+    )
     metrics = _validate_metrics(draft)
     validated = replace(
         draft,

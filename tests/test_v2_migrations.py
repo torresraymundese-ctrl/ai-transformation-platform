@@ -136,6 +136,7 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
         "008_service_content_maturity",
         "009_case_basis_types",
         "010_ingestion_operations",
+        "011_private_http_resource_drafts",
     ]
     assert {
         "submission_key",

@@ -592,7 +592,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "010_ingestion_operations"
+        )][-1] == "011_private_http_resource_drafts"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
@@ -1288,6 +1288,9 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         "require_new_ingestion_candidate_fetched",
         "prevent_sensitive_governance_audit_metadata_insert",
         "prevent_sensitive_governance_audit_metadata_update",
+        "restrict_http_resource_insert",
+        "restrict_http_resource_update",
+        "restrict_http_resource_owner_transition",
     }
     actual_triggers = {
         row[0]

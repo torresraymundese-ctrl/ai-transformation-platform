@@ -13,6 +13,7 @@ import legacy_content_migration
 import media_service
 import models
 import publishing_service
+import scraper
 from content_clock import shanghai_now
 from models import init_db
 from source_url_checker import PinnedHttpTransport
@@ -78,6 +79,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Manage the AI platform")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("migrate", help="Apply database migrations and seed defaults")
+    subcommands.add_parser(
+        "fetch-content",
+        help="Fetch explicitly enabled reviewed sources into the private queue",
+    )
     inventory = subcommands.add_parser(
         "inventory-content",
         help="Print a local-only legacy content review inventory",
@@ -137,6 +142,22 @@ def main(argv=None):
 
     if args.command == "migrate":
         init_db()
+        return 0
+    if args.command == "fetch-content":
+        try:
+            result = scraper.run_scraper()
+        except scraper.IngestionQueueNotReadyError:
+            print("error=ingestion_queue_not_ready", file=sys.stderr)
+            return 1
+        except (OSError, sqlite3.Error, ValueError, RuntimeError):
+            print("error=ingestion_failed", file=sys.stderr)
+            return 1
+        identifiers = ",".join(str(item) for item in result.created_ids) or "none"
+        print(
+            f"created_count={len(result.created_ids)} created_ids={identifiers} "
+            f"deduplicated={result.deduplicated} attempted_sources={result.attempted_sources} "
+            f"failed_sources={result.failed_sources}"
+        )
         return 0
     if args.command == "inventory-content":
         db = None

@@ -1,0 +1,33 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+  <div>
+    <h2>内容接入审核</h2>
+    <p style="color:var(--text-secondary);">仅显示固定、经审核来源进入的候选内容。</p>
+  </div>
+  <form method="post" action="/admin/scrape">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-primary" type="submit">抓取已启用来源</button>
+  </form>
+</div>
+<div class="card" style="padding:20px;">
+  {% if candidates %}
+    <table style="width:100%;border-collapse:collapse;">
+      <thead><tr><th>编号</th><th>来源</th><th>标题</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for candidate in candidates %}
+        <tr>
+          <td>{{ candidate.id }}</td>
+          <td>{{ candidate.source_name }}</td>
+          <td>{{ candidate.title }}</td>
+          <td>{{ candidate.state }}</td>
+          <td><a href="/admin/ingestion/{{ candidate.id }}">查看并选择</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>当前没有候选内容。</p>
+  {% endif %}
+</div>
+{% endblock %}

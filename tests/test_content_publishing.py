@@ -324,6 +324,68 @@ def test_invalid_resource_scalar_rolls_back_without_sqlite_error_or_residue(db):
     assert db.execute("SELECT COUNT(*) FROM content_audit_events").fetchone()[0] == 0
 
 
+def test_http_resource_draft_cannot_publish_even_with_forged_fresh_check(db):
+    source_url = "http://example.com/private-report"
+    source_hash = hashlib.sha256(source_url.encode()).hexdigest()
+    db.execute("BEGIN IMMEDIATE")
+    content_id = publishing_repository.insert_content_draft(
+        db,
+        _resource("private-http-report", source_url=source_url),
+        actor="admin",
+        now=NOW,
+        allow_private_http_source=True,
+    )
+    db.commit()
+    db.execute(
+        "UPDATE resource_content SET source_check_code='https_ok',"
+        "source_checked_at='2026-08-24 09:00:00',"
+        "source_check_expires_at='2099-01-01 00:00:00',"
+        "source_check_url_sha256=? WHERE content_item_id=?",
+        (source_hash, content_id),
+    )
+    db.commit()
+
+    with pytest.raises(ContentValidationError) as error:
+        publish_content(content_id, 1, actor="admin", now=NOW)
+
+    assert error.value.code == "source_check_invalid"
+    assert tuple(
+        db.execute(
+            "SELECT status,lock_version,published_at FROM content_items WHERE id=?",
+            (content_id,),
+        ).fetchone()
+    ) == ("draft", 1, None)
+
+
+def test_private_http_insert_requires_explicit_internal_opt_in(db):
+    db.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ContentValidationError) as error:
+        publishing_repository.insert_content_draft(
+            db,
+            _resource("ordinary-http-report", source_url="http://example.com/report"),
+            actor="admin",
+            now=NOW,
+        )
+    db.rollback()
+
+    assert error.value.code == "source_url_invalid"
+
+
+def test_private_http_opt_in_requires_the_exact_internal_boolean(db):
+    db.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ContentValidationError) as error:
+        publishing_repository.insert_content_draft(
+            db,
+            _resource("invalid-http-opt-in", source_url="http://example.com/report"),
+            actor="admin",
+            now=NOW,
+            allow_private_http_source=1,
+        )
+    db.rollback()
+
+    assert error.value.code == "source_url_invalid"
+
+
 def test_explicit_core_group_identity_mismatch_is_a_stable_validation_error(db):
     scenario_ids = [
         row[0]
