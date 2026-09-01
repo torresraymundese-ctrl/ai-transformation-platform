@@ -474,8 +474,8 @@
 .decision-detail [data-decision-chapter] > h2 + section h3 { margin-top: 1.5rem; }
 .decision-detail [data-decision-chapter] p,
 .decision-detail [data-decision-chapter] li { line-height: 1.75; }
-.decision-detail [data-decision-chapter] a { color: var(--ui-signal-blue); }
-.decision-detail [data-decision-chapter]:nth-child(even) a { color: var(--ui-paper-000); text-decoration-color: var(--ui-signal-blue); }
+.decision-detail [data-decision-chapter] a:not(.btn) { color: var(--ui-signal-blue); }
+.decision-detail [data-decision-chapter]:nth-child(even) a:not(.btn) { color: var(--ui-paper-000); text-decoration-color: var(--ui-signal-blue); }
 
 .decision-detail .decision-subsection { margin-top: clamp(2rem, 4vw, 3.5rem); }
 .decision-detail .decision-subsection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(1.5rem, 4vw, 4rem); margin-top: clamp(2rem, 4vw, 3.5rem); }
@@ -656,6 +656,11 @@
     grid-template-columns: 2.75rem minmax(0, 1fr);
     gap: 1rem;
     padding-block: 2.5rem;
+  }
+  .public-shell .public-scenarios .scenario-signal-row .editorial-result-row__meta {
+    grid-column: 2;
+    min-width: 0;
+    width: auto;
   }
 }
 

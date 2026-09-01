@@ -9,6 +9,7 @@ from pypdf import PdfWriter
 import pytest
 
 import models
+import blueprints.public_catalog as public_catalog_blueprint
 import case_repository
 import publishing_repository
 from content_clock import SHANGHAI
@@ -420,8 +421,9 @@ def test_public_source_check_requires_auth_csrf_hash_lock_and_seven_day_freshnes
 
 
 def test_public_source_case_uses_the_exact_public_authenticity_label(
-    admin_client, db
+    admin_client, db, monkeypatch
 ):
+    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: NOW)
     source_url = "https://example.com/labeled-public-case"
     draft = _create_case(
         admin_client,

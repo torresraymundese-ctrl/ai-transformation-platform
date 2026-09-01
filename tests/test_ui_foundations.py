@@ -220,6 +220,18 @@ def _css_declarations(declarations):
     }
 
 
+def _css_specificity(selector):
+    """Return the CSS specificity tuple needed by the public layout contracts."""
+    without_not = selector.replace(":not(", "(")
+    ids = len(re.findall(r"#[a-zA-Z0-9_-]+", without_not))
+    class_like = len(re.findall(r"\.[a-zA-Z0-9_-]+|\[[^\]]+\]", without_not))
+    class_like += len(re.findall(r":(?!:)[a-zA-Z0-9_-]+", without_not))
+    elements = len(
+        re.findall(r"(?:^|[\s>+~(])([a-zA-Z][a-zA-Z0-9_-]*)", without_not)
+    )
+    return ids, class_like, elements
+
+
 def _contrast_ratio(foreground, background):
     def luminance(color):
         channels = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
@@ -477,6 +489,44 @@ def test_decision_cta_accessible_name_matches_its_visible_label(client, db, path
     assert cta.get("aria-label") in (None, "获取适配建议")
 
 
+def test_decision_chapter_link_color_rules_do_not_override_primary_ctas(client, db):
+    """A later chapter-link rule must not turn a signal-blue CTA's text blue."""
+    db.execute(
+        "UPDATE content_items SET status='published', published_at='2026-08-24 10:00:00' "
+        "WHERE entry_type IN ('industry', 'scenario') AND status='draft'"
+    )
+    db.commit()
+    page = _page(client.get("/industries/manufacturing"))
+    cta = page.select_one(
+        '.decision-detail [data-decision-chapter] a.btn-primary[data-decision-primary-action]'
+    )
+    public_css = client.get("/static/css/public-pages.css").get_data(as_text=True)
+    silver_css = client.get("/static/css/silver-evidence-public.css").get_data(
+        as_text=True
+    )
+    ordinary_selector = ".decision-detail [data-decision-chapter] a:not(.btn)"
+    inverse_selector = (
+        ".decision-detail [data-decision-chapter]:nth-child(even) a:not(.btn)"
+    )
+
+    assert cta is not None
+    assert cta not in page.select(ordinary_selector)
+    assert cta not in page.select(inverse_selector)
+    assert _css_declarations(_css_rule(silver_css, ordinary_selector))["color"] == (
+        "var(--ui-signal-blue)"
+    )
+    assert _css_declarations(_css_rule(silver_css, inverse_selector))["color"] == (
+        "var(--ui-paper-000)"
+    )
+    for selector, expected_color in (
+        (".public-page .btn-primary", "var(--ui-surface-000)"),
+        (".public-page .btn-primary:hover", "var(--ui-graphite-950)"),
+        (".public-page .btn-primary:focus-visible", "var(--ui-graphite-950)"),
+    ):
+        declarations = _css_declarations(_css_rule(public_css, selector))
+        assert declarations["color"] == expected_color
+
+
 def test_shared_navigation_and_footer_use_readable_text_colors(client):
     """The shared shell keeps readable text on its paper and graphite surfaces."""
     tokens = client.get("/static/css/design-tokens.css").get_data(as_text=True)
@@ -574,6 +624,52 @@ def test_decision_detail_css_stacks_the_split_cover_and_fact_strip_on_narrow_scr
     assert fact_item["border-left"] == "0"
     assert desktop_fact_item["min-width"] == "0"
     assert desktop_fact_value["overflow-wrap"] == "anywhere"
+
+
+@pytest.mark.parametrize("viewport_width", (390, 320))
+def test_scenario_mobile_metadata_stays_in_the_body_column(client, db, viewport_width):
+    """At supported phone widths, scenario metadata cannot occupy the 2.75rem index rail."""
+    db.execute(
+        "UPDATE content_items SET status='published', published_at='2026-08-24 10:00:00' "
+        "WHERE entry_type='scenario' AND status='draft'"
+    )
+    db.commit()
+    page = _page(client.get("/scenarios"))
+    metadata = page.select_one(
+        ".public-scenarios .scenario-signal-row .editorial-result-row__meta"
+    )
+    legacy_css = client.get("/static/css/public-pages.css").get_data(as_text=True)
+    silver_css = client.get("/static/css/silver-evidence-public.css").get_data(
+        as_text=True
+    )
+    legacy_selector = (
+        ".public-scenarios .scenario-signal-row .catalog-card-meta"
+    )
+    corrected_selector = (
+        ".public-shell .public-scenarios .scenario-signal-row "
+        ".editorial-result-row__meta"
+    )
+    legacy_mobile = _css_declarations(
+        _css_rule_in_blocks(
+            _css_blocks(legacy_css, "@media (max-width: 767px)"), legacy_selector
+        )
+    )
+    corrected_mobile = _css_declarations(
+        _css_rule_in_blocks(
+            _css_blocks(silver_css, "@media (max-width: 767px)"),
+            corrected_selector,
+        )
+    )
+
+    assert viewport_width <= 767
+    assert metadata is not None
+    assert metadata.name == "dl"
+    assert metadata.select("div > dt + dd")
+    assert legacy_mobile["grid-column"] == "auto"
+    assert _css_specificity(corrected_selector) > _css_specificity(legacy_selector)
+    assert corrected_mobile["grid-column"] == "2"
+    assert corrected_mobile["min-width"] == "0"
+    assert corrected_mobile["width"] == "auto"
 
 
 def test_public_display_titles_balance_lines_and_widen_split_covers_at_large_viewports(client):

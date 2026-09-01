@@ -25,10 +25,13 @@ Homepage/detail reference pairs were inspected in same-input native-pixel compar
 | P2 | Closed | Services title left `包` alone. | Same shared title contract; Browser proves balanced two-line desktop result. |
 | P2 | Closed | Case title left `例` alone and `8 小时 → 2 小时` isolated its last `时`. | Balanced editorial cover plus desktop-only metric nowrap; Browser proves balanced heading and one-line value. |
 | P2 | Closed | Assessment title produced an unbalanced final word/character at desktop/mobile. | Shared balanced title treatment; Browser proves two balanced lines at desktop and 390. |
+| P2 | Closed | Decision-detail chapter link color overrode the industry/scenario/service primary CTA foreground, producing blue text on blue. | Ordinary chapter links now use `a:not(.btn)`; rendered cascade tests pass and IAB computes all three primary CTAs to white `rgb(255,255,255)` on signal blue. |
+| P2 | Closed | Scenario metadata auto-placed into the 2.75rem sequence rail at 390px and wrapped character by character. | A higher-specificity mobile rule keeps metadata in column 2. CSS/DOM contracts cover 390 and 320; IAB proves horizontal writing, useful `dd` widths, no overflow, and natural row height. |
+| P2 | Closed | Industry chapter 02 and service chapter 05 lacked any complete viewport frame. | New centered `fullPage:false` Browser frames show each complete chapter heading; they were inserted 1:1 at explicit 12px sheet boundaries without changing original frame pixels. |
 | Evidence quality | Closed | Full-page compositor duplicated sticky/reveal regions and produced false mobile blanks. | Rejected compositor output. Genuine Browser viewport frames are preserved 1:1 with explicit 12px separators and overlap. |
-| Evidence quality | Closed | First segment round caught 700–800ms reveal transitions at 650ms. | All sixteen routes recaptured after 1100ms load and at least 1050ms per scroll; centered frames make resource filter, case meta, and About 01 fully visible. |
+| Evidence quality | Closed | First segment round caught 700–800ms reveal transitions at 650ms. | All sixteen routes recaptured after 1100ms load and at least 1050ms per scroll; centered frames make resource filter, case meta, About 01, industry 02, and service 05 fully visible. |
 
-The shared P2 correction was test-first: isolated RED `KeyError: 'text-wrap'`, then GREEN `1 passed`; the final full responsibility set is `579 passed`, and Node runtime is `34/34` pass. No open P0, P1, or P2 remains.
+The Fix1 CSS corrections were test-first: authoritative RED `3 failed`, focused GREEN `66 passed`. The full scoped collection then recorded 581 passes plus one repeatable seven-day test-clock expiry; after the authorized test-only clock pin, its singleton and complete 31-test partition passed. Every one of the 582 collected scoped Python cases therefore has fresh pass evidence, and Node runtime is `34/34` pass. No open P0, P1, or P2 remains.
 
 ## Interaction and accessibility truth
 
