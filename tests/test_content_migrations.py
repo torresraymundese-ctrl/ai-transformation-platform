@@ -295,9 +295,16 @@ def test_009_case_basis_types_apply_on_an_empty_database(tmp_path, monkeypatch):
         monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
         migrations.apply_migrations(db)
 
-        assert db.execute(
-            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
-        ).fetchone()[0] == "009_case_basis_types"
+        versions = tuple(
+            row[0]
+            for row in db.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        )
+        assert "009_case_basis_types" in versions
+        assert versions.index("009_case_basis_types") < versions.index(
+            "010_ingestion_operations"
+        )
 
         stored = []
         for index, basis_type in enumerate(
@@ -398,9 +405,16 @@ def test_009_preserves_legacy_case_rows_and_case_integrity_guards(
         migrations.apply_migrations(db)
         migrations.apply_migrations(db)
 
-        assert db.execute(
-            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
-        ).fetchone()[0] == "009_case_basis_types"
+        versions = tuple(
+            row[0]
+            for row in db.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        )
+        assert "009_case_basis_types" in versions
+        assert versions.index("009_case_basis_types") < versions.index(
+            "010_ingestion_operations"
+        )
         assert tuple(db.execute(
             "SELECT * FROM case_content WHERE content_item_id=?", (legacy_item,)
         ).fetchone()) == legacy_before
@@ -578,7 +592,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "009_case_basis_types"
+        )][-1] == "010_ingestion_operations"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
@@ -1270,6 +1284,10 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         "prevent_legacy_case_delete",
         "prevent_legacy_service_delete",
         "prevent_legacy_announcement_delete",
+        "validate_ingestion_candidate_state_transition",
+        "require_new_ingestion_candidate_fetched",
+        "prevent_sensitive_governance_audit_metadata_insert",
+        "prevent_sensitive_governance_audit_metadata_update",
     }
     actual_triggers = {
         row[0]

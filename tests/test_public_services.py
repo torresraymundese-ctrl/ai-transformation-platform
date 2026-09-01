@@ -317,7 +317,9 @@ def test_008_migration_allows_exact_service_owner_and_seed_is_explicit(db):
         "SELECT version FROM schema_migrations ORDER BY version"
     ))
     assert "008_service_content_maturity" in versions
-    assert versions[-1] == "009_case_basis_types"
+    assert versions.index("008_service_content_maturity") < versions.index(
+        "009_case_basis_types"
+    ) < versions.index("010_ingestion_operations")
 
     actual = {}
     for code in SERVICE_MATURITY:
