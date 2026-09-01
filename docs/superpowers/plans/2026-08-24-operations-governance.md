@@ -12,6 +12,14 @@
 
 **Required predecessor:** Every task and review gate in `docs/superpowers/plans/2026-08-24-content-catalog-publishing.md` is complete.
 
+**Binding migration-number erratum (2026-09-01):** Reviewed 5A work appended
+`007_scenario_public_inputs.sql`, `008_service_content_maturity.sql`, and
+`009_case_basis_types.sql` after this plan was approved. Those migrations are
+immutable. Preserve every 5B behavior and task dependency below, but use the
+next six physical ordinals in task order: Task 13=`010`, Task 15=`011`,
+Task 17=`012`, Task 18=`013`, Task 19=`014`, Task 21=`015`. The filenames and
+commands below have been mechanically synchronized to this binding mapping.
+
 **Required execution order:** Tasks 13–22 are sequential review gates. In particular, filters precede dashboard/export; legal storage and rule storage precede the shared flow credential; rule copy/preview precedes publication/runtime switching. Do not parallelize tasks that modify the same assessment runtime or admin Blueprint.
 
 ## Global Constraints
@@ -20,7 +28,7 @@
 - Keep one shared administrator role/account; do not add user, role or permission tables.
 - Scraping writes only `fetched/pending_review` candidates. Acceptance creates a normal 5A draft; no path auto-publishes.
 - Use explicit Asia/Shanghai timestamps and repository-owned `BEGIN IMMEDIATE` transactions for candidate decisions, legal publication, and rule publication.
-- Migration filenames are append-only after execution: `007_ingestion_operations.sql`, `008_operations_query_indexes.sql`, `009_admin_export_audit.sql`, `010_legal_documents.sql`, `011_assessment_rule_releases.sql`, and `012_assessment_flow_enforcement.sql`. Never amend a migration after its task commits.
+- Migration filenames are append-only after execution: `010_ingestion_operations.sql`, `011_operations_query_indexes.sql`, `012_admin_export_audit.sql`, `013_legal_documents.sql`, `014_assessment_rule_releases.sql`, and `015_assessment_flow_enforcement.sql`. Never amend a migration after its task commits.
 - CSV export is POST+CSRF, audited, private/no-store, UTF-8 BOM, formula-safe, field-allowlisted and limited to 10,000 rows.
 - Operations queries and exports always exclude anonymized leads and never reconstruct contacts from consent, assessment or report snapshots.
 - Published legal/rule versions and assessment/report legal snapshots are immutable. Retained consent rows are never rewritten by a policy release but remain deletable by the already-approved withdrawal/deletion/retention anonymization transaction.
@@ -36,7 +44,7 @@
 ### Task 13: Add the ingestion queue, attempts, deduplication, and governance audit schema
 
 **Files:**
-- Create: `migrations/007_ingestion_operations.sql`
+- Create: `migrations/010_ingestion_operations.sql`
 - Create: `ingestion_contracts.py`
 - Create: `ingestion_repository.py`
 - Create: `tests/test_ingestion_repository.py`
@@ -57,7 +65,7 @@ def test_store_candidates_deduplicates_canonical_url_and_content_hash(db):
     assert second.deduplicated == 2
 ```
 
-Cover canonical scheme/host/path, IDNA host normalization, fragment and tracking-query removal, SHA-256 normalized-content dedupe, concurrent unique URL/hash insertion, bounded lowercase source-code syntax, exact `fetched→pending_review→accepted/rejected` transitions, optimistic lock, fixed rejection codes, explicit Shanghai timestamps and migration from databases that already recorded 001–006. Do not assert membership in a registry that is not created yet. Store network failures in `ingestion_fetch_attempts`; only successfully parsed content belongs in the unique candidate table.
+Cover canonical scheme/host/path, IDNA host normalization, fragment and tracking-query removal, SHA-256 normalized-content dedupe, concurrent unique URL/hash insertion, bounded lowercase source-code syntax, exact `fetched→pending_review→accepted/rejected` transitions, optimistic lock, fixed rejection codes, explicit Shanghai timestamps and migration from databases that already recorded 001–009. Do not assert membership in a registry that is not created yet. Store network failures in `ingestion_fetch_attempts`; only successfully parsed content belongs in the unique candidate table.
 
 - [ ] **Step 2: Run tests and confirm RED**
 
@@ -67,7 +75,7 @@ Expected: FAIL because the queue and contracts do not exist.
 
 - [ ] **Step 3: Add the ingestion schema and repository state machine**
 
-`007_ingestion_operations.sql` creates fetch attempts, candidates with exact states `fetched/pending_review/accepted/rejected`, canonical URL, content hash, source code/name, title, licensed summary, sanitized candidate body when permitted, original publish time, rejection code/note, lock version, target content ID, explicit timestamps, and unique URL/hash indexes. It also creates `governance_audit_events(action,target_type,target_id,actor,metadata_json,created_at)` with no bodies, URLs, filenames, contacts or free-form search text.
+`010_ingestion_operations.sql` creates fetch attempts, candidates with exact states `fetched/pending_review/accepted/rejected`, canonical URL, content hash, source code/name, title, licensed summary, sanitized candidate body when permitted, original publish time, rejection code/note, lock version, target content ID, explicit timestamps, and unique URL/hash indexes. It also creates `governance_audit_events(action,target_type,target_id,actor,metadata_json,created_at)` with no bodies, URLs, filenames, contacts or free-form search text.
 
 Expose:
 
@@ -99,7 +107,7 @@ Expected: PASS with no public content writes.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/007_ingestion_operations.sql ingestion_contracts.py ingestion_repository.py tests/test_ingestion_repository.py tests/test_app_factory_and_migrations.py
+git add migrations/010_ingestion_operations.sql ingestion_contracts.py ingestion_repository.py tests/test_ingestion_repository.py tests/test_app_factory_and_migrations.py
 git commit -m "feat: add reviewed ingestion queue"
 ```
 
@@ -182,7 +190,7 @@ git commit -m "feat: review fetched content into drafts"
 ### Task 15: Unify pagination and filters across every operations list
 
 **Files:**
-- Create: `migrations/008_operations_query_indexes.sql`
+- Create: `migrations/011_operations_query_indexes.sql`
 - Create: `templates/admin/_pagination.html`
 - Create: `tests/test_operations_pagination.py`
 - Modify: `tests/test_app_factory_and_migrations.py`
@@ -222,7 +230,7 @@ def test_page_size_is_only_20_or_50(admin_client):
     assert list_page_size(admin_client.get("/admin/leads?per_page=10000")) == 20
 ```
 
-Cover every list, page overflow, GET invalid enums/page/per-page falling back to the documented safe default, write invalid enums remaining 400, escaped bounded search, open privacy-request status filters, no N+1 reads, query-string preservation, anonymous redirect, admin no-store, and `include_anonymized=False` enforced below the route. Freeze ordering per workflow rather than inventing one global direction: ordinary/new leads use `(created_at DESC,id DESC)`; actionable follow-ups use `(next_followup_at ASC,id ASC)` with nulls excluded; appointments use `(preferred_date ASC,time_slot ASC,id ASC)`; privacy requests use `(requested_at DESC,id DESC)`; scheduled content uses `(publish_at ASC,id ASC)` while ordinary content uses `(updated_at DESC,id DESC)`; ingestion uses `(updated_at DESC,id DESC)`. Lead search/joins must not recover contact data from anonymized assessments, reports or consents. Migration tests start from a database that already recorded `007`.
+Cover every list, page overflow, GET invalid enums/page/per-page falling back to the documented safe default, write invalid enums remaining 400, escaped bounded search, open privacy-request status filters, no N+1 reads, query-string preservation, anonymous redirect, admin no-store, and `include_anonymized=False` enforced below the route. Freeze ordering per workflow rather than inventing one global direction: ordinary/new leads use `(created_at DESC,id DESC)`; actionable follow-ups use `(next_followup_at ASC,id ASC)` with nulls excluded; appointments use `(preferred_date ASC,time_slot ASC,id ASC)`; privacy requests use `(requested_at DESC,id DESC)`; scheduled content uses `(publish_at ASC,id ASC)` while ordinary content uses `(updated_at DESC,id DESC)`; ingestion uses `(updated_at DESC,id DESC)`. Lead search/joins must not recover contact data from anonymized assessments, reports or consents. Migration tests start from a database that already recorded `010`.
 
 - [ ] **Step 2: Run tests and confirm RED**
 
@@ -243,7 +251,7 @@ def query_appointments(filters: AppointmentFilters,
                        page: PageRequest) -> Page[AppointmentRow]: ...
 ```
 
-`008_operations_query_indexes.sql` adds only indexes over real columns and those exact query orders: lead ordinary queues on `(anonymized_at,status,created_at DESC,id DESC)`; lead follow-up queues on `(anonymized_at,next_followup_at,id)`; branch-scoped assessment history on `(lead_id,branch_code,completed_at DESC,id DESC)` plus the cross-branch latest-per-lead export lookup on `(lead_id,completed_at DESC,id DESC)`; appointment operations on `(status,preferred_date,time_slot,id)` plus latest-per-lead export lookup on `(lead_id,created_at DESC,id DESC)`; data requests on `(status,requested_at DESC,id DESC)`; ordinary content on `(status,updated_at DESC,id DESC)`; scheduled content on `(status,publish_at,id)`; media on `(status,updated_at DESC,id DESC)`; and ingestion on `(state,updated_at DESC,id DESC)`. Migration tests assert every indexed column exists before creation. Verify query plans use each matching assessment index separately—never assume the intervening `branch_code` index can satisfy the cross-branch latest query—and do the same for representative large fixtures in every other queue. Each repository owns one bound-parameter predicate builder reused by its count and page query. Do not calculate totals by loading all rows or expect one index to serve incompatible queue orders.
+`011_operations_query_indexes.sql` adds only indexes over real columns and those exact query orders: lead ordinary queues on `(anonymized_at,status,created_at DESC,id DESC)`; lead follow-up queues on `(anonymized_at,next_followup_at,id)`; branch-scoped assessment history on `(lead_id,branch_code,completed_at DESC,id DESC)` plus the cross-branch latest-per-lead export lookup on `(lead_id,completed_at DESC,id DESC)`; appointment operations on `(status,preferred_date,time_slot,id)` plus latest-per-lead export lookup on `(lead_id,created_at DESC,id DESC)`; data requests on `(status,requested_at DESC,id DESC)`; ordinary content on `(status,updated_at DESC,id DESC)`; scheduled content on `(status,publish_at,id)`; media on `(status,updated_at DESC,id DESC)`; and ingestion on `(state,updated_at DESC,id DESC)`. Migration tests assert every indexed column exists before creation. Verify query plans use each matching assessment index separately—never assume the intervening `branch_code` index can satisfy the cross-branch latest query—and do the same for representative large fixtures in every other queue. Each repository owns one bound-parameter predicate builder reused by its count and page query. Do not calculate totals by loading all rows or expect one index to serve incompatible queue orders.
 
 - [ ] **Step 4: Update routes/templates and run related tests**
 
@@ -254,7 +262,7 @@ Expected: PASS with existing lead/appointment state transitions unchanged.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/008_operations_query_indexes.sql pagination.py lead_repository.py appointment_repository.py catalog_content_repository.py case_repository.py resource_repository.py ingestion_repository.py media_service.py blueprints/admin/leads.py blueprints/admin/catalog.py blueprints/admin/cases.py blueprints/admin/resources.py blueprints/admin/ingestion.py blueprints/admin/media.py templates/admin/_pagination.html templates/admin/leads.html templates/admin/appointments.html templates/admin/data_requests.html templates/admin/catalog_list.html templates/admin/case_list_v2.html templates/admin/resource_list_v2.html templates/admin/ingestion.html templates/admin/media.html tests/test_operations_pagination.py tests/test_app_factory_and_migrations.py
+git add migrations/011_operations_query_indexes.sql pagination.py lead_repository.py appointment_repository.py catalog_content_repository.py case_repository.py resource_repository.py ingestion_repository.py media_service.py blueprints/admin/leads.py blueprints/admin/catalog.py blueprints/admin/cases.py blueprints/admin/resources.py blueprints/admin/ingestion.py blueprints/admin/media.py templates/admin/_pagination.html templates/admin/leads.html templates/admin/appointments.html templates/admin/data_requests.html templates/admin/catalog_list.html templates/admin/case_list_v2.html templates/admin/resource_list_v2.html templates/admin/ingestion.html templates/admin/media.html tests/test_operations_pagination.py tests/test_app_factory_and_migrations.py
 git commit -m "feat: paginate operations lists"
 ```
 
@@ -317,7 +325,7 @@ git commit -m "feat: surface actionable operations queues"
 ### Task 17: Export filtered leads safely
 
 **Files:**
-- Create: `migrations/009_admin_export_audit.sql`
+- Create: `migrations/012_admin_export_audit.sql`
 - Create: `lead_export.py`
 - Create: `tests/test_lead_export.py`
 - Modify: `tests/test_app_factory_and_migrations.py`
@@ -362,7 +370,7 @@ Expected: FAIL because export and export audit storage are absent.
 
 - [ ] **Step 3: Add exact export audit schema and implementation**
 
-Create append-only migration `009_admin_export_audit.sql` so databases that already recorded `008` still receive:
+Create append-only migration `012_admin_export_audit.sql` so databases that already recorded `011` still receive:
 
 ```sql
 CREATE TABLE admin_export_logs (
@@ -387,7 +395,7 @@ Expected: PASS; no export changes lead state or retention time.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/009_admin_export_audit.sql lead_export.py blueprints/admin/leads.py lead_repository.py templates/admin/leads.html tests/test_lead_export.py tests/test_app_factory_and_migrations.py
+git add migrations/012_admin_export_audit.sql lead_export.py blueprints/admin/leads.py lead_repository.py templates/admin/leads.html tests/test_lead_export.py tests/test_app_factory_and_migrations.py
 git commit -m "feat: export filtered leads safely"
 ```
 
@@ -396,7 +404,7 @@ git commit -m "feat: export filtered leads safely"
 ### Task 18: Version all four legal documents and bind historical records
 
 **Files:**
-- Create: `migrations/010_legal_documents.sql`
+- Create: `migrations/013_legal_documents.sql`
 - Create: `legal_repository.py`
 - Create: `blueprints/admin/legal.py`
 - Create: `blueprints/public_legal.py`
@@ -437,7 +445,7 @@ Expected: FAIL because legal version storage/routes and exact historical links d
 
 - [ ] **Step 3: Implement legal schema and atomic active pointers**
 
-`010_legal_documents.sql` creates `legal_documents` with type check `privacy/terms/roi_disclaimer/ai_content_notice`, a 1–64 character ASCII `version_code` whose first character is alphanumeric and whose remainder is limited to `[A-Za-z0-9._-]` by both CHECK and service validation, mode `internal/external_legacy`, `title`, `body_summary`, sanitized `body_html`, validated `external_url`, current `content_sha256`, nullable `reviewed_content_sha256`, draft/published/archived status, positive `lock_version`, legal-review confirmation time, effective/published/archived/created/updated times, unique `(type, version_code)`, and the admin-list index `(type,status,updated_at DESC,id DESC)`. Internal review fields are either both null or both present; external-legacy requires both null. It separately creates `active_legal_documents(document_type PRIMARY KEY, legal_document_id UNIQUE NOT NULL REFERENCES legal_documents(id))`; this pointer is the sole public/current authority. Do not create a partial unique index limiting published rows per type, because publication legitimately has two published rows between the new-row transition and pointer switch inside one transaction. Versioned paths are generated with `url_for` from the validated code, never by concatenating untrusted text.
+`013_legal_documents.sql` creates `legal_documents` with type check `privacy/terms/roi_disclaimer/ai_content_notice`, a 1–64 character ASCII `version_code` whose first character is alphanumeric and whose remainder is limited to `[A-Za-z0-9._-]` by both CHECK and service validation, mode `internal/external_legacy`, `title`, `body_summary`, sanitized `body_html`, validated `external_url`, current `content_sha256`, nullable `reviewed_content_sha256`, draft/published/archived status, positive `lock_version`, legal-review confirmation time, effective/published/archived/created/updated times, unique `(type, version_code)`, and the admin-list index `(type,status,updated_at DESC,id DESC)`. Internal review fields are either both null or both present; external-legacy requires both null. It separately creates `active_legal_documents(document_type PRIMARY KEY, legal_document_id UNIQUE NOT NULL REFERENCES legal_documents(id))`; this pointer is the sole public/current authority. Do not create a partial unique index limiting published rows per type, because publication legitimately has two published rows between the new-row transition and pointer switch inside one transaction. Versioned paths are generated with `url_for` from the validated code, never by concatenating untrusted text.
 
 Pointer triggers require matching type, published/effective status and a structurally valid digest, then branch by mode. An `internal` target additionally requires nonempty title/summary/body and `reviewed_content_sha256 = content_sha256` with review time present. An `external_legacy` target is allowed only for `privacy`, requires no fabricated review/body, and requires nonempty version/normalized external URL. Because SQLite cannot read environment configuration or calculate SHA-256, `reconcile_external_privacy_reference` recomputes the canonical digest in Python and is the only service allowed to establish that compatibility pointer; it compares version/URL/digest to current immutable config before the transaction. The current route reads only through the pointer. The versioned route loads by exact `(document_type,version_code)`, exposes only published/archived immutable rows, renders internal content, and redirects an external-legacy row only to its own frozen normalized URL. Task 21 applies the stricter flow-readiness rule that all four pointed documents must be reviewed `internal` versions; an external compatibility pointer can never authorize a new assessment flow.
 
@@ -473,7 +481,7 @@ Expected: PASS; legal management is available while the Stage 4 assessment behav
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/010_legal_documents.sql legal_repository.py blueprints/admin/legal.py blueprints/public_legal.py blueprints/admin/__init__.py app.py templates/admin/legal_list.html templates/admin/legal_edit.html templates/legal_detail.html templates/components/footer.html templates/components/admin_navigation.html tests/test_legal_versions.py tests/test_app_factory_and_migrations.py
+git add migrations/013_legal_documents.sql legal_repository.py blueprints/admin/legal.py blueprints/public_legal.py blueprints/admin/__init__.py app.py templates/admin/legal_list.html templates/admin/legal_edit.html templates/legal_detail.html templates/components/footer.html templates/components/admin_navigation.html tests/test_legal_versions.py tests/test_app_factory_and_migrations.py
 git commit -m "feat: version legal consent documents"
 ```
 
@@ -482,7 +490,7 @@ git commit -m "feat: version legal consent documents"
 ### Task 19: Extend `assessment_versions` into complete rule-release drafts
 
 **Files:**
-- Create: `migrations/011_assessment_rule_releases.sql`
+- Create: `migrations/014_assessment_rule_releases.sql`
 - Create: `rule_release_repository.py`
 - Create: `rule_release_validation.py`
 - Create: `rule_release_seed.py`
@@ -529,7 +537,7 @@ Expected: FAIL because relational release drafts do not exist.
 
 - [ ] **Step 3: Add relational draft and immutable snapshot schema**
 
-`011_assessment_rule_releases.sql` alters `assessment_versions` to add nullable `copied_from_id`, positive `lock_version`, `validated_digest`, and `updated_at`, plus the admin-list index `(status,updated_at DESC,id DESC)`. It creates version-scoped scenario rows plus branch/department/pain/budget/service/ROI descendants; version-scoped service rows plus deliverables/steps/prerequisites/exclusions/acceptance descendants; immutable `assessment_version_snapshots(schema_version,canonical_json,sha256)`; and singleton `active_assessment_version` pointing to the one active published `assessment_versions` row. Existing questions/options/weights/benchmarks/ROI option ranges stay under that same root.
+`014_assessment_rule_releases.sql` alters `assessment_versions` to add nullable `copied_from_id`, positive `lock_version`, `validated_digest`, and `updated_at`, plus the admin-list index `(status,updated_at DESC,id DESC)`. It creates version-scoped scenario rows plus branch/department/pain/budget/service/ROI descendants; version-scoped service rows plus deliverables/steps/prerequisites/exclusions/acceptance descendants; immutable `assessment_version_snapshots(schema_version,canonical_json,sha256)`; and singleton `active_assessment_version` pointing to the one active published `assessment_versions` row. Existing questions/options/weights/benchmarks/ROI option ranges stay under that same root.
 
 `assessment_version_snapshots.assessment_version_id` is unique. Before snapshot insertion, compilation writes `assessment_versions.validated_digest` while the draft root is still editable. Snapshot insertion requires its SHA-256 to equal that root digest. Once a parent has a snapshot, triggers reject INSERT/UPDATE/DELETE in every existing or new version-child table and reject snapshot mutation. The root then allows exactly one strict `draft→published` transition changing only `status,published_at,updated_at,lock_version`, with `validated_digest` already equal to the immutable snapshot SHA; after publication, only the strict `published→archived` lifecycle fields may change. Existing V2 initial reconciliation may set its digest before inserting the first snapshot because its root is already published. The active singleton may point only to a published version with exactly one matching snapshot.
 
@@ -559,7 +567,7 @@ Expected: PASS and compiling the copied V2 release produces behavior identical t
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/011_assessment_rule_releases.sql rule_release_repository.py rule_release_validation.py rule_release_seed.py models.py assessment/contracts.py tests/test_rule_release_drafts.py tests/test_app_factory_and_migrations.py
+git add migrations/014_assessment_rule_releases.sql rule_release_repository.py rule_release_validation.py rule_release_seed.py models.py assessment/contracts.py tests/test_rule_release_drafts.py tests/test_app_factory_and_migrations.py
 git commit -m "feat: draft versioned assessment releases"
 ```
 
@@ -644,7 +652,7 @@ git commit -m "feat: edit and preview assessment releases"
 ### Task 21: Atomically publish releases and bind each assessment flow to exact rule/legal versions
 
 **Files:**
-- Create: `migrations/012_assessment_flow_enforcement.sql`
+- Create: `migrations/015_assessment_flow_enforcement.sql`
 - Create: `assessment_flow.py`
 - Create: `rule_release_runtime.py`
 - Create: `tests/assessment_flow_helpers.py`
@@ -701,7 +709,7 @@ def test_same_branch_tabs_keep_independent_old_and_new_flow_credentials(
     assert report_version(client, old_result) == old_config["rule_version"]
 ```
 
-Cover 192-bit unpredictable flow IDs; maximum 8 live flows and 24-hour TTL with deterministic oldest eviction; same-branch/same-Session multi-tab issuance; branch mismatch; unknown/expired/tampered flow; client rule/policy version fields rejected if inconsistent and never used to select history; one flow's config/preview/complete uses the exact rule plus four legal IDs; missing any active legal type or any pointer whose target is not reviewed `mode='internal'` fails before issuing a flow (including the valid external-legacy privacy compatibility pointer); legal-only and rule-only changes; flow validation before idempotency lookup; same submission key under a different valid flow returns generic 409 unless existing branch/rule/four legal IDs all match and report remains authorized to this Session; two connections publishing competing drafts; governance-audit/snapshot/pointer failure rollback; no partial active pointer; direct-SQL rejection of a pointer to draft/snapshot-less rows and archiving a pointed row; corrupt/missing active snapshot generic 503 before quota/domain writes; rule/legal publish concurrent with flow issue or old-flow completion; historical report/PDF digest, version-specific legal link and exact disclaimer access after later legal publication; schema-2.1 lead export through the shared report dispatcher; consent privacy FK/code consistency; a one-call startup upgrade from a database recorded at migration 005 or 006 through migration 012 followed by external-privacy reconciliation, repeated-startup no-op, and rejection of any forged historical-link update that changes another consent field at the same time; withdrawal/deletion/retention still delete consent while assessment legal snapshot remains; appointment/report links; no flow ID in any database row/log/error/HTML beyond the intended config/form field; analytics event privacy; V2 initial snapshot parity; 5A public scenario/service critical fields switching with the active release while narrative revisions stay stable.
+Cover 192-bit unpredictable flow IDs; maximum 8 live flows and 24-hour TTL with deterministic oldest eviction; same-branch/same-Session multi-tab issuance; branch mismatch; unknown/expired/tampered flow; client rule/policy version fields rejected if inconsistent and never used to select history; one flow's config/preview/complete uses the exact rule plus four legal IDs; missing any active legal type or any pointer whose target is not reviewed `mode='internal'` fails before issuing a flow (including the valid external-legacy privacy compatibility pointer); legal-only and rule-only changes; flow validation before idempotency lookup; same submission key under a different valid flow returns generic 409 unless existing branch/rule/four legal IDs all match and report remains authorized to this Session; two connections publishing competing drafts; governance-audit/snapshot/pointer failure rollback; no partial active pointer; direct-SQL rejection of a pointer to draft/snapshot-less rows and archiving a pointed row; corrupt/missing active snapshot generic 503 before quota/domain writes; rule/legal publish concurrent with flow issue or old-flow completion; historical report/PDF digest, version-specific legal link and exact disclaimer access after later legal publication; schema-2.1 lead export through the shared report dispatcher; consent privacy FK/code consistency; a one-call startup upgrade from a database recorded at migration 005 or 006 through migration 015 followed by external-privacy reconciliation, repeated-startup no-op, and rejection of any forged historical-link update that changes another consent field at the same time; withdrawal/deletion/retention still delete consent while assessment legal snapshot remains; appointment/report links; no flow ID in any database row/log/error/HTML beyond the intended config/form field; analytics event privacy; V2 initial snapshot parity; 5A public scenario/service critical fields switching with the active release while narrative revisions stay stable.
 
 `tests/assessment_flow_helpers.py` is the sole test adapter for issuing a real config flow and constructing bound preview/completion payloads or test-only reviewed legal fixtures. Update every listed Python/Node regression that currently posts preview/complete directly or inserts a consent without `legal_version_id`. The production service contract becomes `complete_assessment(request, identity_hash, issued_flow)` with a required `IssuedFlow`; no optional flow, test-only fallback, or legacy authorization path is allowed.
 
@@ -730,7 +738,7 @@ The dedicated confirmation page displays the exact code, validation result and c
 
 Strict runtime loading validates snapshot byte size, exact schema/version/keys/cardinalities/types/domains and SHA-256 before contracts. The migration guarantees an initial V2 snapshot; never silently fall back from a missing/corrupt snapshot. Preserve the frozen V2 snapshot/report validator for historical V2 data and dispatch future validation by persisted snapshot schema.
 
-`012_assessment_flow_enforcement.sql` gives consent INSERT and UPDATE deliberately different rules. Every new INSERT must provide `legal_version_id` referencing a privacy document whose version code exactly equals `policy_version`, whose status is `published` or `archived`, whose mode is `internal`, and whose review digest still equals its immutable content digest. An UPDATE may never rebind an already-bound consent. Its sole compatibility exception is `OLD.legal_version_id IS NULL → NEW.legal_version_id = <external_legacy privacy row>` where that immutable row is published/archived, its `version_code = OLD.policy_version = NEW.policy_version`, and every other consent column is byte-for-byte/`IS` unchanged. This narrow exception lets the controlled Python reconciler run after a single `apply_migrations()` has advanced an old 005/006 database all the way through 012; it cannot authorize a new external consent or smuggle a simultaneous field edit. Repeated reconciliation is an exact no-op. The migration also adds assessment-legal INSERT checks that the referenced document is reviewed internal and published/archived, document type and version code match, and `NEW.digest = legal_documents.content_sha256`; SQLite never attempts to calculate SHA-256. This permits an old valid flow to complete after its bound internal document is archived, while rejecting every mutable draft. Direct-SQL tests cover draft/external/stale-review rejection, already-bound rebinding, forged compatibility updates, and the real one-call-upgrade ordering. Assessment legal rows remain immutable. The migration does not block approved consent-row deletion during anonymization. Apply it only in the same task that changes completion and every fixture to provide the bound IDs.
+`015_assessment_flow_enforcement.sql` gives consent INSERT and UPDATE deliberately different rules. Every new INSERT must provide `legal_version_id` referencing a privacy document whose version code exactly equals `policy_version`, whose status is `published` or `archived`, whose mode is `internal`, and whose review digest still equals its immutable content digest. An UPDATE may never rebind an already-bound consent. Its sole compatibility exception is `OLD.legal_version_id IS NULL → NEW.legal_version_id = <external_legacy privacy row>` where that immutable row is published/archived, its `version_code = OLD.policy_version = NEW.policy_version`, and every other consent column is byte-for-byte/`IS` unchanged. This narrow exception lets the controlled Python reconciler run after a single `apply_migrations()` has advanced an old 005/006 database all the way through 015; it cannot authorize a new external consent or smuggle a simultaneous field edit. Repeated reconciliation is an exact no-op. The migration also adds assessment-legal INSERT checks that the referenced document is reviewed internal and published/archived, document type and version code match, and `NEW.digest = legal_documents.content_sha256`; SQLite never attempts to calculate SHA-256. This permits an old valid flow to complete after its bound internal document is archived, while rejecting every mutable draft. Direct-SQL tests cover draft/external/stale-review rejection, already-bound rebinding, forged compatibility updates, and the real one-call-upgrade ordering. Assessment legal rows remain immutable. The migration does not block approved consent-row deletion during anonymization. Apply it only in the same task that changes completion and every fixture to provide the bound IDs.
 
 Each config call opens one caller-owned SQLite connection and read transaction, calls only `load_active_rule_bundle(db, branch_code)` and `load_active_legal_bundle(db, now)`, validates the rule pointer/snapshot plus all four simultaneously active legal IDs/digests, then commits that consistent database snapshot before writing Session. Neither loader may call `get_db()`, open/close another connection, or commit. Historical preview/completion calls likewise use `load_rule_bundle(db, ...)` and `load_legal_bundle(db, ...)` on their caller-owned connection. It uses `secrets.token_urlsafe(24)` and stores only `flow_id → {branch, rule_version_id, privacy_id, terms_id, roi_disclaimer_id, ai_notice_id, issued_at}` in a maximum-eight, 24-hour Session mapping. The browser returns `flow_id`; existing `rule_version`/`policy_version` fields remain display-integrity values, never authorization. Preview and completion validate the flow before any replay/quota/domain lookup and load only its binding. Unknown/expired flows fail generically before rate quota or writes.
 
@@ -756,7 +764,7 @@ Expected: PASS with old and new versions completing safely and no history wideni
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/012_assessment_flow_enforcement.sql assessment_flow.py rule_release_runtime.py rule_release_service.py blueprints/admin/rules.py templates/admin/rule_releases.html templates/admin/rule_release_publish.html legal_repository.py lead_repository.py lead_export.py assessment_repository.py assessment_completion_service.py assessment_validation.py blueprints/assessment.py assessment/reporting.py templates/assessment/_report_content.html templates/assessment/report_pdf.html catalog_content_repository.py static/js/assessment.js tests/conftest.py tests/assessment_flow_helpers.py tests/test_app_factory_and_migrations.py tests/test_assessment_flows.py tests/test_rule_release_runtime.py tests/test_assessment_completion.py tests/test_assessment_v2_api.py tests/test_appointments.py tests/test_analytics.py tests/test_report_access.py tests/test_assessment_wizard.py tests/test_core_journey.py tests/test_lead_operations.py tests/test_reporting.py tests/test_lead_export.py tests/test_v2_migrations.py tests/js/assessment_runtime.test.js
+git add migrations/015_assessment_flow_enforcement.sql assessment_flow.py rule_release_runtime.py rule_release_service.py blueprints/admin/rules.py templates/admin/rule_releases.html templates/admin/rule_release_publish.html legal_repository.py lead_repository.py lead_export.py assessment_repository.py assessment_completion_service.py assessment_validation.py blueprints/assessment.py assessment/reporting.py templates/assessment/_report_content.html templates/assessment/report_pdf.html catalog_content_repository.py static/js/assessment.js tests/conftest.py tests/assessment_flow_helpers.py tests/test_app_factory_and_migrations.py tests/test_assessment_flows.py tests/test_rule_release_runtime.py tests/test_assessment_completion.py tests/test_assessment_v2_api.py tests/test_appointments.py tests/test_analytics.py tests/test_report_access.py tests/test_assessment_wizard.py tests/test_core_journey.py tests/test_lead_operations.py tests/test_reporting.py tests/test_lead_export.py tests/test_v2_migrations.py tests/js/assessment_runtime.test.js
 git commit -m "feat: bind assessment flows to governed releases"
 ```
 
