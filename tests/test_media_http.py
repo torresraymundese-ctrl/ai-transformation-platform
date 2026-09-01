@@ -567,6 +567,21 @@ def test_published_resource_attachment_uses_only_the_download_route(
     assert client.get(f"/media/{asset['id']}/image").status_code == 404
 
 
+@pytest.mark.parametrize(("path", "kind"), (("image", "image"), ("download", "download")))
+def test_public_media_routes_pass_injected_content_now(client, monkeypatch, path, kind):
+    instant = datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: instant
+    captured = {}
+
+    def lookup(asset_id, *, kind, now):
+        captured.update(asset_id=asset_id, kind=kind, now=now)
+        return None
+
+    monkeypatch.setattr("blueprints.media.get_published_media_asset", lookup)
+    assert client.get(f"/media/7/{path}").status_code == 404
+    assert captured == {"asset_id": 7, "kind": kind, "now": instant}
+
+
 @pytest.mark.parametrize(
     ("instant", "expected_status"),
     (
@@ -593,7 +608,7 @@ def test_public_announcement_media_follows_exact_current_interval(
         valid_from="2026-08-25 10:00:00",
         valid_until="2026-08-25 11:00:00",
     )
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: instant)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: instant
 
     response = client.get(f"/media/{asset['id']}/download")
 
@@ -620,7 +635,7 @@ def test_public_resource_media_follows_exact_seven_day_source_freshness(
     _publish_sourced_resource_attachment(
         db, asset["id"], slug=f"source-media-{instant:%H%M%S}"
     )
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: instant)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: instant
 
     response = client.get(f"/media/{asset['id']}/download")
 
@@ -670,11 +685,7 @@ def test_public_media_rejects_malformed_legacy_reference(
         (content_id,),
     )
     db.commit()
-    monkeypatch.setattr(
-        media_service,
-        "shanghai_now",
-        lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI),
-    )
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
 
     response = client.get(f"/media/{asset['id']}/download")
 
@@ -702,11 +713,7 @@ def test_public_media_allows_a_healthy_shared_reference_when_another_is_expired(
         valid_from="2026-08-25 09:00:00",
         valid_until="2026-08-25 11:00:00",
     )
-    monkeypatch.setattr(
-        media_service,
-        "shanghai_now",
-        lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI),
-    )
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: datetime(2026, 8, 25, 10, 0, 0, tzinfo=SHANGHAI)
 
     response = client.get(f"/media/{asset['id']}/download")
 
@@ -732,8 +739,7 @@ def test_public_media_requires_the_same_complete_projection_as_every_public_deta
         content_id, detail_path = _publish_catalog_image_reference(
             db, asset["id"], entry_type
         )
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: now)
-    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: now)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: now
     assert client.get(detail_path).status_code == 200
     assert client.get(f"/media/{asset['id']}/image").status_code == 200
 
@@ -765,7 +771,7 @@ def test_future_published_image_references_are_private_until_due(
 
     assert client.get(f"/media/{asset['id']}/image").status_code == 404
 
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: due)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: due
 
     assert client.get(f"/media/{asset['id']}/image").status_code == 200
 
@@ -789,7 +795,7 @@ def test_future_published_download_references_are_private_until_due(
 
     assert client.get(f"/media/{asset['id']}/download").status_code == 404
 
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: due)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: due
 
     assert client.get(f"/media/{asset['id']}/download").status_code == 200
 

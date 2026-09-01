@@ -1,11 +1,17 @@
 """Controlled public media responses for currently published references."""
 
-from flask import Blueprint, abort, make_response, request, send_file
+from flask import Blueprint, abort, current_app, make_response, request, send_file
 
+from content_clock import shanghai_now
 from media_service import get_published_media_asset, media_root
 
 
 bp = Blueprint("media", __name__)
+
+
+def _content_now():
+    provider = current_app.config.get("CONTENT_NOW_PROVIDER")
+    return provider() if callable(provider) else shanghai_now()
 
 
 def _asset_path(asset):
@@ -41,7 +47,7 @@ def _send_public(asset, *, attachment):
 
 @bp.get("/media/<int:asset_id>/image")
 def published_image(asset_id):
-    asset = get_published_media_asset(asset_id, kind="image")
+    asset = get_published_media_asset(asset_id, kind="image", now=_content_now())
     if asset is None:
         abort(404)
     return _send_public(asset, attachment=False)
@@ -49,7 +55,7 @@ def published_image(asset_id):
 
 @bp.get("/media/<int:asset_id>/download")
 def published_download(asset_id):
-    asset = get_published_media_asset(asset_id, kind="download")
+    asset = get_published_media_asset(asset_id, kind="download", now=_content_now())
     if asset is None:
         abort(404)
     return _send_public(asset, attachment=True)

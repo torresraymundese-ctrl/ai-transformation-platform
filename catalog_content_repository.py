@@ -119,6 +119,7 @@ class RevisionProjection:
     blocks: tuple[Any, ...]
     relations: tuple[Any, ...]
     maturity_codes: tuple[str, ...]
+    publish_at: str | None
 
 
 @dataclass(frozen=True)
@@ -1042,6 +1043,7 @@ def _revision(db, content_id):
         blocks=aggregate.blocks,
         relations=aggregate.relations,
         maturity_codes=aggregate.maturity_codes,
+        publish_at=item["publish_at"],
     )
 
 
@@ -1206,6 +1208,31 @@ def save_catalog_draft(
         raise
     finally:
         db.close()
+
+
+def schedule_catalog_revision(
+    kind: str,
+    core_id: int,
+    content_id: int,
+    expected_lock_version: int,
+    publish_at,
+    *,
+    actor: str,
+    now,
+):
+    """Schedule the exact catalog draft addressed by the admin URL."""
+    db = models.get_db()
+    try:
+        _assert_content_identity(db, kind, core_id, content_id)
+    finally:
+        db.close()
+    return publishing_service.schedule_content(
+        content_id,
+        expected_lock_version,
+        publish_at,
+        actor=actor,
+        now=now,
+    )
 
 
 def archive_catalog_revision(

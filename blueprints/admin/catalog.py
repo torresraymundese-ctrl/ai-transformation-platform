@@ -7,7 +7,7 @@ from flask import abort, current_app, jsonify, redirect, render_template, reques
 
 from blueprints.admin import bp
 import catalog_content_repository as catalog
-from content_clock import shanghai_now
+from content_clock import parse_shanghai, shanghai_now
 from content_contracts import ContentBlock, ContentDraft, ContentRelation
 from content_validation import BLOCK_TYPES, MATURITY_CODES, ContentValidationError
 from pagination import parse_pagination
@@ -18,7 +18,7 @@ from publishing_repository import (
 )
 
 
-ACTIONS = frozenset({"save", "review", "publish", "archive"})
+ACTIONS = frozenset({"save", "review", "publish", "schedule", "archive"})
 FIXED_FIELDS = frozenset(
     {
         "csrf_token",
@@ -55,6 +55,7 @@ BLOCK_FIELD = re.compile(r"^blocks-(0|[1-9][0-9]*)-([a-z_]+)$")
 RELATION_FIELD = re.compile(
     r"^relations-(0|[1-9][0-9]*)-(type|target_group_id)$"
 )
+LOCAL_TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$")
 RELATION_TYPES = {
     "industry": frozenset({"industry_case", "industry_resource"}),
     "scenario": frozenset({"scenario_case", "scenario_resource"}),
@@ -235,16 +236,42 @@ def _parse_relations(data, kind):
 
 
 def _parse_submission(data, view):
-    _validate_field_names(data)
     action = _one(data, "action")
     if action not in ACTIONS:
         raise CatalogFormError("action_invalid", "action")
+    if action == "schedule":
+        allowed = {
+            "csrf_token", "action", "content_id", "lock_version", "publish_at"
+        }
+        unknown = sorted(set(data.keys()) - allowed)
+        if unknown:
+            raise CatalogFormError("unknown_field", unknown[0])
+        content_id = _positive_id(data, "content_id")
+        lock_version = _positive_id(data, "lock_version")
+        raw_publish_at = _one(data, "publish_at")
+        if LOCAL_TIME_RE.fullmatch(raw_publish_at) is None:
+            raise CatalogFormError("field_invalid", "publish_at")
+        normalized = raw_publish_at.replace("T", " ")
+        if len(normalized) == 16:
+            normalized += ":00"
+        try:
+            publish_at = parse_shanghai(normalized)
+        except ValueError as error:
+            raise CatalogFormError("field_invalid", "publish_at") from error
+        return action, content_id, lock_version, publish_at
+    if action == "archive":
+        allowed = {"csrf_token", "action", "content_id", "lock_version"}
+        unknown = sorted(set(data.keys()) - allowed)
+        if unknown:
+            raise CatalogFormError("unknown_field", unknown[0])
+        content_id = _positive_id(data, "content_id")
+        lock_version = _positive_id(data, "lock_version")
+        return action, content_id, lock_version, None
+    _validate_field_names(data)
     content_id = _positive_id(data, "content_id")
     lock_version = _positive_id(data, "lock_version")
-    if action == "archive":
-        return action, content_id, lock_version, None
     maturity_codes = tuple(data.getlist("maturity_codes"))
-    if view.kind == "scenario":
+    if view.kind in {"scenario", "service"}:
         if not maturity_codes or len(set(maturity_codes)) != len(maturity_codes):
             raise CatalogFormError("maturity_invalid")
         if any(code not in MATURITY_CODES for code in maturity_codes):
@@ -305,6 +332,8 @@ def admin_catalog(kind):
 @bp.route("/admin/catalog/<kind>/<int:core_id>", methods=["GET", "POST"])
 def admin_catalog_edit(kind, core_id):
     kind = _kind_or_404(kind)
+    submitted_draft = None
+    submitted_publish_at = None
     try:
         if request.method == "GET":
             view = catalog.ensure_editable_revision(
@@ -315,10 +344,21 @@ def admin_catalog_edit(kind, core_id):
                 view=view,
                 form=view.draft_revision,
                 error=None,
+                schedule_publish_at=(
+                    view.draft_revision.publish_at.replace(" ", "T")
+                    if view.draft_revision.publish_at is not None
+                    else ""
+                ),
             )
 
         view = catalog.get_editor(kind, core_id)
-        action, content_id, lock_version, draft = _parse_submission(request.form, view)
+        action, content_id, lock_version, submission = _parse_submission(
+            request.form, view
+        )
+        if action == "schedule":
+            submitted_publish_at = submission
+        else:
+            submitted_draft = submission
         if action == "archive":
             catalog.archive_catalog_revision(
                 kind,
@@ -328,13 +368,23 @@ def admin_catalog_edit(kind, core_id):
                 actor=_actor(),
                 now=_now(),
             )
+        elif action == "schedule":
+            catalog.schedule_catalog_revision(
+                kind,
+                core_id,
+                content_id,
+                lock_version,
+                submitted_publish_at,
+                actor=_actor(),
+                now=_now(),
+            )
         else:
             catalog.save_catalog_draft(
                 kind,
                 core_id,
                 content_id,
                 lock_version,
-                draft,
+                submitted_draft,
                 action=action,
                 actor=_actor(),
                 now=_now(),
@@ -344,16 +394,22 @@ def admin_catalog_edit(kind, core_id):
         return _form_error(error)
     except ContentConflictError:
         view = catalog.get_editor(kind, core_id)
-        if "draft" in locals() and draft is not None:
-            form = _submitted(content_id, lock_version, draft)
+        if submitted_draft is not None:
+            form = _submitted(content_id, lock_version, submitted_draft)
         else:
             form = view.draft_revision
+        schedule_publish_at = (
+            submitted_publish_at.strftime("%Y-%m-%dT%H:%M:%S")
+            if submitted_publish_at is not None
+            else ""
+        )
         return (
             render_template(
                 "admin/catalog_edit.html",
                 view=view,
                 form=form,
                 error="内容已被其他操作更新，请核对后重新提交。",
+                schedule_publish_at=schedule_publish_at,
             ),
             409,
         )

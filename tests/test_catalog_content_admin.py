@@ -126,6 +126,110 @@ def test_unknown_or_assessment_critical_fields_are_rejected_without_residue(admi
     assert tuple(db.execute("SELECT minimum_data,min_weeks,max_weeks FROM scenarios WHERE id=?", (item["scenario_id"],)).fetchone()) == before_rule
 
 
+def test_non_schedule_actions_reject_publish_at_without_residue(admin_client, db):
+    item = _first(db)
+    route = f"/admin/catalog/scenario/{item['scenario_id']}"
+    before_item = tuple(
+        db.execute(
+            "SELECT title,lock_version,status,publish_at FROM content_items WHERE id=?",
+            (item["id"],),
+        ).fetchone()
+    )
+    before_audits = db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=?",
+        (item["id"],),
+    ).fetchone()[0]
+
+    for action in ("save", "review", "publish"):
+        response = admin_client.post(
+            route,
+            data=_valid_form(
+                item,
+                action=action,
+                publish_at="2030-01-01T09:00:00",
+            ),
+        )
+        assert response.status_code == 400
+        assert response.get_json() == {
+            "error": "unknown_field",
+            "field": "publish_at",
+        }
+
+    archive = admin_client.post(
+        route,
+        data={
+            "csrf_token": CSRF,
+            "action": "archive",
+            "content_id": str(item["id"]),
+            "lock_version": str(item["lock_version"]),
+            "publish_at": "2030-01-01T09:00:00",
+        },
+    )
+    assert archive.status_code == 400
+    assert archive.get_json() == {
+        "error": "unknown_field",
+        "field": "publish_at",
+    }
+    invalid_schedule = admin_client.post(
+        route,
+        data={
+            "csrf_token": CSRF,
+            "action": "schedule",
+            "content_id": str(item["id"]),
+            "lock_version": str(item["lock_version"]),
+            "publish_at": "2030-01-01T09:00:00",
+            "unexpected": "ignored",
+        },
+    )
+    assert invalid_schedule.status_code == 400
+    assert invalid_schedule.get_json() == {
+        "error": "unknown_field",
+        "field": "unexpected",
+    }
+    assert tuple(
+        db.execute(
+            "SELECT title,lock_version,status,publish_at FROM content_items WHERE id=?",
+            (item["id"],),
+        ).fetchone()
+    ) == before_item
+    assert db.execute(
+        "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=?",
+        (item["id"],),
+    ).fetchone()[0] == before_audits
+
+
+def test_schedule_redirect_projects_persisted_datetime_and_current_lock_version(
+    admin_client, db
+):
+    item = _first(db)
+    route = f"/admin/catalog/scenario/{item['scenario_id']}"
+    scheduled = admin_client.post(
+        route,
+        data={
+            "csrf_token": CSRF,
+            "action": "schedule",
+            "content_id": str(item["id"]),
+            "lock_version": str(item["lock_version"]),
+            "publish_at": "2030-01-01T09:00:00",
+        },
+    )
+    assert scheduled.status_code == 302
+
+    editor = BeautifulSoup(admin_client.get(route).data, "html.parser")
+    schedule_form = editor.select_one("form[data-schedule-content]")
+    assert schedule_form is not None
+    assert schedule_form.select_one('input[name="publish_at"]')["value"] == (
+        "2030-01-01T09:00:00"
+    )
+    persisted_lock_version = db.execute(
+        "SELECT lock_version FROM content_items WHERE id=?", (item["id"],)
+    ).fetchone()[0]
+    assert persisted_lock_version == item["lock_version"] + 1
+    assert schedule_form.select_one('input[name="lock_version"]')["value"] == str(
+        persisted_lock_version
+    )
+
+
 def test_save_review_publish_copy_on_edit_and_archive_use_revision_state_machine(admin_client, db):
     item = _first(db)
     route = f"/admin/catalog/scenario/{item['scenario_id']}"

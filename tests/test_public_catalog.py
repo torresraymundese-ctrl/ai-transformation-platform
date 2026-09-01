@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import app as app_module
 import blueprints.public_catalog as public_catalog_blueprint
 import catalog_content_repository as catalog
+import case_repository as cases
 import content_repository
 from content_clock import SHANGHAI
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
@@ -22,6 +23,36 @@ import media_service
 import publishing_repository
 from publishing_service import copy_revision, create_content_draft, publish_content, publish_due_content, save_content_draft, schedule_content
 from publishing_service import archive_content
+from pagination import Page
+
+
+@pytest.mark.parametrize(
+    ("path", "owner", "name", "result"),
+    (
+        ("/industries", catalog, "public_industries", ()),
+        ("/industries/example", catalog, "public_industry", None),
+        ("/scenarios", catalog, "public_scenarios", Page((), 1, 20, 0, 0)),
+        ("/scenarios/example", catalog, "public_scenario", None),
+        ("/service-packages", catalog, "public_services", Page((), 1, 20, 0, 0)),
+        ("/service-packages/example", catalog, "public_service", None),
+        ("/cases", cases, "public_cases", Page((), 1, 20, 0, 0)),
+        ("/cases/example", cases, "public_case", None),
+    ),
+)
+def test_public_catalog_routes_pass_injected_content_now(
+    client, monkeypatch, path, owner, name, result
+):
+    instant = datetime(2026, 8, 25, 10, 0, tzinfo=SHANGHAI)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: instant
+    captured = []
+
+    def projection(*args):
+        captured.append(args[-1])
+        return result
+
+    monkeypatch.setattr(owner, name, projection)
+    assert client.get(path).status_code in {200, 404}
+    assert captured == [instant]
 
 
 INDUSTRY_REQUIRED_SECTIONS = {
@@ -1057,8 +1088,7 @@ def test_future_published_scenario_hides_detail_and_block_media_until_due(
     assert client.get(f"/media/{image_id}/image").status_code == 404
     assert client.get(f"/media/{download_id}/download").status_code == 404
 
-    monkeypatch.setattr(public_catalog_blueprint, "shanghai_now", lambda: due)
-    monkeypatch.setattr(media_service, "shanghai_now", lambda: due)
+    client.application.config["CONTENT_NOW_PROVIDER"] = lambda: due
 
     assert client.get(f"/scenarios/{slug}").status_code == 200
     assert client.get(f"/media/{image_id}/image").status_code == 200

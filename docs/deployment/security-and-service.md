@@ -32,6 +32,8 @@ TZ=Asia/Shanghai date '+%F %T %z'
   `/etc/ai-platform/ai-platform.env`。
 - 环境文件权限为 `0600 root:root`；源码、提交记录和命令行参数不出现明文密码。
 - 运行日志进入 journald；SQLite 只有 `/opt/ai-platform/data` 可写。
+- 规范 URL 只来自经验证的 `AI_PLATFORM_PUBLIC_BASE_URL`；生产媒体根固定为
+  `/opt/ai-platform/data/media`，二者都不能回退到请求头或临时目录。
 - 两位人员继续共用一个管理员账号和同一权限，不新增账号/角色系统。
 
 ## 建立管理员和隐私配置
@@ -49,7 +51,7 @@ python3 /opt/ai-platform/scripts/configure_security.py \
 和随机 Session 密钥，并拒绝覆盖已有文件。随后使用
 `sudoedit /etc/ai-platform/ai-platform.env` 在同一受限文件补齐隐私配置。
 
-六个生产键必须全部存在且非空：
+八个生产键必须全部存在且非空：
 
 ```text
 AI_PLATFORM_SECRET_KEY=<随机 Session 密钥>
@@ -58,7 +60,14 @@ AI_PLATFORM_ADMIN_PASSWORD_HASH=<Werkzeug scrypt 哈希>
 AI_PLATFORM_PRIVACY_PROCESSOR_NAME=<个人信息处理者全称>
 AI_PLATFORM_PRIVACY_CONTACT=<隐私请求联系渠道>
 AI_PLATFORM_PRIVACY_POLICY_URL=https://<正式域名>/privacy
+AI_PLATFORM_PUBLIC_BASE_URL=https://<正式规范域名>
+AI_PLATFORM_MEDIA_ROOT=/opt/ai-platform/data/media
 ```
+
+`AI_PLATFORM_PUBLIC_BASE_URL` 必须是一个字面 HTTPS origin：不得带路径、query、
+fragment、userinfo 或非规范端口，也不得由 `Host`/`X-Forwarded-Host` 推断。
+`AI_PLATFORM_MEDIA_ROOT` 在生产 WSGI 中必须等于或位于
+`/opt/ai-platform/data/media` 之下；本部署固定使用该目录本身。
 
 不得创建明文管理员密码变量，也不得把真实值写入源码、Git、命令参数、聊天、
 工单或日志。缺少管理员安全键时 `/admin/login` 必须为 503；缺少任一隐私键时
@@ -77,6 +86,7 @@ stat -c '%a %U %G %n' /etc/ai-platform/ai-platform.env
 ```bash
 useradd --system --home /opt/ai-platform --shell /usr/sbin/nologin ai-platform
 install -d -m 0750 -o ai-platform -g ai-platform /opt/ai-platform/data
+install -d -m 0750 -o ai-platform -g ai-platform /opt/ai-platform/data/media
 chown -R root:ai-platform /opt/ai-platform
 chown -R ai-platform:ai-platform /opt/ai-platform/data
 ```
@@ -114,10 +124,12 @@ systemd `ExecStartPre`：PDF 原生运行库异常时，HTML 应用和已生成�
 
 ```bash
 systemctl is-active nginx
+systemctl stop ai-platform
+test "$(systemctl is-active ai-platform)" = inactive
 ```
 
-期望为 `inactive`。创建 SQLite 在线一致性备份；不能复制活动中的单个 DB 文件
-来代替 `.backup`：
+Nginx 和应用都必须为 `inactive`，这样数据库与媒体不会在成组备份之间变化。
+创建 SQLite 一致性备份；不能复制单个 DB 文件来代替 `.backup`：
 
 ```bash
 install -d -m 0700 /var/backups/ai-platform
@@ -129,21 +141,40 @@ sha256sum "$BACKUP_FILE"
 ```
 
 `PRAGMA integrity_check` 必须只输出 `ok`。再把备份恢复到隔离目录并对恢复副本
-执行迁移，不能用生产 DB 做“演练”：
+执行迁移，不能用生产 DB 做“演练”。同一维护窗口还要保存媒体树；媒体归档和
+数据库备份必须作为一组记录，不能只备份其中一个：
+
+```bash
+MEDIA_BACKUP="/var/backups/ai-platform/media-$(date +%Y%m%d-%H%M%S).tar"
+tar --create --file "$MEDIA_BACKUP" \
+  --directory /opt/ai-platform/data/media .
+chmod 0600 "$MEDIA_BACKUP"
+tar --list --file "$MEDIA_BACKUP"
+sha256sum "$MEDIA_BACKUP"
+```
+
+媒体备份不使用 `--remove-files`、`rsync --delete` 或任何清理参数。再在隔离恢复
+目录同时恢复数据库和媒体：
 
 ```bash
 REHEARSAL_DIR="$(mktemp -d /tmp/ai-platform-restore.XXXXXX)"
 rsync -a --exclude='.venv/' --exclude='data/' /opt/ai-platform/ "$REHEARSAL_DIR/"
 install -d -m 0750 -o ai-platform -g ai-platform "$REHEARSAL_DIR/data"
+install -d -m 0750 -o ai-platform -g ai-platform "$REHEARSAL_DIR/data/media"
 install -m 0640 -o ai-platform -g ai-platform \
   "$BACKUP_FILE" "$REHEARSAL_DIR/data/platform.db"
+tar --extract --file "$MEDIA_BACKUP" \
+  --directory "$REHEARSAL_DIR/data/media"
+chown -R ai-platform:ai-platform "$REHEARSAL_DIR/data/media"
 sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
   "$REHEARSAL_DIR/manage.py" migrate
 sqlite3 "$REHEARSAL_DIR/data/platform.db" \
   'PRAGMA integrity_check; SELECT version FROM schema_migrations ORDER BY version;'
+find "$REHEARSAL_DIR/data/media" -type f -printf '%P\n' | LC_ALL=C sort
 ```
 
-记录备份路径、SHA-256、`ok`、迁移版本和恢复副本统计。保留恢复目录直至上线
+记录两份备份路径/SHA-256、`ok`、迁移版本、恢复后的相对媒体清单和副本统计。
+保留恢复目录直至上线
 决定；未成功恢复并迁移副本时，不得重启应用、执行删除/匿名化或启动 Nginx。
 
 若阶段 7 明确决定回滚，先保持 Nginx 停止并停止应用，再原子替换数据库。只有
@@ -182,6 +213,117 @@ sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
 
 `--apply` 匿名化未成交到期线索并保留不可识别的评估/ROI/事件指标；已成交客户
 不参与普通自动清理。没有已校验备份或恢复演练失败时严禁执行 `--apply`。
+
+## 内容目录、来源与媒体（仅阶段 7）
+
+本节是阶段 7 操作顺序，不授权当前任务执行。先完成代码门禁、数据库/媒体成组
+备份和隔离恢复演练，保持 Nginx 与应用停止，再由 `ai-platform` 用户运行迁移：
+
+```bash
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py migrate
+
+# 默认零写入；先把通用库存输出交给内容负责人核对
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py inventory-content
+
+# 获得逐项人工确认后，才写/更新 review 行
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py inventory-content --record
+
+# 这是显式网络操作；只检查已记录来源并只输出通用状态/code
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py check-content-sources
+```
+
+来源检查最多读取 1 MiB，限制 scheme/host/端口/content type/encoding/重定向，
+DNS 只接受有界数量的公网地址；连接固定到已验证地址并核对 peer，每次重定向都
+重新执行相同策略，拒绝 loopback、私网、link-local、保留、多播、非规范地址和
+userinfo。检查 tuple 绑定规范 URL hash，发布时必须为 `https_ok` 且从检查时间
+起七天内有效；URL 改动、过期、未来时间或 hash 不同都必须重新检查。不得临时
+放宽 SSRF、大小或七天 TTL 门禁。自动化和本地验收只用 mock transport；阶段 7
+真实网络检查必须有批准的出站边界和审计记录。
+
+运营人员把严格 JSONL decision 文件放入受限配置目录；文件不得包含私密 query、
+响应正文或联系方式。先预览，再对输出中的 target、锁版本、确认项和当前来源
+checksum 做人工复核，最后才 apply：
+
+```bash
+install -m 0640 -o root -g ai-platform \
+  <approved-content-decisions.jsonl> \
+  /etc/ai-platform/approved-content-decisions.jsonl
+CONTENT_DECISIONS=/etc/ai-platform/approved-content-decisions.jsonl
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py migrate-legacy-content \
+  --decisions "$CONTENT_DECISIONS"
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py migrate-legacy-content \
+  --decisions "$CONTENT_DECISIONS" --apply
+```
+
+`--apply` 仍只创建或显式合并 V2 `draft`。它不发布、不删除或更新旧四表；
+`delete_later` 只是人工标签。数据库触发器禁止删除内容组、修订、区块、关系、
+媒体和旧内容。媒体“归档”只改变受控状态，不删除文件/行；禁止用 SQL、文件清理
+脚本或 `rsync --delete` 绕过。先运行媒体恢复 dry-run：
+
+```bash
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py recover-media-storage
+```
+
+只有逐项核对 finding、成组备份仍有效且明确批准后，才可执行
+`recover-media-storage --apply`；它只归档不可恢复的 pending/missing 状态，不删除
+文件或数据库行。`/opt/ai-platform/data/media` 及其文件必须保持
+`ai-platform:ai-platform` 所有权，目录不得对其他用户开放写权限：
+
+```bash
+stat -c '%a %U %G %n' /opt/ai-platform/data/media
+find /opt/ai-platform/data/media -xdev -type f \
+  ! -user ai-platform -o -type f ! -group ai-platform
+```
+
+第二条命令期望无输出。发布候选通过 loopback 健康检查、管理员内容闭环、公开
+目录/媒体、Session/PDF 和回滚烟雾测试之后，才允许运行一次到期发布并复核输出：
+
+```bash
+sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
+  /opt/ai-platform/manage.py publish-due-content
+```
+
+仓库当前不提供内容定时器 unit；阶段 7 不得提前编造或启用。未来若另经审查加入
+`publish-due-content`、来源复核或媒体恢复 timer，必须先在同一候选上手工运行、
+完成上述烟雾测试，再 `enable/start`；任何候选重启都使该烟雾门禁失效，timer 必须
+继续停止。`recover-media-storage --apply` 和旧内容 conversion 不得成为无人值守
+定时任务。
+
+Nginx 候选配置必须先把全部动态请求限制为 1 MiB，只给经过认证的媒体上传适配器
+精确路径 22 MiB。不能把 22 MiB 放到 `/admin/`、`/media/` 或整个 `server`：
+
+```nginx
+server {
+    client_max_body_size 1m;
+
+    location = /admin/media {
+        client_max_body_size 22m;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:5080;
+    }
+
+    location / {
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://127.0.0.1:5080;
+    }
+}
+```
+
+Nginx 的 `m` 单位按 MiB 计。应用层仍只对已认证的精确 POST endpoint 放行全局
+22 MiB transport ceiling，图片/附件验证分别执行更小的内容限制；其他请求即使
+绕过 Nginx 也保持 1 MiB。该片段只能合并到阶段 7 候选配置；完成候选烟雾测试后
+才运行 `nginx -t`，最终明确批准前仍不得启动 Nginx。
 
 ## 安装与轮换 systemd 服务
 

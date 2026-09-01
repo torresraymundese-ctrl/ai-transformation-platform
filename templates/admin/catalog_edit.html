@@ -45,7 +45,7 @@
     </select>
   </div>
 
-  {% if view.kind == 'scenario' %}
+  {% if view.kind in ('scenario', 'service') %}
   <fieldset class="form-group">
     <legend>适用成熟度（明确选择）</legend>
     {% for code in ('explore','pilot','scale','collaborate') %}
@@ -62,6 +62,17 @@
     <button class="btn btn-outline" type="submit" name="action" value="review">发布前检查</button>
     <button class="btn btn-primary" type="submit" name="action" value="publish">发布</button>
   </div>
+</form>
+
+<form method="POST" data-schedule-content class="card" style="padding:20px;margin-top:16px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="content_id" value="{{ form.id }}">
+  <input type="hidden" name="lock_version" value="{{ form.lock_version }}">
+  <div class="form-group">
+    <label>计划发布时间（Asia/Shanghai）</label>
+    <input type="datetime-local" name="publish_at" value="{{ schedule_publish_at }}" step="1" required>
+  </div>
+  <button class="btn btn-outline" type="submit" name="action" value="schedule">安排定时发布</button>
 </form>
 
 {% if view.public_revision %}

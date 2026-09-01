@@ -3,6 +3,8 @@
 这是 Flask + SQLite 模块化单体的 V2 核心子项目，当前覆盖选择题式评估、
 六维评分、场景与服务包匹配、ROI、Session 私有报告/PDF、线索同意、诊断
 预约、匿名转化事件，以及两位人员共用一个管理员账号的线索操作后台。
+阶段 5A 还提供行业、场景、服务包、已核验案例、资源、公告和受控媒体的
+草稿/审校/发布/修订/排期/归档闭环；旧内容只可经人工决策转换为 V2 草稿。
 
 当前阶段先验证功能和数据边界，最终视觉重设计尚未开始。生产服务器、生产
 数据库和 Nginx 不属于本地开发范围；Nginx 必须保持停止，直到阶段 7 的备份、
@@ -22,6 +24,8 @@ $env:AI_PLATFORM_ADMIN_PASSWORD_HASH = '<Werkzeug scrypt 哈希，不是明文�
 $env:AI_PLATFORM_PRIVACY_PROCESSOR_NAME = '<个人信息处理者全称>'
 $env:AI_PLATFORM_PRIVACY_CONTACT = '<隐私请求联系方式>'
 $env:AI_PLATFORM_PRIVACY_POLICY_URL = 'https://<正式域名>/privacy'
+$env:AI_PLATFORM_PUBLIC_BASE_URL = 'https://<可信规范域名>'
+$env:AI_PLATFORM_MEDIA_ROOT = (Join-Path $PWD 'data\media')
 
 .venv\Scripts\python.exe manage.py migrate
 .venv\Scripts\python.exe -m pytest -q
@@ -44,6 +48,8 @@ Windows 缺少 Pango/Harfbuzz 原生运行库时，在线 HTML 报告仍可开�
 
 - 核心旅程、证据边界和复现命令：
   [`docs/testing/core-assessment-report.md`](docs/testing/core-assessment-report.md)
+- 内容目录发布旅程、已知内容缺口和五项浏览器证据：
+  [`docs/testing/content-catalog.md`](docs/testing/content-catalog.md)
 - 管理员密钥、数据库备份/恢复、PDF、保留清理与服务上线：
   [`docs/deployment/security-and-service.md`](docs/deployment/security-and-service.md)
 - 产品规格：

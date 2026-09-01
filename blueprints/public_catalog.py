@@ -73,14 +73,14 @@ def _format_cny_amount(value):
 @bp.get("/industries")
 def industries():
     return render_template(
-        "industries.html", industries=catalog.public_industries(shanghai_now()),
+        "industries.html", industries=catalog.public_industries(_content_now()),
         canonical=_canonical("/industries"),
     )
 
 
 @bp.get("/industries/<slug>")
 def industry_detail(slug):
-    industry = catalog.public_industry(slug, shanghai_now())
+    industry = catalog.public_industry(slug, _content_now())
     if industry is None:
         abort(404)
     if industry["redirect"]:
@@ -91,7 +91,7 @@ def industry_detail(slug):
 @bp.get("/scenarios")
 def scenarios():
     filters = catalog.parse_public_scenario_filters(request.args)
-    page = catalog.public_scenarios(filters, parse_pagination(request.args), shanghai_now())
+    page = catalog.public_scenarios(filters, parse_pagination(request.args), _content_now())
     return render_template(
         "scenarios.html", page=page, filters=filters,
         maturity_labels=catalog.MATURITY_LABELS, canonical=_canonical("/scenarios"),
@@ -100,7 +100,7 @@ def scenarios():
 
 @bp.get("/scenarios/<slug>")
 def scenario_detail(slug):
-    scenario = catalog.public_scenario(slug, shanghai_now())
+    scenario = catalog.public_scenario(slug, _content_now())
     if scenario is None:
         abort(404)
     if scenario["redirect"]:
@@ -115,7 +115,7 @@ def scenario_detail(slug):
 
 @bp.get("/service-packages")
 def service_packages():
-    page = catalog.public_services(parse_pagination(request.args), shanghai_now())
+    page = catalog.public_services(parse_pagination(request.args), _content_now())
     return render_template(
         "service_packages.html", page=page,
         canonical=_canonical("/service-packages"),
@@ -124,7 +124,7 @@ def service_packages():
 
 @bp.get("/service-packages/<slug>")
 def service_package_detail(slug):
-    service = catalog.public_service(slug, shanghai_now())
+    service = catalog.public_service(slug, _content_now())
     if service is None:
         abort(404)
     if service["redirect"]:
@@ -137,13 +137,13 @@ def service_package_detail(slug):
 
 @bp.get("/cases")
 def cases_page():
-    page = cases.public_cases(parse_pagination(request.args), shanghai_now())
+    page = cases.public_cases(parse_pagination(request.args), _content_now())
     return render_template("cases.html", page=page, canonical=_canonical("/cases"))
 
 
 @bp.get("/cases/<slug>")
 def case_detail(slug):
-    case = cases.public_case(slug, shanghai_now())
+    case = cases.public_case(slug, _content_now())
     if case is None:
         abort(404)
     if case.redirect:
