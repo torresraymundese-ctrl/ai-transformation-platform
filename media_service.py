@@ -22,6 +22,7 @@ from media_validation import (
 )
 import models
 import publishing_repository
+from pagination import Page, PageRequest, parse_bounded_search
 
 
 DEFAULT_MEDIA_CONFIG = {
@@ -56,6 +57,71 @@ class MediaAsset:
     byte_size: int
     sha256: str
     status: str
+
+
+@dataclass(frozen=True)
+class MediaFilters:
+    status: str | None = None
+    search: str | None = None
+
+
+def parse_media_filters(values) -> MediaFilters:
+    try:
+        raw_status = values.get("status", "")
+    except (AttributeError, TypeError):
+        raw_status = ""
+    status = raw_status.strip() if type(raw_status) is str else ""
+    return MediaFilters(
+        status=status if status in {"pending", "ready", "archived"} else None,
+        search=parse_bounded_search(values),
+    )
+
+
+def _media_predicate(filters: MediaFilters):
+    clauses = []
+    parameters = []
+    if filters.status is not None:
+        clauses.append("status=?")
+        parameters.append(filters.status)
+    if filters.search is not None:
+        pattern = (
+            "%"
+            + filters.search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            + "%"
+        )
+        clauses.append("display_name LIKE ? ESCAPE '\\'")
+        parameters.append(pattern)
+    return (
+        " WHERE " + " AND ".join(clauses) if clauses else "",
+        tuple(parameters),
+    )
+
+
+def query_media_assets(filters: MediaFilters, page: PageRequest) -> Page[MediaAsset]:
+    where, parameters = _media_predicate(filters)
+    connection = models.get_db()
+    try:
+        total = connection.execute(
+            "SELECT COUNT(*) FROM media_assets" + where, parameters
+        ).fetchone()[0]
+        if total == 0:
+            return Page((), 1, page.per_page, 0, 0)
+        total_pages = (total + page.per_page - 1) // page.per_page
+        page_number = min(page.page, total_pages)
+        items = tuple(
+            _asset(row)
+            for row in connection.execute(
+                "SELECT * FROM media_assets"
+                + where
+                + " ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?",
+                (*parameters, page.per_page, (page_number - 1) * page.per_page),
+            ).fetchall()
+        )
+        return Page(items, page_number, page.per_page, total, total_pages)
+    finally:
+        connection.close()
 
 
 @dataclass(frozen=True)

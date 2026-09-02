@@ -185,8 +185,11 @@ def _json_error(error):
 
 @bp.get("/admin/cases")
 def admin_cases_v2():
+    filters = cases.parse_case_filters(request.args)
     return render_template(
-        "admin/case_list_v2.html", page=cases.admin_cases(parse_pagination(request.args))
+        "admin/case_list_v2.html",
+        page=cases.admin_cases(parse_pagination(request.args), filters),
+        filters=filters,
     )
 
 

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import analytics_repository
 from models import get_db
+from pagination import Page, PageRequest, parse_bounded_search
 from repository import DataConflictError
 
 
@@ -28,6 +29,63 @@ STATUS_TIMESTAMPS = {
 class AppointmentResult:
     appointment_id: int
     status: str
+
+
+@dataclass(frozen=True)
+class AppointmentFilters:
+    status: str | None = None
+    search: str | None = None
+
+
+def parse_appointment_filters(values) -> AppointmentFilters:
+    try:
+        raw_status = values.get("status", "")
+    except (AttributeError, TypeError):
+        raw_status = ""
+    status = raw_status.strip() if type(raw_status) is str else ""
+    return AppointmentFilters(
+        status=status if status in ALLOWED_TRANSITIONS else None,
+        search=parse_bounded_search(values),
+    )
+
+
+def _appointment_predicate(filters):
+    clauses = ["l.anonymized_at IS NULL"]
+    parameters = []
+    if filters.status is not None:
+        clauses.append("a.status=?")
+        parameters.append(filters.status)
+    if filters.search is not None:
+        pattern = "%" + filters.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        clauses.append(
+            "(l.company_name LIKE ? ESCAPE '\\' OR l.contact_name LIKE ? ESCAPE '\\')"
+        )
+        parameters.extend((pattern, pattern))
+    return " WHERE " + " AND ".join(clauses), tuple(parameters)
+
+
+def query_appointments(
+    filters: AppointmentFilters, page: PageRequest
+) -> Page[sqlite3.Row]:
+    where, parameters = _appointment_predicate(filters)
+    base = " FROM appointments a JOIN leads l ON l.id=a.lead_id"
+    db = get_db()
+    try:
+        total = db.execute("SELECT COUNT(*)" + base + where, parameters).fetchone()[0]
+        if total == 0:
+            return Page((), 1, page.per_page, 0, 0)
+        total_pages = (total + page.per_page - 1) // page.per_page
+        page_number = min(page.page, total_pages)
+        rows = tuple(
+            db.execute(
+                "SELECT a.*,l.company_name,l.contact_name,l.phone_normalized,l.email,l.wechat" +
+                base + where + " ORDER BY a.preferred_date ASC,a.time_slot ASC,a.id ASC LIMIT ? OFFSET ?",
+                (*parameters, page.per_page, (page_number - 1) * page.per_page),
+            ).fetchall()
+        )
+        return Page(rows, page_number, page.per_page, total, total_pages)
+    finally:
+        db.close()
 
 
 def submit_appointment_intent(

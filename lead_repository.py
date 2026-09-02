@@ -6,7 +6,9 @@ import re
 import sqlite3
 from zoneinfo import ZoneInfo
 
+from assessment_validation import BRANCH_CODES
 from models import get_db
+from pagination import Page, PageRequest, parse_bounded_search
 from repository import DataConflictError
 from validation import (
     ValidationError,
@@ -80,6 +82,194 @@ class RetentionPurgeResult:
     @property
     def count(self) -> int:
         return len(self.lead_ids)
+
+
+@dataclass(frozen=True)
+class LeadFilters:
+    status: str | None = None
+    branch: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    queue: str = "ordinary"
+    search: str | None = None
+
+
+@dataclass(frozen=True)
+class DataRequestFilters:
+    status: str | None = None
+    request_type: str | None = None
+    search: str | None = None
+
+
+def _query_value(values, name):
+    try:
+        value = values.get(name, "")
+    except (AttributeError, TypeError):
+        return ""
+    return value.strip() if type(value) is str else ""
+
+
+def parse_lead_filters(values) -> LeadFilters:
+    status = _query_value(values, "status")
+    branch = _query_value(values, "branch")
+    queue = _query_value(values, "queue")
+    return LeadFilters(
+        status=status if status in LEAD_STATUSES else None,
+        branch=branch if branch in BRANCH_CODES else None,
+        date_from=parse_date_filter(_query_value(values, "date_from"), "date_from"),
+        date_to=parse_date_filter(_query_value(values, "date_to"), "date_to"),
+        queue=queue if queue in {"ordinary", "followup"} else "ordinary",
+        search=parse_bounded_search(values),
+    )
+
+
+def parse_data_request_filters(values) -> DataRequestFilters:
+    status = _query_value(values, "status")
+    request_type = _query_value(values, "request_type")
+    return DataRequestFilters(
+        status=status if status in DATA_REQUEST_STATUSES | {"open"} else None,
+        request_type=(
+            request_type if request_type in DATA_REQUEST_TYPES else None
+        ),
+        search=parse_bounded_search(values),
+    )
+
+
+def _like_pattern(value):
+    return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _lead_predicate(filters: LeadFilters):
+    clauses = ["l.anonymized_at IS NULL"]
+    parameters = []
+    if filters.status is not None:
+        clauses.append("l.status=?")
+        parameters.append(filters.status)
+    if filters.branch is not None:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM assessments branch_a "
+            "WHERE branch_a.lead_id=l.id AND branch_a.branch_code=?)"
+        )
+        parameters.append(filters.branch)
+    if filters.date_from is not None:
+        clauses.append("date(l.created_at)>=?")
+        parameters.append(filters.date_from)
+    if filters.date_to is not None:
+        clauses.append("date(l.created_at)<=?")
+        parameters.append(filters.date_to)
+    if filters.queue == "followup":
+        clauses.append("l.next_followup_at IS NOT NULL")
+    if filters.search is not None:
+        pattern = _like_pattern(filters.search)
+        clauses.append(
+            "(l.company_name LIKE ? ESCAPE '\\' OR l.contact_name LIKE ? ESCAPE '\\' "
+            "OR COALESCE(l.owner_text,'') LIKE ? ESCAPE '\\')"
+        )
+        parameters.extend((pattern, pattern, pattern))
+    return " WHERE " + " AND ".join(clauses), tuple(parameters)
+
+
+def _page_bounds(total, request):
+    if total == 0:
+        return 1, 0
+    total_pages = (total + request.per_page - 1) // request.per_page
+    return min(request.page, total_pages), total_pages
+
+
+def query_leads(filters: LeadFilters, page: PageRequest) -> Page[sqlite3.Row]:
+    where, parameters = _lead_predicate(filters)
+    order = (
+        "l.next_followup_at ASC,l.id ASC"
+        if filters.queue == "followup"
+        else "l.created_at DESC,l.id DESC"
+    )
+    db = get_db()
+    try:
+        total = db.execute("SELECT COUNT(*) FROM leads l" + where, parameters).fetchone()[0]
+        page_number, total_pages = _page_bounds(total, page)
+        if total == 0:
+            return Page((), 1, page.per_page, 0, 0)
+        rows = tuple(
+            db.execute(
+                "SELECT l.*,(SELECT COUNT(*) FROM assessments count_a WHERE count_a.lead_id=l.id) "
+                "AS assessment_count,(SELECT latest_a.branch_code FROM assessments latest_a "
+                "WHERE latest_a.lead_id=l.id ORDER BY latest_a.completed_at DESC,latest_a.id DESC "
+                "LIMIT 1) AS latest_branch FROM leads l" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
+                (*parameters, page.per_page, (page_number - 1) * page.per_page),
+            ).fetchall()
+        )
+        return Page(rows, page_number, page.per_page, total, total_pages)
+    finally:
+        db.close()
+
+
+def _data_request_predicate(filters: DataRequestFilters):
+    clauses = []
+    parameters = []
+    if filters.status == "open":
+        clauses.append("r.status IN ('received','verifying')")
+    elif filters.status is not None:
+        clauses.append("r.status=?")
+        parameters.append(filters.status)
+    if filters.request_type is not None:
+        clauses.append("r.request_type=?")
+        parameters.append(filters.request_type)
+    if filters.search is not None:
+        pattern = _like_pattern(filters.search)
+        clauses.append(
+            "(l.anonymized_at IS NULL AND (l.company_name LIKE ? ESCAPE '\\' "
+            "OR l.contact_name LIKE ? ESCAPE '\\'))"
+        )
+        parameters.extend((pattern, pattern))
+    prefix = " WHERE " if clauses else ""
+    return prefix + " AND ".join(clauses), tuple(parameters)
+
+
+def query_data_subject_requests(
+    filters: DataRequestFilters, page: PageRequest
+) -> Page[sqlite3.Row]:
+    where, parameters = _data_request_predicate(filters)
+    base = " FROM data_subject_requests r LEFT JOIN leads l ON l.id=r.lead_id"
+    db = get_db()
+    try:
+        total = db.execute("SELECT COUNT(*)" + base + where, parameters).fetchone()[0]
+        page_number, total_pages = _page_bounds(total, page)
+        if total == 0:
+            return Page((), 1, page.per_page, 0, 0)
+        rows = tuple(
+            db.execute(
+                "SELECT r.id,r.lead_id,r.request_type,r.status,r.channel,r.requested_at,"
+                "r.resolution_note,r.completed_at,r.admin_updated_at,"
+                "CASE WHEN l.anonymized_at IS NULL THEN l.company_name END AS company_name,"
+                "CASE WHEN l.anonymized_at IS NULL THEN l.contact_name END AS contact_name" + base + where +
+                " ORDER BY r.requested_at DESC,r.id DESC LIMIT ? OFFSET ?",
+                (*parameters, page.per_page, (page_number - 1) * page.per_page),
+            ).fetchall()
+        )
+        return Page(rows, page_number, page.per_page, total, total_pages)
+    finally:
+        db.close()
+
+
+def search_lead_choices(search) -> tuple[sqlite3.Row, ...]:
+    """Return at most twenty non-anonymized leads for an explicit search."""
+    normalized = parse_bounded_search({"q": search})
+    if normalized is None:
+        return ()
+    pattern = _like_pattern(normalized)
+    db = get_db()
+    try:
+        return tuple(
+            db.execute(
+                "SELECT id,company_name,contact_name FROM leads "
+                "WHERE anonymized_at IS NULL AND "
+                "(company_name LIKE ? ESCAPE '\\' OR contact_name LIKE ? ESCAPE '\\') "
+                "ORDER BY created_at DESC,id DESC LIMIT 20",
+                (pattern, pattern),
+            ).fetchall()
+        )
+    finally:
+        db.close()
 
 
 def current_shanghai_datetime() -> datetime:
@@ -198,8 +388,14 @@ def list_leads(
     date_from=None,
     date_to=None,
     include_anonymized=True,
+    filters=None,
+    page=None,
 ):
     """Return leads matching the small operational filter set."""
+    if filters is not None or page is not None:
+        if not isinstance(filters, LeadFilters) or not isinstance(page, PageRequest):
+            raise TypeError("paginated lead filters are incomplete")
+        return query_leads(filters, page)
     clauses = []
     parameters = []
     if not include_anonymized:

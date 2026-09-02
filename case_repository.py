@@ -7,7 +7,7 @@ from content_clock import as_shanghai, format_shanghai
 from content_contracts import CaseMetric, ContentBlock, ContentDraft
 from content_validation import ContentValidationError
 from media_validation import IMAGE_MIMES
-from pagination import Page, PageRequest
+from pagination import Page, PageRequest, parse_bounded_search
 import publishing_repository
 import publishing_service
 from publishing_repository import ContentNotFoundError
@@ -79,6 +79,28 @@ class AdminCaseRow:
     revision_number: int
     lock_version: int
     updated_at: str
+
+
+@dataclass(frozen=True)
+class CaseFilters:
+    status: str | None = None
+    search: str | None = None
+
+
+def parse_case_filters(values) -> CaseFilters:
+    try:
+        raw_status = values.get("status", "")
+    except (AttributeError, TypeError):
+        raw_status = ""
+    status = raw_status.strip() if type(raw_status) is str else ""
+    return CaseFilters(
+        status=(
+            status
+            if status in {"draft", "scheduled", "published", "archived"}
+            else None
+        ),
+        search=parse_bounded_search(values),
+    )
 
 
 @dataclass(frozen=True)
@@ -238,11 +260,38 @@ def copy_revision(content_id, expected_lock_version, *, actor, now) -> int:
     )
 
 
-def admin_cases(page_request: PageRequest) -> Page[AdminCaseRow]:
+def _case_predicate(filters: CaseFilters):
+    clauses = ["entry_type='case'"]
+    parameters = []
+    if filters.status == "scheduled":
+        clauses.extend(("status='draft'", "publish_at IS NOT NULL"))
+    elif filters.status == "draft":
+        clauses.extend(("status='draft'", "publish_at IS NULL"))
+    elif filters.status is not None:
+        clauses.append("status=?")
+        parameters.append(filters.status)
+    if filters.search is not None:
+        pattern = (
+            "%"
+            + filters.search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            + "%"
+        )
+        clauses.append("(title LIKE ? ESCAPE '\\' OR slug LIKE ? ESCAPE '\\')")
+        parameters.extend((pattern, pattern))
+    return " WHERE " + " AND ".join(clauses), tuple(parameters)
+
+
+def admin_cases(
+    page_request: PageRequest, filters: CaseFilters | None = None
+) -> Page[AdminCaseRow]:
+    filters = filters or CaseFilters()
+    where, parameters = _case_predicate(filters)
     db = models.get_db()
     try:
         total = db.execute(
-            "SELECT COUNT(*) FROM content_items WHERE entry_type='case'"
+            "SELECT COUNT(*) FROM content_items" + where, parameters
         ).fetchone()[0]
         if total == 0:
             return Page((), 1, page_request.per_page, 0, 0)
@@ -250,14 +299,27 @@ def admin_cases(page_request: PageRequest) -> Page[AdminCaseRow]:
         page_number = min(page_request.page, total_pages)
         rows = tuple(
             AdminCaseRow(
-                row["id"], row["slug"], row["title"], row["status"],
+                row["id"],
+                row["slug"],
+                row["title"],
+                (
+                    "scheduled"
+                    if row["status"] == "draft" and row["publish_at"] is not None
+                    else row["status"]
+                ),
                 row["revision_number"], row["lock_version"], row["updated_at"],
             )
             for row in db.execute(
-                "SELECT id,slug,title,status,revision_number,lock_version,updated_at "
-                "FROM content_items WHERE entry_type='case' "
-                "ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?",
-                (page_request.per_page, (page_number - 1) * page_request.per_page),
+                "SELECT id,slug,title,status,publish_at,revision_number,lock_version,updated_at "
+                "FROM content_items"
+                + where
+                + (
+                    " ORDER BY publish_at ASC,id ASC"
+                    if filters.status == "scheduled"
+                    else " ORDER BY updated_at DESC,id DESC"
+                )
+                + " LIMIT ? OFFSET ?",
+                (*parameters, page_request.per_page, (page_number - 1) * page_request.per_page),
             )
         )
         return Page(rows, page_number, page_request.per_page, total, total_pages)

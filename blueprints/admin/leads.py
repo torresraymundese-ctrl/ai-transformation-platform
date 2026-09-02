@@ -10,6 +10,7 @@ from assessment_validation import BRANCH_CODES
 from blueprints.admin import bp
 import lead_repository
 from validation import ValidationError, integer as valid_integer
+from pagination import parse_bounded_search, parse_pagination
 
 
 def _admin_actor():
@@ -47,10 +48,12 @@ def _lead_filters():
 
 @bp.route("/admin/leads")
 def admin_leads():
-    filters = _lead_filters()
+    filters = lead_repository.parse_lead_filters(request.args)
     return render_template(
         "admin/leads.html",
-        leads=lead_repository.list_leads(**filters),
+        page=lead_repository.list_leads(
+            filters=filters, page=parse_pagination(request.args)
+        ),
         filters=filters,
         statuses=lead_repository.LEAD_STATUSES,
         branches=tuple(sorted(BRANCH_CODES)),
@@ -112,15 +115,14 @@ def admin_appointments():
         )
         return redirect(url_for("admin.admin_appointments"))
 
-    status = request.args.get("status", "").strip()
-    if status and status not in appointment_repository.ALLOWED_TRANSITIONS:
-        raise ValidationError("status has an invalid value")
+    filters = appointment_repository.parse_appointment_filters(request.args)
     return render_template(
         "admin/appointments.html",
-        appointments=appointment_repository.list_appointments(
-            status=status or None
+        page=appointment_repository.query_appointments(
+            filters, parse_pagination(request.args)
         ),
-        selected_status=status,
+        filters=filters,
+        selected_status=filters.status or "",
         statuses=tuple(appointment_repository.ALLOWED_TRANSITIONS),
         transitions=appointment_repository.ALLOWED_TRANSITIONS,
     )
@@ -172,17 +174,18 @@ def admin_data_requests():
             raise ValidationError("action has an invalid value")
         return redirect(url_for("admin.admin_data_requests"))
 
-    status = request.args.get("status", "").strip()
-    if status and status not in lead_repository.DATA_REQUEST_STATUSES:
-        raise ValidationError("status has an invalid value")
+    filters = lead_repository.parse_data_request_filters(request.args)
+    lead_search = parse_bounded_search(request.args, name="lead_q")
     return render_template(
         "admin/data_requests.html",
-        data_requests=lead_repository.list_data_subject_requests(
-            status=status or None
+        page=lead_repository.query_data_subject_requests(
+            filters, parse_pagination(request.args)
         ),
-        leads=lead_repository.list_leads(include_anonymized=False),
-        selected_status=status,
-        statuses=tuple(sorted(lead_repository.DATA_REQUEST_STATUSES)),
+        filters=filters,
+        leads=lead_repository.search_lead_choices(lead_search),
+        lead_search=lead_search or "",
+        selected_status=filters.status or "",
+        statuses=("open", *tuple(sorted(lead_repository.DATA_REQUEST_STATUSES))),
         request_types=tuple(sorted(lead_repository.DATA_REQUEST_TYPES)),
         channels=tuple(sorted(lead_repository.DATA_REQUEST_CHANNELS)),
         completion_outcomes=lead_repository.COMPLETION_OUTCOMES,

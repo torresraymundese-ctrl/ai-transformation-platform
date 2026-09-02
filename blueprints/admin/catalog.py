@@ -325,8 +325,11 @@ def _form_error(error):
 @bp.get("/admin/catalog/<kind>")
 def admin_catalog(kind):
     kind = _kind_or_404(kind)
-    page = catalog.get_catalog_page(kind, parse_pagination(request.args))
-    return render_template("admin/catalog_list.html", kind=kind, page=page)
+    filters = catalog.parse_admin_catalog_filters(request.args)
+    page = catalog.get_catalog_page(kind, parse_pagination(request.args), filters)
+    return render_template(
+        "admin/catalog_list.html", kind=kind, page=page, filters=filters
+    )
 
 
 @bp.route("/admin/catalog/<kind>/<int:core_id>", methods=["GET", "POST"])

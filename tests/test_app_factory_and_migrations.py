@@ -111,6 +111,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "009_case_basis_types",
         "010_ingestion_operations",
         "011_private_http_resource_drafts",
+        "012_operations_query_indexes",
     ]
     assert sentinel == "keep-me"
 
@@ -397,11 +398,161 @@ def test_011_preserves_deleted_resource_high_water_when_table_is_empty(
         db.close()
 
 
-def test_migration_ordinals_are_unique_and_contiguous_through_011():
+def test_migration_ordinals_are_unique_and_contiguous_through_012():
     paths = sorted((PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
     ordinals = [int(path.name[:3]) for path in paths]
 
-    assert ordinals == list(range(1, 12))
+    assert ordinals == list(range(1, 13))
+
+
+def test_012_adds_only_real_column_operations_indexes_from_recorded_011(
+    tmp_path, monkeypatch
+):
+    migration_012 = PROJECT_ROOT / "migrations" / "012_operations_query_indexes.sql"
+    assert migration_012.is_file()
+    staged = tmp_path / "migrations"
+    staged.mkdir()
+    for source in sorted((PROJECT_ROOT / "migrations").glob("0[0-1][0-9]_*.sql")):
+        if not source.name.startswith("012_"):
+            shutil.copy2(source, staged / source.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    expected = {
+        "operations_leads_ordinary": ("leads", ("anonymized_at", "status", "created_at", "id")),
+        "operations_leads_followup": ("leads", ("anonymized_at", "next_followup_at", "id")),
+        "operations_assessments_branch": ("assessments", ("lead_id", "branch_code", "completed_at", "id")),
+        "operations_assessments_latest": ("assessments", ("lead_id", "completed_at", "id")),
+        "operations_appointments_queue": ("appointments", ("status", "preferred_date", "time_slot", "id")),
+        "operations_appointments_latest": ("appointments", ("lead_id", "created_at", "id")),
+        "operations_data_requests_queue": ("data_subject_requests", ("status", "requested_at", "id")),
+        "operations_content_ordinary": ("content_items", ("status", "updated_at", "id")),
+        "operations_content_scheduled": ("content_items", ("status", "publish_at", "id")),
+        "operations_media_queue": ("media_assets", ("status", "updated_at", "id")),
+        "operations_ingestion_queue": ("ingestion_candidates", ("state", "updated_at", "id")),
+    }
+    db = models.get_db()
+    try:
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "011_private_http_resource_drafts"
+        sentinel_id = db.execute(
+            "INSERT INTO leads (company_name,contact_name,status,created_at,updated_at) "
+            "VALUES ('sentinel','sentinel','new','2026-08-31 10:00:00','2026-08-31 10:00:00')"
+        ).lastrowid
+        for table, columns in {value for value in expected.values()}:
+            existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+            assert set(columns) <= existing
+        db.commit()
+    finally:
+        db.close()
+    shutil.copy2(migration_012, staged / migration_012.name)
+    models.init_db()
+    models.init_db()
+    db = models.get_db()
+    try:
+        assert db.execute("SELECT company_name FROM leads WHERE id=?", (sentinel_id,)).fetchone()[0] == "sentinel"
+        for name, (table, columns) in expected.items():
+            row = db.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?", (name,)
+            ).fetchone()
+            assert row is not None and row[0] == table
+            assert tuple(item[2] for item in db.execute(f"PRAGMA index_info({name})")) == columns
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "012_operations_query_indexes"
+        assert not db.execute(
+            "SELECT name FROM sqlite_temp_master WHERE type IN ('table','index')"
+        ).fetchall()
+    finally:
+        db.close()
+
+
+def test_012_representative_queue_plans_use_each_approved_index(db):
+    timestamp = "2026-08-31 10:00:00"
+    for number in range(120):
+        lead_id = db.execute(
+            "INSERT INTO leads (company_name,contact_name,status,next_followup_at,"
+            "created_at,updated_at) VALUES (?,?, 'new',?,?,?)",
+            (
+                f"plan-company-{number}",
+                f"plan-contact-{number}",
+                f"2026-09-{(number % 20) + 1:02d} 10:00:00",
+                timestamp,
+                timestamp,
+            ),
+        ).lastrowid
+        assessment_id = db.execute(
+            "INSERT INTO assessments (lead_id,branch_code,completed_at) VALUES "
+            "(?,'manufacturing',?)",
+            (lead_id, timestamp),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO appointments (assessment_id,lead_id,submission_key,"
+            "preferred_date,time_slot,status,created_at,updated_at) "
+            "VALUES (?,?,?,'2026-09-01','morning','pending',?,?)",
+            (assessment_id, lead_id, f"plan-appointment-{number}", timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO data_subject_requests (lead_id,identity_hash,request_type,"
+            "status,channel,requested_at) VALUES (?,?,'access','received','email',?)",
+            (lead_id, f"plan-request-{number}", timestamp),
+        )
+        group_id = db.execute(
+            "INSERT INTO content_groups (entry_type,canonical_slug,created_at,updated_at) "
+            "VALUES ('case',?,?,?)",
+            (f"plan-case-{number}", timestamp, timestamp),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO content_items (content_group_id,entry_type,revision_number,slug,"
+            "title,summary,seo_title,seo_description,status,lock_version,created_at,updated_at) "
+            "VALUES (?,'case',1,?,?,?,'Plan','Plan','draft',1,?,?)",
+            (group_id, f"plan-case-{number}", f"Plan {number}", "Plan", timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO media_assets (storage_name,display_name,detected_mime,byte_size,"
+            "sha256,status,created_at,updated_at) VALUES (?,?, 'application/pdf',1,?,"
+            "'pending',?,?)",
+            (
+                f"plan-media-{number}.pdf",
+                f"plan-media-{number}.pdf",
+                f"{number + 1:064x}",
+                timestamp,
+                timestamp,
+            ),
+        )
+        db.execute(
+            "INSERT INTO ingestion_candidates (source_code,source_name,canonical_url,"
+            "content_sha256,title,licensed_summary,state,lock_version,created_at,updated_at) "
+            "VALUES ('plan','Plan',?,?,?,'Plan','fetched',1,?,?)",
+            (
+                f"https://example.invalid/plan/{number}",
+                f"{number + 1000:064x}",
+                f"Plan {number}",
+                timestamp,
+                timestamp,
+            ),
+        )
+    db.commit()
+    db.execute("ANALYZE")
+    probes = (
+        ("operations_leads_ordinary", "SELECT id FROM leads WHERE anonymized_at IS NULL AND status='new' ORDER BY created_at DESC,id DESC"),
+        ("operations_leads_followup", "SELECT id FROM leads WHERE anonymized_at IS NULL AND next_followup_at IS NOT NULL ORDER BY next_followup_at,id"),
+        ("operations_assessments_branch", "SELECT id FROM assessments WHERE lead_id=1 AND branch_code='manufacturing' ORDER BY completed_at DESC,id DESC"),
+        ("operations_assessments_latest", "SELECT id FROM assessments WHERE lead_id=1 ORDER BY completed_at DESC,id DESC"),
+        ("operations_appointments_queue", "SELECT id FROM appointments WHERE status='pending' ORDER BY preferred_date,time_slot,id"),
+        ("operations_appointments_latest", "SELECT id FROM appointments WHERE lead_id=1 ORDER BY created_at DESC,id DESC"),
+        ("operations_data_requests_queue", "SELECT id FROM data_subject_requests WHERE status='received' ORDER BY requested_at DESC,id DESC"),
+        ("operations_content_ordinary", "SELECT id FROM content_items WHERE status='draft' ORDER BY updated_at DESC,id DESC"),
+        ("operations_content_scheduled", "SELECT id FROM content_items WHERE status='draft' AND publish_at IS NOT NULL ORDER BY publish_at,id"),
+        ("operations_media_queue", "SELECT id FROM media_assets WHERE status='ready' ORDER BY updated_at DESC,id DESC"),
+        ("operations_ingestion_queue", "SELECT id FROM ingestion_candidates WHERE state='fetched' ORDER BY updated_at DESC,id DESC"),
+    )
+    for index_name, sql in probes:
+        details = " ".join(
+            row["detail"] for row in db.execute("EXPLAIN QUERY PLAN " + sql)
+        )
+        assert index_name in details, (index_name, details)
 
 
 def test_blueprints_delegate_database_access_to_repositories():

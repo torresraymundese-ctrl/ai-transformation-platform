@@ -8,12 +8,14 @@ from media_service import (
     MediaNotFoundError,
     archive_media,
     get_media_asset,
-    list_media_assets,
     media_root,
+    parse_media_filters,
+    query_media_assets,
     store_media,
 )
 from media_validation import ATTACHMENT_MIMES
 from repository import DataConflictError
+from pagination import parse_pagination
 
 
 @bp.route("/admin/media", methods=["GET", "POST"])
@@ -26,7 +28,12 @@ def admin_media():
             ),
         )
         return redirect(url_for("admin.admin_media"))
-    return render_template("admin/media.html", assets=list_media_assets())
+    filters = parse_media_filters(request.args)
+    return render_template(
+        "admin/media.html",
+        page=query_media_assets(filters, parse_pagination(request.args)),
+        filters=filters,
+    )
 
 
 @bp.get("/admin/media/<int:asset_id>/preview")

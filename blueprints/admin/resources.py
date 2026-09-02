@@ -177,10 +177,14 @@ def _template(entry_type):
 
 
 def _list(entry_type):
+    filters = resources.parse_admin_entry_filters(request.args)
     return render_template(
         "admin/resource_list_v2.html",
-        page=resources.admin_entries(entry_type, parse_pagination(request.args)),
+        page=resources.admin_entries(
+            entry_type, parse_pagination(request.args), filters
+        ),
         entry_type=entry_type,
+        filters=filters,
     )
 
 

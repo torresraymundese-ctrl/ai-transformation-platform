@@ -7,7 +7,7 @@ from content_clock import as_shanghai, format_shanghai
 from content_contracts import ContentBlock, ContentDraft
 from content_validation import ContentValidationError
 from media_validation import ATTACHMENT_MIMES, IMAGE_MIMES
-from pagination import Page, PageRequest
+from pagination import Page, PageRequest, parse_bounded_search
 import publishing_repository
 import publishing_service
 from publishing_repository import ContentNotFoundError
@@ -102,6 +102,28 @@ class AdminContentRow:
     revision_number: int
     lock_version: int
     updated_at: str
+
+
+@dataclass(frozen=True)
+class AdminEntryFilters:
+    status: str | None = None
+    search: str | None = None
+
+
+def parse_admin_entry_filters(values) -> AdminEntryFilters:
+    try:
+        raw_status = values.get("status", "")
+    except (AttributeError, TypeError):
+        raw_status = ""
+    status = raw_status.strip() if type(raw_status) is str else ""
+    return AdminEntryFilters(
+        status=(
+            status
+            if status in {"draft", "scheduled", "published", "archived"}
+            else None
+        ),
+        search=parse_bounded_search(values),
+    )
 
 
 @dataclass(frozen=True)
@@ -291,13 +313,38 @@ def copy_revision(content_id, expected_lock_version, entry_type, *, actor, now):
     )
 
 
-def admin_entries(entry_type, page_request):
+def _admin_entry_predicate(entry_type, filters):
+    clauses = ["entry_type=?"]
+    parameters = [entry_type]
+    if filters.status == "scheduled":
+        clauses.extend(("status='draft'", "publish_at IS NOT NULL"))
+    elif filters.status == "draft":
+        clauses.extend(("status='draft'", "publish_at IS NULL"))
+    elif filters.status is not None:
+        clauses.append("status=?")
+        parameters.append(filters.status)
+    if filters.search is not None:
+        pattern = (
+            "%"
+            + filters.search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            + "%"
+        )
+        clauses.append("(title LIKE ? ESCAPE '\\' OR slug LIKE ? ESCAPE '\\')")
+        parameters.extend((pattern, pattern))
+    return " WHERE " + " AND ".join(clauses), tuple(parameters)
+
+
+def admin_entries(entry_type, page_request, filters=None):
     if entry_type not in {"resource", "announcement"}:
         raise ContentNotFoundError()
+    filters = filters or AdminEntryFilters()
+    where, parameters = _admin_entry_predicate(entry_type, filters)
     db = models.get_db()
     try:
         total = db.execute(
-            "SELECT COUNT(*) FROM content_items WHERE entry_type=?", (entry_type,)
+            "SELECT COUNT(*) FROM content_items" + where, parameters
         ).fetchone()[0]
         if total == 0:
             return Page((), 1, page_request.per_page, 0, 0)
@@ -305,15 +352,28 @@ def admin_entries(entry_type, page_request):
         page_number = min(page_request.page, total_pages)
         items = tuple(
             AdminContentRow(
-                row["id"], row["slug"], row["title"], row["status"],
+                row["id"],
+                row["slug"],
+                row["title"],
+                (
+                    "scheduled"
+                    if row["status"] == "draft" and row["publish_at"] is not None
+                    else row["status"]
+                ),
                 row["revision_number"], row["lock_version"], row["updated_at"],
             )
             for row in db.execute(
-                "SELECT id,slug,title,status,revision_number,lock_version,updated_at "
-                "FROM content_items WHERE entry_type=? ORDER BY updated_at DESC,id DESC "
-                "LIMIT ? OFFSET ?",
+                "SELECT id,slug,title,status,publish_at,revision_number,lock_version,updated_at "
+                "FROM content_items"
+                + where
+                + (
+                    " ORDER BY publish_at ASC,id ASC"
+                    if filters.status == "scheduled"
+                    else " ORDER BY updated_at DESC,id DESC"
+                )
+                + " LIMIT ? OFFSET ?",
                 (
-                    entry_type,
+                    *parameters,
                     page_request.per_page,
                     (page_number - 1) * page_request.per_page,
                 ),

@@ -20,7 +20,7 @@ from content_validation import (
     public_input_texts,
 )
 from media_validation import IMAGE_MIMES
-from pagination import Page, PageRequest
+from pagination import Page, PageRequest, parse_bounded_search
 import publishing_repository
 import publishing_service
 from publishing_repository import ContentConflictError, ContentNotFoundError
@@ -102,6 +102,28 @@ class CatalogRow:
     status: str
     draft_id: int | None
     public_id: int | None
+
+
+@dataclass(frozen=True)
+class AdminCatalogFilters:
+    status: str | None = None
+    search: str | None = None
+
+
+def parse_admin_catalog_filters(values) -> AdminCatalogFilters:
+    try:
+        raw_status = values.get("status", "")
+    except (AttributeError, TypeError):
+        raw_status = ""
+    status = raw_status.strip() if type(raw_status) is str else ""
+    return AdminCatalogFilters(
+        status=(
+            status
+            if status in {"draft", "scheduled", "published", "archived"}
+            else None
+        ),
+        search=parse_bounded_search(values),
+    )
 
 
 @dataclass(frozen=True)
@@ -952,30 +974,81 @@ def _config(kind):
         raise CatalogKindError(kind) from error
 
 
-def list_catalog(db, kind: str, page_request: PageRequest) -> Page[CatalogRow]:
+def _catalog_predicate(filters: AdminCatalogFilters):
+    clauses = []
+    parameters = []
+    if filters.status == "scheduled":
+        clauses.extend(("d.id IS NOT NULL", "d.publish_at IS NOT NULL"))
+    elif filters.status == "draft":
+        clauses.extend(("d.id IS NOT NULL", "d.publish_at IS NULL"))
+    elif filters.status == "published":
+        clauses.extend(("d.id IS NULL", "p.id IS NOT NULL"))
+    elif filters.status == "archived":
+        clauses.extend(("d.id IS NULL", "p.id IS NULL", "a.id IS NOT NULL"))
+    if filters.search is not None:
+        pattern = (
+            "%"
+            + filters.search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            + "%"
+        )
+        clauses.append(
+            "(core.code LIKE ? ESCAPE '\\' OR g.canonical_slug LIKE ? ESCAPE '\\' "
+            "OR COALESCE(d.title,p.title,a.title,'') LIKE ? ESCAPE '\\')"
+        )
+        parameters.extend((pattern, pattern, pattern))
+    return (" AND " + " AND ".join(clauses) if clauses else ""), tuple(parameters)
+
+
+def list_catalog(
+    db,
+    kind: str,
+    page_request: PageRequest,
+    filters: AdminCatalogFilters | None = None,
+) -> Page[CatalogRow]:
     config = _config(kind)
+    filters = filters or AdminCatalogFilters()
     table = config["table"]
     identity = config["identity"]
+    predicate, parameters = _catalog_predicate(filters)
+    base = (
+        f" FROM content_groups g JOIN {table} core ON core.id=g.{identity} "
+        "LEFT JOIN content_items d ON d.content_group_id=g.id AND d.status='draft' "
+        "LEFT JOIN content_items p ON p.content_group_id=g.id AND p.status='published' "
+        "LEFT JOIN content_items a ON a.content_group_id=g.id AND a.status='archived' "
+        "AND a.id=(SELECT latest_a.id FROM content_items latest_a "
+        "WHERE latest_a.content_group_id=g.id AND latest_a.status='archived' "
+        "ORDER BY latest_a.revision_number DESC,latest_a.id DESC LIMIT 1) "
+        "WHERE g.entry_type=? AND core.status='published' AND core.code IS NOT NULL"
+    )
     total = db.execute(
-        f"SELECT COUNT(*) FROM content_groups g JOIN {table} core "
-        f"ON core.id=g.{identity} WHERE g.entry_type=? AND core.status='published' "
-        "AND core.code IS NOT NULL",
-        (kind,),
+        "SELECT COUNT(*)" + base + predicate,
+        (kind, *parameters),
     ).fetchone()[0]
     if total == 0:
         return Page((), 1, page_request.per_page, 0, 0)
     total_pages = (total + page_request.per_page - 1) // page_request.per_page
-    page_number = page_request.page if page_request.page <= total_pages else 1
+    page_number = min(page_request.page, total_pages)
+    order = (
+        "d.publish_at ASC,d.id ASC"
+        if filters.status == "scheduled"
+        else "COALESCE(d.updated_at,p.updated_at,a.updated_at,g.updated_at) DESC,"
+        "COALESCE(d.id,p.id,a.id,g.id) DESC"
+    )
     rows = db.execute(
         f"SELECT core.id AS core_id,core.code,g.id AS group_id,g.canonical_slug,"
-        "d.id AS draft_id,d.title AS draft_title,p.id AS public_id,p.title AS public_title "
-        f"FROM content_groups g JOIN {table} core ON core.id=g.{identity} "
-        "LEFT JOIN content_items d ON d.content_group_id=g.id AND d.status='draft' "
-        "LEFT JOIN content_items p ON p.content_group_id=g.id AND p.status='published' "
-        "WHERE g.entry_type=? AND core.status='published' AND core.code IS NOT NULL "
-        "ORDER BY core.sort_order,core.id LIMIT ? OFFSET ?",
+        "d.id AS draft_id,d.title AS draft_title,d.publish_at AS draft_publish_at,"
+        "p.id AS public_id,p.title AS public_title,a.id AS archived_id,"
+        "a.title AS archived_title "
+        + base
+        + predicate
+        + " ORDER BY "
+        + order
+        + " LIMIT ? OFFSET ?",
         (
             kind,
+            *parameters,
             page_request.per_page,
             (page_number - 1) * page_request.per_page,
         ),
@@ -988,8 +1061,23 @@ def list_catalog(db, kind: str, page_request: PageRequest) -> Page[CatalogRow]:
             group_key=f"{kind}:{row['code']}",
             group_id=row["group_id"],
             slug=row["canonical_slug"],
-            title=row["draft_title"] or row["public_title"] or row["code"],
-            status="draft" if row["draft_id"] else "published" if row["public_id"] else "archived",
+            title=(
+                row["draft_title"]
+                or row["public_title"]
+                or row["archived_title"]
+                or row["code"]
+            ),
+            status=(
+                "scheduled"
+                if row["draft_id"] and row["draft_publish_at"] is not None
+                else "draft"
+                if row["draft_id"]
+                else "published"
+                if row["public_id"]
+                else "archived"
+                if row["archived_id"]
+                else "uninitialized"
+            ),
             draft_id=row["draft_id"],
             public_id=row["public_id"],
         )
@@ -998,10 +1086,14 @@ def list_catalog(db, kind: str, page_request: PageRequest) -> Page[CatalogRow]:
     return Page(items, page_number, page_request.per_page, total, total_pages)
 
 
-def get_catalog_page(kind: str, page_request: PageRequest) -> Page[CatalogRow]:
+def get_catalog_page(
+    kind: str,
+    page_request: PageRequest,
+    filters: AdminCatalogFilters | None = None,
+) -> Page[CatalogRow]:
     db = models.get_db()
     try:
-        return list_catalog(db, kind, page_request)
+        return list_catalog(db, kind, page_request, filters)
     finally:
         db.close()
 

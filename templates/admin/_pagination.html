@@ -1,0 +1,12 @@
+<nav class="operations-pagination" data-pagination="operations" data-per-page="{{ page.per_page }}" aria-label="分页">
+  <span>第 {{ page.page }} / {{ page.total_pages or 1 }} 页，共 {{ page.total }} 项</span>
+  {% for size in (20, 50) %}
+  <a href="{{ request.path }}?{% for name, value in request.args.items() if name not in ('page', 'per_page') %}{{ name|urlencode }}={{ value|urlencode }}&amp;{% endfor %}page=1&amp;per_page={{ size }}" {% if size == page.per_page %}aria-current="true"{% endif %}>{{ size }} 条</a>
+  {% endfor %}
+  {% if page.page > 1 %}
+  <a rel="prev" href="{{ request.path }}?{% for name, value in request.args.items() if name not in ('page', 'per_page') %}{{ name|urlencode }}={{ value|urlencode }}&amp;{% endfor %}page={{ page.page - 1 }}&amp;per_page={{ page.per_page }}">上一页</a>
+  {% endif %}
+  {% if page.page < page.total_pages %}
+  <a rel="next" href="{{ request.path }}?{% for name, value in request.args.items() if name not in ('page', 'per_page') %}{{ name|urlencode }}={{ value|urlencode }}&amp;{% endfor %}page={{ page.page + 1 }}&amp;per_page={{ page.per_page }}">下一页</a>
+  {% endif %}
+</nav>

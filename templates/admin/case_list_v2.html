@@ -4,8 +4,9 @@
   <div><h2>V2 已验证案例</h2><p>共 {{ page.total }} 个修订</p></div>
   <a class="btn btn-primary" href="{{ url_for('admin.admin_case_new_v2') }}">新建案例</a>
 </div>
+<form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
 <table><thead><tr><th>公开路径</th><th>标题</th><th>修订</th><th>状态</th><th>操作</th></tr></thead><tbody>
 {% for row in page.items %}<tr><td><code>/cases/{{ row.slug }}</code></td><td>{{ row.title }}</td><td>#{{ row.revision_number }}</td><td>{{ row.status }}</td><td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_case_edit_v2', content_id=row.id) }}">审核与编辑</a></td></tr>{% else %}<tr><td colspan="5">暂无 V2 案例。</td></tr>{% endfor %}
 </tbody></table>
-{% if page.total_pages > 1 %}<nav aria-label="案例分页">{% for number in range(1, page.total_pages + 1) %}<a class="btn btn-outline btn-sm" href="?page={{ number }}&amp;per_page={{ page.per_page }}" {% if number == page.page %}aria-current="page"{% endif %}>{{ number }}</a>{% endfor %}</nav>{% endif %}
+{% include "admin/_pagination.html" %}
 {% endblock %}

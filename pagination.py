@@ -1,6 +1,7 @@
 """One immutable pagination contract shared by server-side list views."""
 
 from dataclasses import dataclass
+import unicodedata
 from typing import Generic, Literal, TypeVar
 
 
@@ -86,3 +87,17 @@ def parse_pagination(values) -> PageRequest:
     if per_page not in ALLOWED_PER_PAGE:
         per_page = 20
     return PageRequest(page=page, per_page=per_page)
+
+
+def parse_bounded_search(values, name="q", maximum=100):
+    """Return normalized bounded search text, or the safe empty default."""
+    try:
+        raw = values.get(name)
+    except (AttributeError, TypeError):
+        return None
+    if type(raw) is not str:
+        return None
+    value = unicodedata.normalize("NFKC", raw).strip()
+    if not value or len(value) > maximum or any(ord(char) < 32 for char in value):
+        return None
+    return value

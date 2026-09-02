@@ -13,12 +13,13 @@
     <div><button class="btn btn-primary" type="submit">上传并验证</button></div>
   </form>
 </section>
+<form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('pending','ready','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
 <section class="card admin-section">
-  {% if assets %}
+  {% if page.items %}
   <table>
     <thead><tr><th>ID</th><th>显示名称</th><th>类型</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
-    {% for asset in assets %}
+    {% for asset in page.items %}
       <tr>
         <td>{{ asset.id }}</td><td>{{ asset.display_name }}</td><td>{{ asset.detected_mime }}</td>
         <td>{{ asset.byte_size }}</td><td>{{ asset.status }}</td>
@@ -37,4 +38,5 @@
   </table>
   {% else %}<p class="empty">暂无媒体。</p>{% endif %}
 </section>
+{% include "admin/_pagination.html" %}
 {% endblock %}

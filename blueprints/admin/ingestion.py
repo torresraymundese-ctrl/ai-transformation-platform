@@ -4,16 +4,20 @@ from flask import abort, current_app, jsonify, redirect, render_template, reques
 
 from blueprints.admin import bp
 from content_clock import shanghai_now
-from ingestion_repository import load_candidate
+from ingestion_repository import (
+    load_candidate,
+    parse_ingestion_filters,
+    query_ingestion_candidates,
+)
 from ingestion_service import (
     AcceptDecision,
     IngestionDecisionError,
     REJECTION_CODES,
     accept_candidate,
-    list_candidates,
     reject_candidate,
 )
 from scraper import IngestionQueueNotReadyError, run_scraper
+from pagination import parse_pagination
 
 
 def _actor():
@@ -27,7 +31,12 @@ def _now():
 
 @bp.get("/admin/ingestion")
 def admin_ingestion():
-    return render_template("admin/ingestion.html", candidates=list_candidates())
+    filters = parse_ingestion_filters(request.args)
+    return render_template(
+        "admin/ingestion.html",
+        page=query_ingestion_candidates(filters, parse_pagination(request.args)),
+        filters=filters,
+    )
 
 
 @bp.get("/admin/ingestion/<int:candidate_id>")

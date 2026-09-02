@@ -7,6 +7,7 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -22,6 +23,7 @@ from ingestion_contracts import (
     require_source_code,
 )
 from models import get_db
+from pagination import Page, PageRequest, parse_bounded_search
 from security import sanitize_html
 
 
@@ -89,6 +91,79 @@ class IngestionConflictError(RuntimeError):
     def __init__(self, code="candidate_conflict"):
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class IngestionFilters:
+    state: str | None = None
+    search: str | None = None
+
+
+def parse_ingestion_filters(values) -> IngestionFilters:
+    try:
+        raw_state = values.get("state", "")
+    except (AttributeError, TypeError):
+        raw_state = ""
+    state = raw_state.strip() if type(raw_state) is str else ""
+    return IngestionFilters(
+        state=(
+            state
+            if state in {"fetched", "pending_review", "accepted", "rejected"}
+            else None
+        ),
+        search=parse_bounded_search(values),
+    )
+
+
+def _ingestion_predicate(filters: IngestionFilters):
+    clauses = []
+    parameters = []
+    if filters.state is not None:
+        clauses.append("state=?")
+        parameters.append(filters.state)
+    if filters.search is not None:
+        pattern = (
+            "%"
+            + filters.search.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            + "%"
+        )
+        clauses.append(
+            "(title LIKE ? ESCAPE '\\' OR source_name LIKE ? ESCAPE '\\')"
+        )
+        parameters.extend((pattern, pattern))
+    return (
+        " WHERE " + " AND ".join(clauses) if clauses else "",
+        tuple(parameters),
+    )
+
+
+def query_ingestion_candidates(
+    filters: IngestionFilters, page: PageRequest
+) -> Page[sqlite3.Row]:
+    where, parameters = _ingestion_predicate(filters)
+    db = get_db()
+    try:
+        total = db.execute(
+            "SELECT COUNT(*) FROM ingestion_candidates" + where, parameters
+        ).fetchone()[0]
+        if total == 0:
+            return Page((), 1, page.per_page, 0, 0)
+        total_pages = (total + page.per_page - 1) // page.per_page
+        page_number = min(page.page, total_pages)
+        rows = tuple(
+            db.execute(
+                "SELECT id,source_code,source_name,title,licensed_summary,state,"
+                "lock_version,created_at,updated_at FROM ingestion_candidates"
+                + where
+                + " ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?",
+                (*parameters, page.per_page, (page_number - 1) * page.per_page),
+            ).fetchall()
+        )
+        return Page(rows, page_number, page.per_page, total, total_pages)
+    finally:
+        db.close()
 
 
 def _normalize_path_percent_encoding(value: str) -> str:

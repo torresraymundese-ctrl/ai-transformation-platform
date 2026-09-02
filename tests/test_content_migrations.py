@@ -592,7 +592,7 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "011_private_http_resource_drafts"
+        )][-1] == "012_operations_query_indexes"
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
             assert exact_rows(db, table, where, parameters) == before, (
