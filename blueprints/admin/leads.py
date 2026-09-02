@@ -1,13 +1,25 @@
 """Minimal shared-admin lead, appointment, and privacy workflows."""
 
 import hashlib
+import json
 import secrets
+from datetime import datetime
 
-from flask import abort, current_app, redirect, render_template, request, session, url_for
+from flask import (
+    abort,
+    current_app,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 
 import appointment_repository
 from assessment_validation import BRANCH_CODES
 from blueprints.admin import bp
+import lead_export
 import lead_repository
 from validation import ValidationError, integer as valid_integer
 from pagination import parse_bounded_search, parse_pagination
@@ -58,6 +70,48 @@ def admin_leads():
         statuses=lead_repository.LEAD_STATUSES,
         branches=tuple(sorted(BRANCH_CODES)),
     )
+
+
+@bp.post("/admin/leads/export")
+def admin_leads_export():
+    filters = lead_repository.parse_export_filters(request.form)
+    provider = _now_provider()
+    moment = provider() if callable(provider) else lead_repository.current_shanghai_datetime()
+    if not isinstance(moment, datetime):
+        raise RuntimeError("admin clock unavailable")
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(lead_repository.SHANGHAI).replace(tzinfo=None)
+    moment = moment.replace(microsecond=0)
+
+    rows = lead_repository.export_rows(filters)
+    payload = lead_export.write_lead_csv(rows)
+    filter_json = json.dumps(
+        lead_export.audit_filter_metadata(filters),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    try:
+        lead_repository.record_export_audit(
+            _admin_actor(),
+            filter_json,
+            len(rows),
+            moment.isoformat(sep=" "),
+        )
+    except Exception:
+        current_app.logger.error("Failed to write lead export audit")
+        abort(503)
+
+    response = make_response(payload)
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="leads-{moment:%Y%m%d-%H%M%S}.csv"'
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @bp.route("/admin/lead/<int:lead_id>", methods=["GET", "POST"])

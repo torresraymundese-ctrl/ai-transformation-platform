@@ -11,6 +11,16 @@
     <div class="form-group"><label for="q">搜索</label><input id="q" name="q" value="{{ filters.search or '' }}" maxlength="100"></div>
     <button class="btn btn-primary" type="submit">筛选</button>
   </form>
+  <form class="inline-form" method="post" action="{{ url_for('admin.admin_leads_export') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="status" value="{{ filters.status or '' }}">
+    <input type="hidden" name="branch" value="{{ filters.branch or '' }}">
+    <input type="hidden" name="date_from" value="{{ filters.date_from or '' }}">
+    <input type="hidden" name="date_to" value="{{ filters.date_to or '' }}">
+    <input type="hidden" name="queue" value="{{ filters.queue }}">
+    <input type="hidden" name="q" value="{{ filters.search or '' }}">
+    <button class="btn" type="submit">导出 CSV</button>
+  </form>
 </section>
 <section class="card">
 {% if page.items %}

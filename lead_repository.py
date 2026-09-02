@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import re
 import sqlite3
+import unicodedata
 from zoneinfo import ZoneInfo
 
+import assessment_repository
 from assessment_validation import BRANCH_CODES
 from models import get_db
 from pagination import Page, PageRequest, parse_bounded_search
@@ -73,6 +75,13 @@ REJECTION_OUTCOMES = (
     ("request_not_applicable", "经核验，该请求不符合处理条件"),
 )
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+EXPORT_FORM_KEYS = frozenset(
+    {"csrf_token", "status", "branch", "date_from", "date_to", "queue", "q"}
+)
+
+
+class ExportSnapshotError(RuntimeError):
+    """Raised when a persisted report cannot be exported safely."""
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,54 @@ def parse_lead_filters(values) -> LeadFilters:
         date_to=parse_date_filter(_query_value(values, "date_to"), "date_to"),
         queue=queue if queue in {"ordinary", "followup"} else "ordinary",
         search=parse_bounded_search(values),
+    )
+
+
+def parse_export_filters(values) -> LeadFilters:
+    """Strictly parse the Task 15 filter DTO from an export form."""
+    try:
+        supplied_keys = set(values.keys())
+    except (AttributeError, TypeError):
+        raise ValidationError("export filters have an invalid value") from None
+    if not supplied_keys <= EXPORT_FORM_KEYS:
+        raise ValidationError("export filters have an invalid value")
+    if hasattr(values, "getlist") and any(
+        len(values.getlist(key)) != 1 for key in supplied_keys
+    ):
+        raise ValidationError("export filters have an invalid value")
+
+    def supplied(name):
+        value = values.get(name, "")
+        if not isinstance(value, str):
+            raise ValidationError(f"{name} must be text")
+        return value.strip()
+
+    status = supplied("status")
+    branch = supplied("branch")
+    queue = supplied("queue")
+    if status and status not in LEAD_STATUSES:
+        raise ValidationError("status has an invalid value")
+    if branch and branch not in BRANCH_CODES:
+        raise ValidationError("branch has an invalid value")
+    if queue and queue not in {"ordinary", "followup"}:
+        raise ValidationError("queue has an invalid value")
+
+    raw_search = values.get("q", "")
+    if not isinstance(raw_search, str):
+        raise ValidationError("q must be text")
+    search = unicodedata.normalize("NFKC", raw_search).strip()
+    if len(search) > 100 or any(
+        unicodedata.category(character).startswith("C") for character in search
+    ):
+        raise ValidationError("q has an invalid value")
+
+    return LeadFilters(
+        status=status or None,
+        branch=branch or None,
+        date_from=parse_date_filter(supplied("date_from"), "date_from"),
+        date_to=parse_date_filter(supplied("date_to"), "date_to"),
+        queue=queue or "ordinary",
+        search=search or None,
     )
 
 
@@ -199,6 +256,87 @@ def query_leads(filters: LeadFilters, page: PageRequest) -> Page[sqlite3.Row]:
             ).fetchall()
         )
         return Page(rows, page_number, page.per_page, total, total_pages)
+    finally:
+        db.close()
+
+
+def export_rows(filters: LeadFilters, limit=10_000):
+    if not isinstance(filters, LeadFilters):
+        raise TypeError("filters must be LeadFilters")
+    if type(limit) is not int or not 1 <= limit <= 10_000:
+        raise ValueError("limit has an invalid value")
+    where, parameters = _lead_predicate(filters)
+    order = (
+        "l.next_followup_at ASC,l.id ASC"
+        if filters.queue == "followup"
+        else "l.created_at DESC,l.id DESC"
+    )
+    latest_assessment = (
+        "SELECT a.{field} FROM assessments a WHERE a.lead_id=l.id "
+        "AND a.completed_at IS NOT NULL "
+        "ORDER BY a.completed_at DESC,a.id DESC LIMIT 1"
+    )
+    latest_appointment = (
+        "SELECT ap.{field} FROM appointments ap WHERE ap.lead_id=l.id "
+        "ORDER BY ap.created_at DESC,ap.id DESC LIMIT 1"
+    )
+    statement = (
+        "SELECT l.company_name,l.contact_name,l.phone_normalized AS phone,"
+        "l.email,l.wechat,l.status,l.owner_text,"
+        f"({latest_assessment.format(field='branch_code')}) AS industry_branch,"
+        f"({latest_assessment.format(field='department_code')}) AS department,"
+        f"({latest_assessment.format(field='id')}) AS assessment_number,"
+        f"({latest_assessment.format(field='report_snapshot_json')}) AS "
+        "report_snapshot_json,"
+        f"({latest_appointment.format(field='status')}) AS appointment_status,"
+        f"({latest_appointment.format(field='preferred_date')}) AS preferred_date,"
+        f"({latest_appointment.format(field='time_slot')}) AS time_slot,"
+        "l.last_effective_followup_at,l.next_followup_at FROM leads l"
+        + where
+        + " ORDER BY "
+        + order
+        + " LIMIT ?"
+    )
+    db = get_db()
+    try:
+        selected = tuple(db.execute(statement, (*parameters, limit + 1)).fetchall())
+    finally:
+        db.close()
+    if len(selected) > limit:
+        raise ValidationError("export exceeds row limit")
+
+    exported = []
+    for row in selected:
+        item = dict(row)
+        serialized_snapshot = item.pop("report_snapshot_json")
+        if item["assessment_number"] is None:
+            maturity, primary_scenario = None, None
+        else:
+            summary = assessment_repository.report_summary_from_snapshot(
+                serialized_snapshot
+            )
+            if summary is None:
+                raise ExportSnapshotError("report snapshot is unavailable")
+            maturity, primary_scenario = summary
+        item["maturity"] = maturity
+        item["primary_scenario"] = primary_scenario
+        exported.append(item)
+    return tuple(exported)
+
+
+def record_export_audit(actor, filter_json, row_count, created_at):
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            "INSERT INTO admin_export_logs "
+            "(actor,filter_json,row_count,created_at) VALUES (?,?,?,?)",
+            (actor, filter_json, row_count, created_at),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

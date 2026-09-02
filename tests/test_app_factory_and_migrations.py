@@ -112,8 +112,60 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "010_ingestion_operations",
         "011_private_http_resource_drafts",
         "012_operations_query_indexes",
+        "013_admin_export_audit",
     ]
     assert sentinel == "keep-me"
+
+
+def test_013_adds_append_only_admin_export_audit_after_012(tmp_path, monkeypatch):
+    staged = tmp_path / "migrations"
+    staged.mkdir()
+    for source in sorted((PROJECT_ROOT / "migrations").glob("*.sql")):
+        if int(source.name[:3]) <= 12:
+            shutil.copy2(source, staged / source.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "012_operations_query_indexes"
+    finally:
+        db.close()
+
+    shutil.copy2(
+        PROJECT_ROOT / "migrations" / "013_admin_export_audit.sql",
+        staged / "013_admin_export_audit.sql",
+    )
+    models.init_db()
+    db = models.get_db()
+    try:
+        columns = {
+            row["name"]: (row["type"], row["notnull"], row["pk"])
+            for row in db.execute("PRAGMA table_info(admin_export_logs)")
+        }
+        db.execute(
+            "INSERT INTO admin_export_logs "
+            "(actor,filter_json,row_count,created_at) VALUES ('admin','{}',10000,?)",
+            ("2026-08-21 10:30:45",),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO admin_export_logs "
+                "(actor,filter_json,row_count,created_at) VALUES ('admin','{}',10001,?)",
+                ("2026-08-21 10:30:45",),
+            )
+    finally:
+        db.close()
+
+    assert columns == {
+        "id": ("INTEGER", 0, 1),
+        "actor": ("TEXT", 1, 0),
+        "filter_json": ("TEXT", 1, 0),
+        "row_count": ("INTEGER", 1, 0),
+        "created_at": ("TEXT", 1, 0),
+    }
 
 
 def test_database_enforces_asset_foreign_keys(tmp_path, monkeypatch):
@@ -398,11 +450,11 @@ def test_011_preserves_deleted_resource_high_water_when_table_is_empty(
         db.close()
 
 
-def test_migration_ordinals_are_unique_and_contiguous_through_012():
+def test_migration_ordinals_are_unique_and_contiguous_through_013():
     paths = sorted((PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
     ordinals = [int(path.name[:3]) for path in paths]
 
-    assert ordinals == list(range(1, 13))
+    assert ordinals == list(range(1, 14))
 
 
 def test_012_adds_only_real_column_operations_indexes_from_recorded_011(
@@ -413,7 +465,7 @@ def test_012_adds_only_real_column_operations_indexes_from_recorded_011(
     staged = tmp_path / "migrations"
     staged.mkdir()
     for source in sorted((PROJECT_ROOT / "migrations").glob("0[0-1][0-9]_*.sql")):
-        if not source.name.startswith("012_"):
+        if int(source.name[:3]) <= 11:
             shutil.copy2(source, staged / source.name)
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
     monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))

@@ -456,6 +456,34 @@ def load_report_snapshot(assessment_id: int):
         db.close()
 
 
+def report_summary_from_snapshot(serialized_snapshot):
+    """Return the validated V2 maturity and primary scenario, or ``None``."""
+    if not isinstance(serialized_snapshot, str):
+        return None
+    try:
+        if len(serialized_snapshot.encode("utf-8")) > MAX_REPORT_SNAPSHOT_BYTES:
+            return None
+        snapshot = json.loads(serialized_snapshot)
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("schema_version") != "2.0"
+            or not _valid_report_snapshot(snapshot)
+        ):
+            return None
+        return (
+            snapshot["scores"]["maturity_code"],
+            snapshot["recommendations"][0]["scenario"]["code"],
+        )
+    except (
+        json.JSONDecodeError,
+        UnicodeEncodeError,
+        ValueError,
+        TypeError,
+        RecursionError,
+    ):
+        return None
+
+
 def insert_completed(
     db,
     lead_id,
