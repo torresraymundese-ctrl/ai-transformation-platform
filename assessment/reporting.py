@@ -1,6 +1,9 @@
 """Pure, deterministic builders for JSON-serializable assessment reports."""
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 
 from .contracts import (
     AssessmentCatalog,
@@ -144,6 +147,25 @@ _PUBLIC_SERVICE_NOT_INCLUDED = {
 }
 
 
+@dataclass(frozen=True)
+class ReportPublicCopy:
+    """Immutable release-owned copy supplied only by draft previews."""
+
+    risk_explanations: Mapping[str, str]
+
+    def __post_init__(self):
+        if not isinstance(self.risk_explanations, Mapping) or any(
+            type(code) is not str or type(value) is not str
+            for code, value in self.risk_explanations.items()
+        ):
+            raise TypeError("invalid report public copy")
+        object.__setattr__(
+            self,
+            "risk_explanations",
+            MappingProxyType(dict(self.risk_explanations)),
+        )
+
+
 def public_service_not_included(package):
     """Return Chinese display copy without changing a persisted legacy snapshot."""
     code = package["code"]
@@ -160,6 +182,8 @@ def build_report_snapshot(
     roi: RoiResult,
     catalog: AssessmentCatalog,
     roi_option_ranges,
+    *,
+    public_copy: ReportPublicCopy | None = None,
 ) -> dict[str, object]:
     """Build the complete stored report record without persistence or generated prose."""
     reference_line = catalog.reference_lines.get(profile.branch_code)
@@ -171,6 +195,13 @@ def build_report_snapshot(
         raise AssessmentInputError(f"unknown maturity code: {scores.maturity_code!r}")
     _validate_dimensions(scores, reference_line)
 
+    if public_copy is not None and type(public_copy) is not ReportPublicCopy:
+        raise TypeError("invalid report public copy")
+    risk_explanations = (
+        RISK_EXPLANATIONS
+        if public_copy is None
+        else public_copy.risk_explanations
+    )
     selected_matches = tuple(matches[:3])
     return {
         "schema_version": "2.0",
@@ -201,7 +232,9 @@ def build_report_snapshot(
                 scores.weakest_dimension, DIMENSION_IMPROVEMENT_EXPLANATIONS
             ),
         },
-        "recommendations": [_recommendation(match) for match in selected_matches],
+        "recommendations": [
+            _recommendation(match, risk_explanations) for match in selected_matches
+        ],
         "roi": {
             band.band_code: _roi_band(band)
             for band in (roi.conservative, roi.midpoint, roi.ideal)
@@ -239,7 +272,9 @@ def _dimension_explanation(
     return {"dimension": dimension, "explanation": templates[dimension]}
 
 
-def _recommendation(match: ScenarioMatch) -> dict[str, object]:
+def _recommendation(
+    match: ScenarioMatch, risk_explanations: Mapping[str, str]
+) -> dict[str, object]:
     reasons = []
     for code in match.reason_codes:
         explanation = REASON_TEMPLATES.get(code)
@@ -260,13 +295,13 @@ def _recommendation(match: ScenarioMatch) -> dict[str, object]:
         "components": dict(match.components),
         "reason_codes": list(match.reason_codes),
         "reasons": reasons,
-        "risks": [_risk(code) for code in match.scenario.risk_codes],
+        "risks": [_risk(code, risk_explanations) for code in match.scenario.risk_codes],
         "package": _package(match),
     }
 
 
-def _risk(code: str) -> dict[str, str]:
-    explanation = RISK_EXPLANATIONS.get(code)
+def _risk(code: str, risk_explanations: Mapping[str, str]) -> dict[str, str]:
+    explanation = risk_explanations.get(code)
     if explanation is None:
         raise AssessmentInputError(f"unknown recommendation risk: {code!r}")
     return {"code": code, "explanation": explanation}

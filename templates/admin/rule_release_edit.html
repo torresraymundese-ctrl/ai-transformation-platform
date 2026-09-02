@@ -1,0 +1,168 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div class="admin-heading"><div><h1>规则版本 {{ draft.code }}</h1><p class="muted">状态：{{ draft.status }} · 锁版本：{{ draft.lock_version }}</p></div></div>
+
+<section class="card admin-section" aria-labelledby="validation-heading">
+  <h2 id="validation-heading">验证与编译</h2>
+  {% if validation_errors %}
+    <ul class="error-list" data-validation-errors>{% for error in validation_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  {% else %}
+    <p data-validation-result>规则草稿验证通过</p>
+  {% endif %}
+  <p>编译摘要：<code data-compiled-digest>{{ compiled_digest or '尚不可编译' }}</code></p>
+</section>
+
+{% if draft.status == 'draft' %}
+<form method="post" action="{{ url_for('admin.admin_rule_edit', release_id=draft.id) }}" data-rule-edit>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="expected_lock_version" value="{{ draft.lock_version }}">
+  <section class="card admin-section">
+    <h2>基础设置</h2>
+    <label>版本名称<input name="name" value="{{ draft.name }}" maxlength="200" required></label>
+    <label>痛点最少选择<input type="number" name="pain_min_selections" min="1" max="3" value="{{ draft.pain_min_selections }}" required></label>
+    <label>痛点最多选择<input type="number" name="pain_max_selections" min="1" max="3" value="{{ draft.pain_max_selections }}" required></label>
+  </section>
+
+  <section class="card admin-section" data-reorder="release-owned-labels">
+    <h2>行业、部门、痛点与企业规模</h2>
+    {% for industry in draft.industries %}
+      {% set prefix = 'industry__' ~ industry.code ~ '__' %}
+      <fieldset data-industry-code="{{ industry.code }}"><legend>{{ industry.code }}</legend>
+        <label>行业标签<input name="{{ prefix }}label" value="{{ industry.label }}" maxlength="200" required></label>
+        <label>行业顺序<select name="{{ prefix }}position">{% for position in range(1, draft.industries|length + 1) %}<option value="{{ position }}" {% if position == industry.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+        {% for collection_name, family, attribute, heading in (
+          ('subbranches', 'subbranch', 'data-subbranch-code', '细分支'),
+          ('departments', 'department', 'data-department-code', '部门'),
+          ('pain_points', 'pain', 'data-pain-code', '痛点')
+        ) %}
+          {% set collection = industry|attr(collection_name) %}
+          <div data-reorder="{{ family }}"><h3>{{ heading }}</h3>
+            {% for item in collection %}
+              {% set item_prefix = prefix ~ family ~ '__' ~ item.code ~ '__' %}
+              <div class="form-grid" {{ attribute }}="{{ item.code }}"><code>{{ item.code }}</code><label>标签<input name="{{ item_prefix }}label" value="{{ item.label }}" maxlength="200" required></label><label>顺序<select name="{{ item_prefix }}position">{% for position in range(1, collection|length + 1) %}<option value="{{ position }}" {% if position == item.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label></div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </fieldset>
+    {% endfor %}
+    <fieldset><legend>企业规模</legend>
+      {% for item in draft.company_sizes %}
+        {% set prefix = 'company_size__' ~ item.code ~ '__' %}
+        <div class="form-grid" data-company-size-code="{{ item.code }}"><code>{{ item.code }}</code><label>标签<input name="{{ prefix }}label" value="{{ item.label }}" maxlength="200" required></label><label>顺序<select name="{{ prefix }}position">{% for position in range(1, draft.company_sizes|length + 1) %}<option value="{{ position }}" {% if position == item.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label></div>
+      {% endfor %}
+    </fieldset>
+  </section>
+
+  <section class="card admin-section">
+    <h2>公开标签与解释</h2>
+    {% for family in ('risk_labels', 'risk_explanations', 'dimensions', 'maturities', 'integrations', 'roi_groups') %}
+      <fieldset><legend>{{ family }}</legend>
+      {% for code, text in draft.public_labels|attr(family)|items %}
+        <label><code>{{ code }}</code><input name="public__{{ family }}__{{ code }}" value="{{ text }}" maxlength="500" required></label>
+      {% endfor %}
+      </fieldset>
+    {% endfor %}
+    {% for group, labels in draft.public_labels.roi_options.items() %}
+      <fieldset><legend>roi_options / {{ group }}</legend>
+      {% for code, text in labels.items() %}
+        <label><code>{{ code }}</code><input name="public__roi_options__{{ group }}__{{ code }}" value="{{ text }}" maxlength="500" required></label>
+      {% endfor %}
+      </fieldset>
+    {% endfor %}
+  </section>
+
+  <section class="card admin-section">
+    <h2>题目、选项与评分</h2>
+    {% for question in draft.questions %}
+      {% set prefix = 'question__' ~ question.code ~ '__' %}
+      <fieldset data-question-code="{{ question.code }}"><legend>{{ question.code }}</legend>
+        <label>题目顺序<select name="{{ prefix }}position">{% for position in range(1, draft.questions|length + 1) %}<option value="{{ position }}" {% if position == question.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+        <label>维度<select name="{{ prefix }}dimension">{% for dimension in dimension_order %}<option value="{{ dimension }}" {% if dimension == question.dimension %}selected{% endif %}>{{ dimension }}</option>{% endfor %}</select></label>
+        <label>题目<input name="{{ prefix }}prompt" value="{{ question.prompt }}" maxlength="500" required></label>
+        {% for option in question.options %}
+          {% set option_prefix = prefix ~ 'option__' ~ option.code ~ '__' %}
+          <div class="form-grid" data-option-code="{{ option.code }}"><code>{{ option.code }}</code><label>标签<input name="{{ option_prefix }}label" value="{{ option.label }}" maxlength="200" required></label><label>分值<select name="{{ option_prefix }}score">{% for score in range(4) %}<option value="{{ score }}" {% if score == option.score %}selected{% endif %}>{{ score }}</option>{% endfor %}</select></label><label>选项顺序<select name="{{ option_prefix }}position">{% for position in range(1, question.options|length + 1) %}<option value="{{ position }}" {% if position == option.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label></div>
+        {% endfor %}
+      </fieldset>
+    {% endfor %}
+  </section>
+
+  <section class="card admin-section">
+    <h2>行业权重与基准线</h2>
+    {% for branch_code, weights in draft.branch_weights.items() %}
+      <fieldset><legend>{{ branch_code }} 权重</legend><div class="form-grid">{% for dimension in dimension_order %}<label>{{ dimension }}<input type="number" min="0" max="100" name="weight__{{ branch_code }}__{{ dimension }}" value="{{ weights[dimension] }}" required></label>{% endfor %}</div></fieldset>
+    {% endfor %}
+    {% for benchmark in draft.benchmarks %}
+      <fieldset><legend>{{ benchmark.branch_code }} 基准线</legend><label>公开标签<input name="benchmark__{{ benchmark.branch_code }}__label" value="{{ benchmark.label }}" maxlength="200" required></label><div class="form-grid">{% for dimension in dimension_order %}<label>{{ dimension }}<input type="number" min="0" max="100" name="benchmark__{{ benchmark.branch_code }}__{{ dimension }}" value="{{ benchmark.scores[dimension] }}" required></label>{% endfor %}</div></fieldset>
+    {% endfor %}
+  </section>
+
+  <section class="card admin-section">
+    <h2>ROI 选项区间</h2>
+    {% for group, options in draft.roi_ranges.items() %}
+      <fieldset><legend>{{ group }}</legend>{% for code, triple in options.items() %}<div class="form-grid"><code>{{ code }}</code>{% for band in ('low', 'mid', 'high') %}<label>{{ band }}<input name="roi__{{ group }}__{{ code }}__{{ band }}" value="{{ triple[loop.index0] }}" inputmode="decimal" required></label>{% endfor %}</div>{% endfor %}</fieldset>
+    {% endfor %}
+  </section>
+
+  <section class="card admin-section" data-reorder="scenarios">
+    <h2>场景顺序与规则</h2>
+    {% for scenario in draft.scenarios %}
+      {% set prefix = 'scenario__' ~ scenario.code ~ '__' %}
+      <fieldset data-scenario-code="{{ scenario.code }}"><legend>{{ scenario.code }}</legend>
+        <label>显示顺序<select name="{{ prefix }}position">{% for position in range(1, draft.scenarios|length + 1) %}<option value="{{ position }}" {% if position == scenario.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+        <label>分类<select name="{{ prefix }}category_code">{% for value in scenario_categories %}<option value="{{ value }}" {% if value == scenario.category_code %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>公开名称<input name="{{ prefix }}public_name" value="{{ scenario.public_name }}" maxlength="200" required></label>
+        <label>说明<textarea name="{{ prefix }}description" maxlength="1000">{{ scenario.description }}</textarea></label>
+        <label>集成等级<select name="{{ prefix }}integration_level">{% for value in integration_levels %}<option value="{{ value }}" {% if value == scenario.integration_level %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>服务包<select name="{{ prefix }}service_code">{% for value in service_choices %}<option value="{{ value }}" {% if value == scenario.service_code %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>适用行业<select multiple name="{{ prefix }}branches">{% for value in branch_choices %}<option value="{{ value }}" {% if value in scenario.branch_codes %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>适用部门<select multiple name="{{ prefix }}departments">{% for value, label in department_choices %}<option value="{{ value }}" {% for link in scenario.department_links %}{% if value == link.branch_code ~ ':' ~ link.code %}selected{% endif %}{% endfor %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>适用痛点<select multiple name="{{ prefix }}pains">{% for value, label in pain_choices %}<option value="{{ value }}" {% for link in scenario.pain_links %}{% if value == link.branch_code ~ ':' ~ link.code %}selected{% endif %}{% endfor %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>预算范围<select multiple name="{{ prefix }}budgets">{% for value in budget_choices %}<option value="{{ value }}" {% if value in scenario.budget_codes %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>风险<select multiple name="{{ prefix }}risks">{% for value in risk_choices %}<option value="{{ value }}" {% if value in scenario.risk_codes %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <div class="form-grid">{% for dimension in dimension_order %}<label>{{ dimension }} 阈值<input type="number" min="0" max="100" name="{{ prefix }}minimum__{{ dimension }}" value="{{ scenario.minimum_scores[dimension] }}" required></label>{% endfor %}</div>
+        <label>最短周数<input type="number" min="1" name="{{ prefix }}min_weeks" value="{{ scenario.min_weeks }}" required></label>
+        <label>最长周数<input type="number" min="1" name="{{ prefix }}max_weeks" value="{{ scenario.max_weeks }}" required></label>
+        {% for coefficient in ('efficiency', 'loss_improvement', 'annual_support_rate') %}
+          <div class="form-grid"><strong>{{ coefficient }}</strong>{% for value in scenario|attr(coefficient) %}<label>{{ loop.index }}<input name="{{ prefix }}{{ coefficient }}__{{ loop.index0 }}" value="{{ value }}" inputmode="decimal" required></label>{% endfor %}</div>
+        {% endfor %}
+      </fieldset>
+    {% endfor %}
+  </section>
+
+  <section class="card admin-section" data-reorder="services"><h2>服务包完整配置</h2>
+    {% for service in draft.services %}{% set prefix = 'service__' ~ service.code ~ '__' %}
+      <fieldset data-service-code="{{ service.code }}"><legend>{{ service.code }}</legend>
+        <label>显示顺序<select name="{{ prefix }}position">{% for position in range(1, draft.services|length + 1) %}<option value="{{ position }}" {% if position == service.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+        <label>分类<select name="{{ prefix }}category">{% for value in service_categories %}<option value="{{ value }}" {% if value == service.category %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>公开名称<input name="{{ prefix }}public_name" value="{{ service.public_name }}" maxlength="200" required></label>
+        <div class="form-grid"><label>最低预算<input name="{{ prefix }}min_budget" value="{{ service.min_budget }}" inputmode="decimal" required></label><label>最高预算<input name="{{ prefix }}max_budget" value="{{ service.max_budget }}" inputmode="decimal" required></label><label>最短周数<input type="number" min="1" name="{{ prefix }}min_weeks" value="{{ service.min_weeks }}" required></label><label>最长周数<input type="number" min="1" name="{{ prefix }}max_weeks" value="{{ service.max_weeks }}" required></label><label>支持天数<input type="number" min="0" name="{{ prefix }}support_days" value="{{ service.support_days }}" required></label></div>
+        <label>交付物（每行一项）<textarea name="{{ prefix }}deliverables" required>{{ service.deliverables|join('\n') }}</textarea></label>
+        <label>实施步骤（每行一项）<textarea name="{{ prefix }}implementation_steps" required>{{ service.implementation_steps|join('\n') }}</textarea></label>
+        <label>前提（每行一项）<textarea name="{{ prefix }}prerequisites" required>{{ service.prerequisites|join('\n') }}</textarea></label>
+        <label>不包含（每行一项）<textarea name="{{ prefix }}not_included" required>{{ service.not_included|join('\n') }}</textarea></label>
+        <label>验收（每行一项）<textarea name="{{ prefix }}acceptance" required>{{ service.acceptance|join('\n') }}</textarea></label>
+        <label>支持说明<textarea name="{{ prefix }}support_description" maxlength="500" required>{{ service.support_description }}</textarea></label>
+        <label>公开声明<textarea name="{{ prefix }}public_disclaimer" maxlength="500" required>{{ service.public_disclaimer }}</textarea></label>
+      </fieldset>
+    {% endfor %}
+  </section>
+  <button class="btn btn-primary" type="submit">保存草稿</button>
+</form>
+
+<form method="post" action="{{ url_for('admin.admin_rule_preview', release_id=draft.id) }}" class="card admin-section" data-rule-preview>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2>真实管线预览</h2>
+  <label>行业<select name="branch_code">{% for industry in draft.industries %}<option value="{{ industry.code }}">{{ industry.label }}</option>{% endfor %}</select></label>
+  <label>细分支<select name="subbranch_code">{% for industry in draft.industries %}{% for item in industry.subbranches %}<option value="{{ item.code }}">{{ industry.label }} / {{ item.label }}</option>{% endfor %}{% endfor %}</select></label>
+  <label>部门<select name="department_code">{% for industry in draft.industries %}{% for item in industry.departments %}<option value="{{ item.code }}">{{ industry.label }} / {{ item.label }}</option>{% endfor %}{% endfor %}</select></label>
+  <label>企业规模<select name="company_size_code">{% for item in draft.company_sizes %}<option value="{{ item.code }}">{{ item.label }}</option>{% endfor %}</select></label>
+  <label>痛点<select multiple name="pain_codes">{% for industry in draft.industries %}{% for item in industry.pain_points %}<option value="{{ item.code }}">{{ industry.label }} / {{ item.label }}</option>{% endfor %}{% endfor %}</select></label>
+  {% for question in draft.questions %}<label>{{ question.prompt }}<select name="answer__{{ question.code }}">{% for option in question.options %}<option value="{{ option.code }}">{{ option.label }}</option>{% endfor %}</select></label>{% endfor %}
+  {% for group, options in draft.roi_ranges.items() %}<label>{{ draft.public_labels.roi_groups[group] }}<select name="roi__{{ group }}">{% for code in options %}<option value="{{ code }}">{{ draft.public_labels.roi_options[group][code] }}</option>{% endfor %}</select></label>{% endfor %}
+  <button class="btn btn-primary" type="submit">运行预览</button>
+</form>
+{% else %}
+<section class="card admin-section"><p>已发布或归档版本只读；编辑入口已关闭。</p></section>
+{% endif %}
+{% endblock %}

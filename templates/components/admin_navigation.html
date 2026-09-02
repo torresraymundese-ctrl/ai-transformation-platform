@@ -10,6 +10,7 @@
   <a href="/admin/cases" class="{% if '/admin/case' in request.path or '/admin/cases' in request.path %}active{% endif %}">已验证案例</a>
   <a href="/admin/announcements" class="{% if '/admin/announcement' in request.path or '/admin/announcements' in request.path %}active{% endif %}">有效期公告</a>
   <a href="/admin/assessments" class="{% if '/admin/assessments' in request.path %}active{% endif %}">评估记录</a>
+  <a href="/admin/rules" class="{% if '/admin/rules' in request.path %}active{% endif %}">规则版本</a>
   <a href="/admin/leads" class="{% if request.path == '/admin/leads' or '/admin/lead/' in request.path %}active{% endif %}">线索管理</a>
   <a href="/admin/appointments" class="{% if request.path == '/admin/appointments' %}active{% endif %}">诊断预约</a>
   <a href="/admin/data-requests" class="{% if request.path == '/admin/data-requests' %}active{% endif %}">隐私请求</a>

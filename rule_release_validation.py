@@ -54,6 +54,8 @@ WECHAT_PATTERN = re.compile(
     re.I,
 )
 
+OPTION_EXPECTED_SCORES = {f"level_{score}": score for score in range(4)}
+
 
 def validate_release_draft(draft: RuleReleaseDraft) -> tuple[str, ...]:
     """Pure, total validation with exact nested container/dataclass gates."""
@@ -198,13 +200,14 @@ def _legacy_validate_release_draft(draft: RuleReleaseDraft) -> tuple[str, ...]:
         }
         branch_pains[industry.code] = {item.code for item in industry.pain_points}
 
-    if tuple(item.code for item in draft.company_sizes) != COMPANY_SIZE_CODES or not _labeled_collection(
-        draft.company_sizes
+    if (
+        {item.code for item in draft.company_sizes} != set(COMPANY_SIZE_CODES)
+        or not _labeled_collection(draft.company_sizes)
     ):
         errors.append("company_sizes")
 
     question_codes = tuple(item.code for item in draft.questions)
-    if question_codes != QUESTION_CODES or not _unique_ordered(
+    if set(question_codes) != set(QUESTION_CODES) or not _unique_ordered(
         draft.questions, lambda item: item.code
     ):
         errors.append("questions")
@@ -213,13 +216,25 @@ def _legacy_validate_release_draft(draft: RuleReleaseDraft) -> tuple[str, ...]:
     ):
         errors.append("question_dimensions")
     for question in draft.questions:
-        if not _text(question.prompt, 500) or not _exact_int(question.sort_order, 1):
+        if (
+            question.dimension not in DIMENSION_ORDER
+            or not _text(question.prompt, 500)
+            or not _exact_int(question.sort_order, 1)
+        ):
             errors.append("question")
-        if len(question.options) != 4 or any(
-            option.code != f"level_{score}"
-            or not _exact_int(option.score, score, score)
-            or not _exact_int(option.sort_order, score + 1, score + 1)
-            for score, option in enumerate(question.options)
+        if (
+            len(question.options) != 4
+            or {option.code for option in question.options}
+            != set(OPTION_EXPECTED_SCORES)
+            or not _unique_ordered(question.options, lambda option: option.code)
+            or any(
+                not _exact_int(
+                    option.score,
+                    OPTION_EXPECTED_SCORES[option.code],
+                    OPTION_EXPECTED_SCORES[option.code],
+                )
+                for option in question.options
+            )
         ):
             errors.append("question_options")
         if any(not _text(option.label, 200) for option in question.options):
@@ -472,36 +487,52 @@ def validate_canonical_release_json(
             }
 
         sizes = payload["company_sizes"]
-        if not _canonical_labeled_list(sizes) or tuple(
+        if not _canonical_labeled_list(sizes) or {
             item["code"] for item in sizes
-        ) != COMPANY_SIZE_CODES:
+        } != set(COMPANY_SIZE_CODES):
             return False
 
         questions = payload["questions"]
-        if type(questions) is not list or len(questions) != 12 or tuple(
-            item.get("code") for item in questions if type(item) is dict
-        ) != QUESTION_CODES:
+        if (
+            type(questions) is not list
+            or len(questions) != 12
+            or any(type(item) is not dict for item in questions)
+            or {item.get("code") for item in questions} != set(QUESTION_CODES)
+        ):
             return False
         dimensions = []
         for question in questions:
             if not _canonical_mapping(
                 question, {"code", "dimension", "prompt", "options"}
-            ) or not _canonical_code(question["code"]) or not _canonical_text(question["prompt"], 500):
+            ) or question["dimension"] not in DIMENSION_ORDER or not _canonical_text(
+                question["prompt"], 500
+            ):
                 return False
             dimensions.append(question["dimension"])
             options = question["options"]
-            if type(options) is not list or len(options) != 4:
+            if (
+                type(options) is not list
+                or len(options) != 4
+                or any(type(option) is not dict for option in options)
+                or {option.get("code") for option in options}
+                != set(OPTION_EXPECTED_SCORES)
+            ):
                 return False
-            for index, option in enumerate(options):
+            for option in options:
                 if not _canonical_mapping(option, {"code", "label", "score"}):
                     return False
                 if (
-                    option["code"] != f"level_{index}"
-                    or not _canonical_int(option["score"], index, index)
+                    not _canonical_int(
+                        option["score"],
+                        OPTION_EXPECTED_SCORES[option["code"]],
+                        OPTION_EXPECTED_SCORES[option["code"]],
+                    )
                     or not _canonical_text(option["label"], 200)
                 ):
                     return False
-        if Counter(dimensions) != Counter({dimension: 2 for dimension in DIMENSION_ORDER}):
+        if Counter(dimensions) != Counter(
+            {dimension: 2 for dimension in DIMENSION_ORDER}
+        ):
             return False
 
         weights = payload["branch_weights"]

@@ -354,42 +354,72 @@ def load_public_config(db, catalog: AssessmentCatalog, branch_code: str):
     ).fetchone()
     if reference is None:
         raise RuntimeError("published assessment reference line is unavailable")
-    return {
-        "branch": {"code": industry["code"], "label": industry["name"]},
-        "subbranches": _labeled_codes(
+    return build_public_config(
+        catalog,
+        branch={"code": industry["code"], "label": industry["name"]},
+        subbranches=_labeled_codes(
             db,
             "SELECT code,name FROM industry_branches "
             "WHERE industry_id=? AND status='published' ORDER BY sort_order",
             (industry["id"],),
         ),
-        "departments": _labeled_codes(
+        departments=_labeled_codes(
             db,
             "SELECT code,name FROM departments "
             "WHERE industry_id=? AND status='published' ORDER BY sort_order",
             (industry["id"],),
         ),
-        "pain_points": _labeled_codes(
+        pain_points=_labeled_codes(
             db,
             "SELECT code,name FROM pain_points "
             "WHERE industry_id=? AND status='published' ORDER BY sort_order",
             (industry["id"],),
         ),
-        "company_sizes": _labeled_codes(
+        company_sizes=_labeled_codes(
             db,
             "SELECT code,name FROM company_sizes "
             "WHERE status='published' ORDER BY sort_order",
         ),
-        "pain_selection": {
+        pain_selection={
             "minimum": version["pain_min_selections"],
             "maximum": version["pain_max_selections"],
         },
-        "roi_options": {
+        roi_options={
             group: list(options)
             for group, options in _roi_option_codes(
                 db, catalog.version_id
             ).items()
         },
-        "reference_label": reference["label"],
+        reference_label=reference["label"],
+    )
+
+
+def build_public_config(
+    catalog: AssessmentCatalog,
+    *,
+    branch,
+    subbranches,
+    departments,
+    pain_points,
+    company_sizes,
+    pain_selection,
+    roi_options,
+    reference_label,
+):
+    """Build public questionnaire copy from already validated rule inputs."""
+    if not isinstance(catalog, AssessmentCatalog):
+        raise TypeError("invalid assessment catalog")
+    return {
+        "branch": dict(branch),
+        "subbranches": [dict(item) for item in subbranches],
+        "departments": [dict(item) for item in departments],
+        "pain_points": [dict(item) for item in pain_points],
+        "company_sizes": [dict(item) for item in company_sizes],
+        "pain_selection": dict(pain_selection),
+        "roi_options": {
+            group: list(options) for group, options in roi_options.items()
+        },
+        "reference_label": reference_label,
     }
 
 
