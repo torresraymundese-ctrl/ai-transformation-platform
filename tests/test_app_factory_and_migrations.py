@@ -10,6 +10,9 @@ from werkzeug.security import generate_password_hash
 import app as app_module
 import migrations
 import models
+from assessment_validation import CONSENT_POLICY_VERSION
+from content_clock import SHANGHAI
+from datetime import datetime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +116,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "011_private_http_resource_drafts",
         "012_operations_query_indexes",
         "013_admin_export_audit",
+        "014_legal_documents",
     ]
     assert sentinel == "keep-me"
 
@@ -166,6 +170,116 @@ def test_013_adds_append_only_admin_export_audit_after_012(tmp_path, monkeypatch
         "row_count": ("INTEGER", 1, 0),
         "created_at": ("TEXT", 1, 0),
     }
+
+
+def test_014_applies_after_a_true_recorded_013_database(tmp_path, monkeypatch):
+    staged = tmp_path / "migrations"
+    staged.mkdir()
+    for source in sorted((PROJECT_ROOT / "migrations").glob("*.sql")):
+        if int(source.name[:3]) <= 13:
+            shutil.copy2(source, staged / source.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "013_admin_export_audit"
+        assert db.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='legal_documents'"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+    shutil.copy2(
+        PROJECT_ROOT / "migrations" / "014_legal_documents.sql",
+        staged / "014_legal_documents.sql",
+    )
+    models.init_db()
+    db = models.get_db()
+    try:
+        assert db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0] == "014_legal_documents"
+        assert db.execute("SELECT COUNT(*) FROM legal_documents").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_init_db_reconciles_configured_external_privacy_once_after_migrations(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    calls = []
+    moment = datetime(2026, 8, 31, 10, 0, 0, tzinfo=SHANGHAI)
+
+    def clock():
+        calls.append(1)
+        return moment
+
+    models.init_db(
+        privacy_policy_version=CONSENT_POLICY_VERSION,
+        privacy_policy_url="https://legal.example/privacy",
+        now_provider=clock,
+    )
+    db = models.get_db()
+    try:
+        row = db.execute(
+            "SELECT d.version_code,d.mode,d.external_url "
+            "FROM active_legal_documents a JOIN legal_documents d ON d.id=a.legal_document_id "
+            "WHERE a.document_type='privacy'"
+        ).fetchone()
+    finally:
+        db.close()
+
+    assert calls == [1]
+    assert tuple(row) == (
+        CONSENT_POLICY_VERSION,
+        "external_legacy",
+        "https://legal.example/privacy",
+    )
+
+
+def test_init_db_zero_argument_without_policy_url_does_not_invent_legal_text(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    monkeypatch.delenv("AI_PLATFORM_PRIVACY_POLICY_URL", raising=False)
+    models.init_db()
+    db = models.get_db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM legal_documents").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"privacy_policy_version": ""},
+        {"privacy_policy_version": "v1", "privacy_policy_url": ""},
+        {"privacy_policy_url": "https://legal.example/privacy", "privacy_policy_version": ""},
+        {"privacy_policy_url": "http://legal.example/privacy", "privacy_policy_version": "v1"},
+    ],
+)
+def test_init_db_rejects_incomplete_or_invalid_policy_overrides_without_legal_writes(
+    tmp_path, monkeypatch, kwargs
+):
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    monkeypatch.delenv("AI_PLATFORM_PRIVACY_POLICY_URL", raising=False)
+    with pytest.raises(ValueError):
+        models.init_db(**kwargs)
+    if Path(models.DB_PATH).exists():
+        db = models.get_db()
+        try:
+            table_exists = db.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='legal_documents'"
+            ).fetchone()[0]
+            if table_exists:
+                assert db.execute("SELECT COUNT(*) FROM legal_documents").fetchone()[0] == 0
+        finally:
+            db.close()
 
 
 def test_database_enforces_asset_foreign_keys(tmp_path, monkeypatch):
@@ -450,11 +564,11 @@ def test_011_preserves_deleted_resource_high_water_when_table_is_empty(
         db.close()
 
 
-def test_migration_ordinals_are_unique_and_contiguous_through_013():
+def test_migration_ordinals_are_unique_and_contiguous_through_014():
     paths = sorted((PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
     ordinals = [int(path.name[:3]) for path in paths]
 
-    assert ordinals == list(range(1, 14))
+    assert ordinals == list(range(1, 15))
 
 
 def test_012_adds_only_real_column_operations_indexes_from_recorded_011(

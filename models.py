@@ -8,6 +8,7 @@ import json                             # JSON 数据（备用）
 from migrations import apply_migrations
 from assessment.seed import seed_v2_defaults
 from content_clock import shanghai_now
+from assessment_validation import CONSENT_POLICY_VERSION
 
 DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     os.path.dirname(__file__),          # 当前脚本所在目录
@@ -24,27 +25,75 @@ def get_db():                           # 🔌 获取数据库连接
     conn.execute("PRAGMA journal_mode=WAL")  # 启用 WAL 写入模式（提升并发性能）
     return conn
 
-def init_db():                          # 🏗️ 初始化数据库
+_UNSET_POLICY = object()
+
+
+def init_db(
+    privacy_policy_version=_UNSET_POLICY,
+    privacy_policy_url=_UNSET_POLICY,
+    *,
+    now_provider=None,
+):                          # 🏗️ 初始化数据库
     """创建所有表结构 + 插入种子数据（如果表为空）"""
     from content_seed import seed_content_defaults
+    from legal_repository import (
+        reconcile_external_privacy_reference,
+        validate_external_privacy_configuration,
+    )
+
+    explicit_version = privacy_policy_version is not _UNSET_POLICY
+    explicit_url = privacy_policy_url is not _UNSET_POLICY
+    version = (
+        CONSENT_POLICY_VERSION
+        if not explicit_version
+        else privacy_policy_version
+    )
+    policy_url = (
+        os.environ.get("AI_PLATFORM_PRIVACY_POLICY_URL")
+        if not explicit_url
+        else privacy_policy_url
+    )
+    should_reconcile = bool(policy_url)
+    if not should_reconcile and (explicit_version or explicit_url):
+        raise ValueError("privacy policy version and URL are required together")
+    if should_reconcile:
+        version, policy_url, _ = validate_external_privacy_configuration(
+            version, policy_url
+        )
+
+    if now_provider is None:
+        moment = shanghai_now()
+    elif callable(now_provider):
+        moment = now_provider()
+    else:
+        raise ValueError("now_provider must be callable")
 
     conn = get_db()
-    apply_migrations(conn)
-    # 🌱 如果服务表为空，插入种子数据
-    if conn.execute("SELECT COUNT(*) FROM services").fetchone()[0] == 0:
-        seed_services(conn)
-    # 🌱 如果案例表为空，插入种子数据
-    if conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0] == 0:
-        seed_cases(conn)
-    # 🌱 如果资产编码表为空，插入种子数据
-    if conn.execute("SELECT COUNT(*) FROM asset_codes").fetchone()[0] == 0:
-        seed_asset_codes(conn)
+    try:
+        apply_migrations(conn)
+        # 🌱 如果服务表为空，插入种子数据
+        if conn.execute("SELECT COUNT(*) FROM services").fetchone()[0] == 0:
+            seed_services(conn)
+        # 🌱 如果案例表为空，插入种子数据
+        if conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0] == 0:
+            seed_cases(conn)
+        # 🌱 如果资产编码表为空，插入种子数据
+        if conn.execute("SELECT COUNT(*) FROM asset_codes").fetchone()[0] == 0:
+            seed_asset_codes(conn)
 
-    seed_v2_defaults(conn)
-    seed_content_defaults(conn, now=shanghai_now())
+        seed_v2_defaults(conn)
+        seed_content_defaults(conn, now=moment)
 
-    conn.commit()                        # 提交所有变更
-    conn.close()                         # 关闭连接
+        conn.commit()                    # 种子/迁移与法律对账的明确事务边界
+        if should_reconcile:
+            reconcile_external_privacy_reference(
+                conn, version, policy_url, moment
+            )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()                     # 关闭连接
 
 def seed_services(conn):                 # 🌱 插入种子服务数据
     """向 services 表插入 12 项标准化服务（启航包 4 + 加速包 4 + 旗舰包 4）"""

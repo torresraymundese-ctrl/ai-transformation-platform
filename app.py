@@ -17,11 +17,13 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import idna
 
 import analytics_repository
+from assessment_validation import CONSENT_POLICY_VERSION
 from blueprints.admin import bp as admin_bp
 from blueprints.assessment import bp as assessment_bp
 from blueprints.api import bp as api_bp
 from blueprints.public import bp as public_bp, svc_emoji
 from blueprints.public_catalog import bp as public_catalog_bp
+from blueprints.public_legal import bp as public_legal_bp
 from blueprints.media import bp as media_bp
 from models import init_db
 from security import (add_security_headers, audit_admin_actions, check_admin_auth,
@@ -72,6 +74,7 @@ DEFAULT_CONFIG = {
     ),
     "PRIVACY_CONTACT": os.environ.get("AI_PLATFORM_PRIVACY_CONTACT"),
     "PRIVACY_POLICY_URL": os.environ.get("AI_PLATFORM_PRIVACY_POLICY_URL"),
+    "PRIVACY_POLICY_VERSION": CONSENT_POLICY_VERSION,
     "SCRAPE_RATE_LIMIT": 3,
     "SCRAPE_RATE_WINDOW": 60 * 60,
 }
@@ -299,6 +302,7 @@ def create_app(test_config=None):
 
     flask_app.register_blueprint(public_bp)
     flask_app.register_blueprint(public_catalog_bp)
+    flask_app.register_blueprint(public_legal_bp)
     flask_app.register_blueprint(api_bp)
     flask_app.register_blueprint(assessment_bp)
     flask_app.register_blueprint(admin_bp)
@@ -310,7 +314,10 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    init_db()
+    init_db(
+        privacy_policy_version=app.config["PRIVACY_POLICY_VERSION"],
+        privacy_policy_url=app.config["PRIVACY_POLICY_URL"],
+    )
     print("Enterprise AI Transformation Platform")
     print("Open http://127.0.0.1:5080")
     app.run(host="127.0.0.1", port=5080, debug=False, threaded=True)

@@ -14,6 +14,7 @@ from . import (  # noqa: E402,F401
     content,
     ingestion,
     leads,
+    legal,
     media,
     operations,
     resources,

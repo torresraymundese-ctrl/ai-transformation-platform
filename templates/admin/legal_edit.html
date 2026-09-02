@@ -1,0 +1,14 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div class="admin-heading"><div><h1>{% if document %}{{ document.document_type }} · {{ document.version_code }}{% else %}新建法律文档{% endif %}</h1>{% if document %}<p class="muted">状态 {{ document.status }} · 锁版本 {{ document.lock_version }}</p>{% endif %}</div><a class="btn btn-outline" href="{{ url_for('admin.admin_legal_list') }}">返回列表</a></div>
+{% if not document %}
+<form method="post" class="card admin-section"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-group"><label>类型</label><select name="document_type" required>{% for item in document_types %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select></div>
+  <div class="form-group"><label>版本代码</label><input name="version_code" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" required></div>
+  <div class="form-group"><label>标题</label><input name="title" maxlength="200" required></div><div class="form-group"><label>摘要</label><textarea name="body_summary" maxlength="1000" required></textarea></div><div class="form-group"><label>正文 HTML</label><textarea name="body_html" required></textarea></div><div class="form-group"><label>生效时间（Asia/Shanghai）</label><input type="datetime-local" name="effective_at" step="1" required></div><button class="btn btn-primary" type="submit">创建草稿</button></form>
+{% elif document.status == 'draft' %}
+<form method="post" class="card admin-section"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_lock_version" value="{{ document.lock_version }}">
+  <div class="form-group"><label>标题</label><input name="title" value="{{ document.title }}" maxlength="200" required></div><div class="form-group"><label>摘要</label><textarea name="body_summary" maxlength="1000" required>{{ document.body_summary }}</textarea></div><div class="form-group"><label>正文 HTML</label><textarea name="body_html" required>{{ document.body_html }}</textarea></div><div class="form-group"><label>生效时间</label><input name="effective_at" value="{{ document.effective_at }}" required></div><button class="btn btn-outline" name="action" value="save">保存并清除审核</button></form>
+<form method="post" class="card admin-section"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_lock_version" value="{{ document.lock_version }}"><button class="btn btn-outline" name="action" value="review">确认法务审核</button><button class="btn btn-primary" name="action" value="publish">发布并切换指针</button></form>
+{% else %}<section class="card admin-section"><p><strong>{{ document.title or document.external_url }}</strong></p><p>{{ document.body_summary or '外部历史政策引用' }}</p><p>已发布或归档版本不可编辑。</p></section>{% endif %}
+{% endblock %}

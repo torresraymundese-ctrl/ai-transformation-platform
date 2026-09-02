@@ -1,0 +1,11 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div class="admin-heading"><div><h1>法律文档</h1><p class="muted">不可变版本、审核与活动指针。</p></div><a class="btn btn-primary" href="{{ url_for('admin.admin_legal_new') }}">新建草稿</a></div>
+<form method="get" class="inline-form admin-section card">
+  <div class="form-group"><label for="legal_type">类型</label><select id="legal_type" name="type"><option value="">全部</option>{% for item in document_types %}<option value="{{ item }}" {% if filters.document_type == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+  <div class="form-group"><label for="legal_status">状态</label><select id="legal_status" name="status"><option value="">全部</option>{% for item in ('draft','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+  <button class="btn btn-primary" type="submit">筛选</button>
+</form>
+<section class="card admin-section">{% if page.items %}<table><thead><tr><th>类型</th><th>版本</th><th>模式</th><th>状态</th><th>更新</th><th>操作</th></tr></thead><tbody>{% for item in page.items %}<tr><td>{{ item.document_type }}</td><td>{{ item.version_code }}</td><td>{{ item.mode }}</td><td>{{ item.status }}</td><td>{{ item.updated_at }}</td><td><a href="{{ url_for('admin.admin_legal_edit', version_id=item.id) }}">查看</a></td></tr>{% endfor %}</tbody></table>{% else %}<p class="empty">暂无法律文档。</p>{% endif %}</section>
+{% include "admin/_pagination.html" %}
+{% endblock %}
