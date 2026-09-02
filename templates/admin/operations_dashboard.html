@@ -1,0 +1,45 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}运营工作台 - 企业AI转型平台{% endblock %}
+{% block admin_content %}
+{% if selected_queue is none %}
+<section data-operations-dashboard>
+  <div class="admin-heading">
+    <div>
+      <h1>运营工作台</h1>
+      <p class="muted">只读提醒来自当前业务数据，不建立额外任务状态。</p>
+    </div>
+  </div>
+  <div class="admin-grid">
+    {% for card in snapshot.cards %}
+    <article class="card admin-section" data-operation-card data-queue="{{ card.code }}" data-count="{{ card.count }}">
+      <p class="muted">{{ card.code }}</p>
+      <h2>{{ card.label }}</h2>
+      <p class="stat-card num" aria-label="{{ card.label }}数量">{{ card.count }}</p>
+      <a class="btn btn-outline" href="/admin?queue={{ card.code|urlencode }}">查看队列</a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section data-operations-queue="{{ selected_queue }}" data-total="{{ page.total }}">
+  <div class="admin-heading">
+    <div>
+      <p><a href="/admin">← 返回运营工作台</a></p>
+      <h1>{{ queue_label }}</h1>
+      <p class="muted">共 {{ page.total }} 项，只读显示当前数据库投影。</p>
+    </div>
+  </div>
+  <div class="card admin-section stack">
+    {% for item in page.items %}
+    <article data-operation-row data-id="{{ item.id }}">
+      <strong>{{ item.display_title or "已匿名化记录" }}</strong>
+      <span class="muted">{{ item.display_meta or "" }}{% if item.status %} · {{ item.status }}{% endif %}</span>
+    </article>
+    {% else %}
+    <p class="empty" data-empty-state>当前没有待处理项目。</p>
+    {% endfor %}
+  </div>
+  {% include "admin/_pagination.html" %}
+</section>
+{% endif %}
+{% endblock %}

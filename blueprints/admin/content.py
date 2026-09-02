@@ -6,11 +6,6 @@ from blueprints.admin import bp
 import content_repository
 
 
-@bp.route("/admin")
-def admin_index():
-    return render_template("admin/index.html", stats=content_repository.admin_counts())
-
-
 @bp.route("/admin/case/new", methods=["GET", "POST"])
 def admin_case_new():
     return "旧案例编辑器已停用；请等待案例迁移审阅流程。", 410

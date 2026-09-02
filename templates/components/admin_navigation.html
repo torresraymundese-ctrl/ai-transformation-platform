@@ -1,6 +1,6 @@
 <nav class="admin-nav">
   <a href="/admin" class="brand">CMS 后台管理</a>
-  <a href="/admin" class="{% if request.path == '/admin' %}active{% endif %}">控制台</a>
+  <a href="/admin" class="{% if request.path == '/admin' %}active{% endif %}">运营工作台</a>
   <a href="/admin/catalog/industry" class="{% if '/admin/catalog/industry' in request.path %}active{% endif %}">行业文案</a>
   <a href="/admin/catalog/scenario" class="{% if '/admin/catalog/scenario' in request.path %}active{% endif %}">场景文案</a>
   <a href="/admin/catalog/service" class="{% if '/admin/catalog/service' in request.path %}active{% endif %}">服务文案</a>

@@ -6,4 +6,15 @@ from flask import Blueprint
 bp = Blueprint("admin", __name__)
 
 
-from . import assets, auth, cases, catalog, content, ingestion, leads, media, resources  # noqa: E402,F401
+from . import (  # noqa: E402,F401
+    assets,
+    auth,
+    cases,
+    catalog,
+    content,
+    ingestion,
+    leads,
+    media,
+    operations,
+    resources,
+)
