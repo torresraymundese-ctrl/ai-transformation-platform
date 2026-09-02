@@ -5,10 +5,13 @@
 import sqlite3                          # SQLite 数据库驱动
 import os                               # 文件系统操作（路径、目录）
 import json                             # JSON 数据（备用）
+import hashlib                          # 快照 UTF-8 完整性校验
 from migrations import apply_migrations
 from assessment.seed import seed_v2_defaults
 from content_clock import shanghai_now
 from assessment_validation import CONSENT_POLICY_VERSION
+from rule_release_seed import reconcile_initial_v2_release
+from rule_release_validation import validate_canonical_release_json
 
 DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     os.path.dirname(__file__),          # 当前脚本所在目录
@@ -16,10 +19,27 @@ DB_PATH = os.path.join(                 # 🗄️ 数据库文件路径
     "platform.db"                       # 数据库文件名
 )
 
+
+def _sha256_utf8(value):
+    """Return the lowercase SHA-256 of a SQLite TEXT value's UTF-8 bytes."""
+    if type(value) is not str:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _canonical_release_valid(canonical_json, code, name, pain_min, pain_max):
+    return int(
+        validate_canonical_release_json(canonical_json, code, name, pain_min, pain_max)
+    )
+
 def get_db():                           # 🔌 获取数据库连接
     """返回带 Row 工厂的数据库连接（支持字段名访问）"""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # 自动创建 data/ 目录
     conn = sqlite3.connect(DB_PATH)     # 连接 SQLite 数据库
+    conn.create_function("sha256_utf8", 1, _sha256_utf8, deterministic=True)
+    conn.create_function(
+        "canonical_release_valid", 5, _canonical_release_valid, deterministic=True
+    )
     conn.row_factory = sqlite3.Row      # 启用行工厂（查询结果可通过字段名访问）
     conn.execute("PRAGMA foreign_keys=ON")  # 强制执行资产引用完整性
     conn.execute("PRAGMA journal_mode=WAL")  # 启用 WAL 写入模式（提升并发性能）
@@ -85,6 +105,7 @@ def init_db(
         seed_content_defaults(conn, now=moment)
 
         conn.commit()                    # 种子/迁移与法律对账的明确事务边界
+        reconcile_initial_v2_release(conn, moment)
         if should_reconcile:
             reconcile_external_privacy_reference(
                 conn, version, policy_url, moment

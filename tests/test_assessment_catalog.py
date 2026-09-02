@@ -1,5 +1,6 @@
 import importlib
 import json
+import sqlite3
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 
@@ -659,12 +660,33 @@ def test_repeated_init_never_overwrites_the_published_version(tmp_path, monkeypa
         version_id = db.execute(
             "SELECT id FROM assessment_versions WHERE code=?", (VERSION_CODE,)
         ).fetchone()[0]
-        db.execute(
-            "UPDATE assessment_questions SET prompt=? "
+        original_prompt = db.execute(
+            "SELECT prompt FROM assessment_questions "
             "WHERE assessment_version_id=? AND code='business_value_frequency'",
-            ("published sentinel", version_id),
+            (version_id,),
+        ).fetchone()[0]
+        canonical_json, snapshot_sha = db.execute(
+            "SELECT canonical_json, sha256 FROM assessment_version_snapshots "
+            "WHERE assessment_version_id=?",
+            (version_id,),
+        ).fetchone()
+        root_digest = db.execute(
+            "SELECT validated_digest FROM assessment_versions WHERE id=?",
+            (version_id,),
+        ).fetchone()[0]
+        frozen_bytes = (
+            canonical_json.encode("utf-8"),
+            snapshot_sha.encode("ascii"),
+            root_digest.encode("ascii"),
         )
-        db.commit()
+
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            db.execute(
+                "UPDATE assessment_questions SET prompt=? "
+                "WHERE assessment_version_id=? AND code='business_value_frequency'",
+                ("published sentinel", version_id),
+            )
+        db.rollback()
     finally:
         db.close()
 
@@ -674,16 +696,25 @@ def test_repeated_init_never_overwrites_the_published_version(tmp_path, monkeypa
         version_count = db.execute(
             "SELECT COUNT(*) FROM assessment_versions WHERE code=?", (VERSION_CODE,)
         ).fetchone()[0]
-        prompt = db.execute(
-            "SELECT prompt FROM assessment_questions "
-            "WHERE assessment_version_id=? AND code='business_value_frequency'",
+        prompt, canonical_json, snapshot_sha, root_digest = db.execute(
+            "SELECT q.prompt, s.canonical_json, s.sha256, v.validated_digest "
+            "FROM assessment_versions AS v "
+            "JOIN assessment_questions AS q ON q.assessment_version_id=v.id "
+            "JOIN assessment_version_snapshots AS s "
+            "ON s.assessment_version_id=v.id "
+            "WHERE v.id=? AND q.code='business_value_frequency'",
             (version_id,),
-        ).fetchone()[0]
+        ).fetchone()
     finally:
         db.close()
 
     assert version_count == 1
-    assert prompt == "published sentinel"
+    assert prompt == original_prompt
+    assert (
+        canonical_json.encode("utf-8"),
+        snapshot_sha.encode("ascii"),
+        root_digest.encode("ascii"),
+    ) == frozen_bytes
 
 
 def test_repeated_init_reconciles_only_exact_legacy_service_exclusions(

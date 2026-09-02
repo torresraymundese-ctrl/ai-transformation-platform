@@ -1,6 +1,7 @@
 import sqlite3
 from pathlib import Path
 import shutil
+import json
 
 import pytest
 from bs4 import BeautifulSoup
@@ -117,6 +118,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "012_operations_query_indexes",
         "013_admin_export_audit",
         "014_legal_documents",
+        "015_assessment_rule_releases",
     ]
     assert sentinel == "keep-me"
 
@@ -203,6 +205,119 @@ def test_014_applies_after_a_true_recorded_013_database(tmp_path, monkeypatch):
             "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
         ).fetchone()[0] == "014_legal_documents"
         assert db.execute("SELECT COUNT(*) FROM legal_documents").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_015_upgrades_recorded_014_preserving_rule_foreign_keys_and_rows(
+    tmp_path, monkeypatch
+):
+    """The release migration must extend, not rebuild, referenced assessment roots."""
+    staged = tmp_path / "migrations"
+    staged.mkdir()
+    for source in sorted((PROJECT_ROOT / "migrations").glob("*.sql")):
+        if int(source.name[:3]) <= 14:
+            shutil.copy2(source, staged / source.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    models.init_db()
+    db = models.get_db()
+    try:
+        version_id = db.execute(
+            "SELECT id FROM assessment_versions WHERE code='v2.0-2026-08-19'"
+        ).fetchone()[0]
+        assessment_id = db.execute(
+            "INSERT INTO assessments (company_name,rule_version_id) VALUES ('sentinel',?)",
+            (version_id,),
+        ).lastrowid
+        roi_id = db.execute(
+            "INSERT INTO roi_estimates "
+            "(assessment_id,rule_version_id,recommended_scenarios_json,estimate_snapshot_json) "
+            "VALUES (?,?,'[]','{}')",
+            (assessment_id, version_id),
+        ).lastrowid
+        before_assessment_fk = {
+            (row["from"], row["table"], row["to"])
+            for row in db.execute("PRAGMA foreign_key_list(assessments)")
+        }
+        before_roi_fk = {
+            (row["from"], row["table"], row["to"])
+            for row in db.execute("PRAGMA foreign_key_list(roi_estimates)")
+        }
+        service = db.execute(
+            "SELECT s.id,s.code FROM services s WHERE s.status='published' AND s.code IS NOT NULL "
+            "AND EXISTS(SELECT 1 FROM service_deliverables d WHERE d.service_id=s.id) "
+            "ORDER BY s.sort_order LIMIT 1"
+        ).fetchone()
+        deliverable = db.execute(
+            "SELECT id FROM service_deliverables WHERE service_id=? ORDER BY sort_order LIMIT 1",
+            (service["id"],),
+        ).fetchone()[0]
+        scenario = db.execute(
+            "SELECT id,code FROM scenarios WHERE status='published' ORDER BY sort_order LIMIT 1"
+        ).fetchone()
+        db.execute(
+            "UPDATE services SET public_name=?,min_budget=? WHERE id=?",
+            ("014 关系服务标签", 12345.6789, service["id"]),
+        )
+        db.execute(
+            "UPDATE service_deliverables SET title=? WHERE id=?",
+            ("014 关系交付物", deliverable),
+        )
+        db.execute(
+            "UPDATE scenario_roi_profiles SET efficiency_low=?,efficiency_mid=?,"
+            "efficiency_high=? WHERE assessment_version_id=? AND scenario_id=?",
+            (0.111111, 0.222222, 0.333333, version_id, scenario["id"]),
+        )
+        db.commit()
+        assert db.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='active_assessment_version'"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+    shutil.copy2(
+        PROJECT_ROOT / "migrations" / "015_assessment_rule_releases.sql",
+        staged / "015_assessment_rule_releases.sql",
+    )
+    models.init_db()
+    models.init_db()
+    db = models.get_db()
+    try:
+        after_assessment_fk = {
+            (row["from"], row["table"], row["to"])
+            for row in db.execute("PRAGMA foreign_key_list(assessments)")
+        }
+        after_roi_fk = {
+            (row["from"], row["table"], row["to"])
+            for row in db.execute("PRAGMA foreign_key_list(roi_estimates)")
+        }
+        assert before_assessment_fk == after_assessment_fk
+        assert before_roi_fk == after_roi_fk
+        assert db.execute(
+            "SELECT rule_version_id FROM assessments WHERE id=?", (assessment_id,)
+        ).fetchone()[0] == version_id
+        assert db.execute(
+            "SELECT rule_version_id FROM roi_estimates WHERE id=?", (roi_id,)
+        ).fetchone()[0] == version_id
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert db.execute(
+            "SELECT COUNT(*) FROM assessment_version_snapshots WHERE assessment_version_id=?",
+            (version_id,),
+        ).fetchone()[0] == 1
+        canonical = json.loads(
+            db.execute(
+                "SELECT canonical_json FROM assessment_version_snapshots "
+                "WHERE assessment_version_id=?",
+                (version_id,),
+            ).fetchone()[0]
+        )
+        frozen_service = next(item for item in canonical["services"] if item["code"] == service["code"])
+        frozen_scenario = next(item for item in canonical["scenarios"] if item["code"] == scenario["code"])
+        assert frozen_service["public_name"] == "014 关系服务标签"
+        assert frozen_service["budget"][0] == "12345.6789"
+        assert frozen_service["deliverables"][0] == "014 关系交付物"
+        assert frozen_scenario["efficiency"] == ["0.111111", "0.222222", "0.333333"]
     finally:
         db.close()
 
@@ -564,11 +679,11 @@ def test_011_preserves_deleted_resource_high_water_when_table_is_empty(
         db.close()
 
 
-def test_migration_ordinals_are_unique_and_contiguous_through_014():
+def test_migration_ordinals_are_unique_and_contiguous_through_015():
     paths = sorted((PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
     ordinals = [int(path.name[:3]) for path in paths]
 
-    assert ordinals == list(range(1, 15))
+    assert ordinals == list(range(1, 16))
 
 
 def test_012_adds_only_real_column_operations_indexes_from_recorded_011(
