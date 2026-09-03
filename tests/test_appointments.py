@@ -8,6 +8,11 @@ import pytest
 from bs4 import BeautifulSoup
 
 from repository import DataConflictError
+from tests.assessment_flow_helpers import (
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 SUBMISSION_KEY_1 = "550e8400-e29b-41d4-a716-446655440000"
@@ -44,47 +49,20 @@ def _insert_assessment(db, *, company="测试企业", contact="测试联系人")
 
 
 def _complete_assessment(client, *, submission_key=None, phone="13800138000"):
-    client.application.config.update(
-        PRIVACY_PROCESSOR_NAME="测试处理者",
-        PRIVACY_CONTACT="privacy@example.invalid",
-        PRIVACY_POLICY_URL="https://example.invalid/privacy",
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(client)
+    csrf_token = config["csrf_token"]
+    payload = bound_completion_payload(
+        config, submission_key=submission_key or str(uuid.uuid4())
     )
-    config = client.get("/api/v2/assessment/config/manufacturing")
-    assert config.status_code == 200
-    csrf_token = config.get_json()["csrf_token"]
+    payload["contact"] = {
+        "company_name": "预约接口测试企业",
+        "contact_name": "测试联系人",
+        "phone": phone,
+    }
     completion = client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": submission_key or str(uuid.uuid4()),
-            "assessment": {
-                "schema_version": "2.0",
-                "profile": {
-                    "branch_code": "manufacturing",
-                    "subbranch_code": "discrete_manufacturing",
-                    "department_code": "production",
-                    "company_size_code": "50_200",
-                    "pain_codes": ["production_reporting"],
-                },
-                "answers": {code: "level_3" for code in QUESTION_CODES},
-                "roi_choices": {
-                    "headcount": "6_20",
-                    "monthly_hours": "20_80",
-                    "monthly_cost": "8000_15000",
-                    "loss_factor": "normal",
-                    "budget": "50000_200000",
-                },
-            },
-            "contact": {
-                "company_name": "预约接口测试企业",
-                "contact_name": "测试联系人",
-                "phone": phone,
-            },
-            "consent": {
-                "accepted": True,
-                "policy_version": "2026-08-19",
-            },
-            "attribution": {"source": "website_assessment"},
-        },
+        json=payload,
         headers={"X-CSRF-Token": csrf_token},
     )
     assert completion.status_code == 200

@@ -15,7 +15,8 @@ from assessment.contracts import (
     Consent,
     Contact,
 )
-from assessment_completion_service import complete_assessment
+from assessment_completion_service import complete_assessment as _complete_assessment
+from tests.assessment_flow_helpers import issue_test_service_flow
 from validation import ValidationError
 
 
@@ -36,6 +37,14 @@ QUESTION_CODES = (
     "delivery_budget",
     "delivery_timeline",
 )
+
+
+def complete_assessment(request, identity_hash):
+    return _complete_assessment(
+        request,
+        identity_hash,
+        issue_test_service_flow(request.profile.branch_code),
+    )
 
 
 @pytest.fixture()
@@ -70,7 +79,7 @@ def valid_completion(key=UUID_1, *, phone="13800138000"):
             email="private-7f9c@example.invalid",
             wechat="wechat-private-8a2d",
         ),
-        consent=Consent(accepted=True, policy_version="2026-08-19"),
+        consent=Consent(accepted=True, policy_version="test-privacy-v1"),
         attribution=Attribution(
             source="website_assessment",
             utm_source="organic",
@@ -129,7 +138,7 @@ def test_completion_creates_atomic_lead_consent_assessment_roi_and_events(
     assert assessment["lead_id"] == lead["id"]
     assert assessment["report_snapshot_json"]
     assert estimate["rule_version_id"] == assessment["rule_version_id"]
-    assert consent["policy_version"] == "2026-08-19"
+    assert consent["policy_version"] == "test-privacy-v1"
     assert [event["event_name"] for event in events] == [
         "assessment_completed",
         "lead_submitted",
@@ -387,7 +396,7 @@ def test_completion_event_repository_rejects_non_allowlisted_events(completion_d
 
 def test_false_consent_and_invalid_calculation_make_no_writes(completion_db):
     no_consent = replace(
-        valid_completion(), consent=Consent(False, "2026-08-19")
+        valid_completion(), consent=Consent(False, "test-privacy-v1")
     )
     bad_answers = dict(valid_completion(UUID_2).profile.answers)
     bad_answers["business_value_frequency"] = "request-secret-option"

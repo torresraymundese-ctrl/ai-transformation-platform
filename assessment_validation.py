@@ -252,6 +252,64 @@ def parse_preview_payload(data) -> AssessmentProfile:
 
 
 def parse_completion_payload(data) -> CompletionRequest:
+    return _parse_completion_payload(data, expected_policy_version=CONSENT_POLICY_VERSION)
+
+
+def parse_bound_preview_payload(data):
+    payload = _object(data)
+    _exact_keys(
+        payload,
+        {
+            "flow_id",
+            "rule_version",
+            "schema_version",
+            "profile",
+            "answers",
+            "roi_choices",
+        },
+    )
+    flow_id = _text(payload["flow_id"], maximum=64, required=True)
+    rule_version = _text(payload["rule_version"], maximum=64, required=True)
+    assessment = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"flow_id", "rule_version"}
+    }
+    return flow_id, rule_version, parse_preview_payload(assessment)
+
+
+def parse_bound_completion_payload(data):
+    payload = _object(data)
+    _exact_keys(
+        payload,
+        {
+            "flow_id",
+            "submission_key",
+            "assessment",
+            "contact",
+            "consent",
+            "attribution",
+        },
+    )
+    flow_id = _text(payload["flow_id"], maximum=64, required=True)
+    completion = {key: value for key, value in payload.items() if key != "flow_id"}
+    assessment = _object(completion["assessment"])
+    _exact_keys(
+        assessment,
+        {"rule_version", "schema_version", "profile", "answers", "roi_choices"},
+    )
+    rule_version = _text(assessment["rule_version"], maximum=64, required=True)
+    completion["assessment"] = {
+        key: value for key, value in assessment.items() if key != "rule_version"
+    }
+    return (
+        flow_id,
+        rule_version,
+        _parse_completion_payload(completion, expected_policy_version=None),
+    )
+
+
+def _parse_completion_payload(data, *, expected_policy_version) -> CompletionRequest:
     payload = _object(data)
     _exact_keys(
         payload,
@@ -281,7 +339,10 @@ def parse_completion_payload(data) -> CompletionRequest:
     policy_version = _text(
         consent["policy_version"], maximum=50, required=True
     )
-    if policy_version != CONSENT_POLICY_VERSION:
+    if (
+        expected_policy_version is not None
+        and policy_version != expected_policy_version
+    ):
         raise ValidationError("invalid assessment payload")
     consent_value = Consent(accepted=True, policy_version=policy_version)
 

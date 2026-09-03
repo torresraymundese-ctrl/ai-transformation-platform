@@ -2,14 +2,15 @@
 
 from dataclasses import replace
 from datetime import datetime, timedelta
+from decimal import Decimal
 import hashlib
 import json
 import sqlite3
-import uuid
 
 from bs4 import BeautifulSoup
 import pytest
 
+import blueprints.public_catalog as public_catalog_blueprint
 import catalog_content_repository as catalog
 from content_clock import SHANGHAI
 from content_contracts import CaseMetric, ContentBlock, ContentDraft, ContentRelation
@@ -22,6 +23,18 @@ from publishing_service import (
     publish_content,
     publish_due_content,
     schedule_content,
+)
+from rule_release_repository import (
+    copy_active_release,
+    load_release_draft,
+    save_release_draft,
+)
+from rule_release_service import publish_release
+from tests.assessment_flow_helpers import (
+    FLOW_NOW,
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
 )
 
 
@@ -312,6 +325,127 @@ def published_services(client, db):
     return client
 
 
+def test_active_service_order_ignores_mutable_sort_order(
+    published_services, db
+):
+    page = PageRequest(1, 50)
+    before = tuple(item.code for item in catalog.public_services(page, NOW).items)
+
+    db.execute(
+        "UPDATE services SET sort_order=1000-sort_order "
+        "WHERE status='published'"
+    )
+    db.commit()
+
+    after = tuple(item.code for item in catalog.public_services(page, NOW).items)
+    assert after == before
+
+
+def test_active_service_order_switches_with_published_release(
+    published_services,
+):
+    page = PageRequest(1, 50)
+    before = tuple(item.code for item in catalog.public_services(page, NOW).items)
+    release_id = copy_active_release(
+        "v2.1-service-order",
+        "Service order",
+        "test-admin",
+        FLOW_NOW,
+    )
+    draft = load_release_draft(release_id)
+    reordered = replace(
+        draft,
+        services=(
+            replace(draft.services[1], sort_order=1),
+            replace(draft.services[0], sort_order=2),
+            *draft.services[2:],
+        ),
+    )
+    next_lock = save_release_draft(
+        release_id, draft.lock_version, reordered, FLOW_NOW
+    )
+    publish_release(
+        release_id,
+        next_lock,
+        "test-admin",
+        FLOW_NOW + timedelta(minutes=1),
+    )
+
+    after = tuple(item.code for item in catalog.public_services(page, NOW).items)
+    assert after == (before[1], before[0], *before[2:])
+
+
+@pytest.mark.parametrize("target", ("industry", "department", "pain"))
+def test_active_service_facets_require_published_core_codes(
+    published_services, db, target
+):
+    item = _service_item(db, "knowledge_assistant_pilot", "published")
+    release = load_release_draft(1)
+    scenarios = tuple(
+        scenario
+        for scenario in release.scenarios
+        if scenario.service_code == "knowledge_assistant_pilot"
+    )
+    if target == "industry":
+        codes = {code for scenario in scenarios for code in scenario.branch_codes}
+        placeholders = ",".join("?" for _ in codes)
+        db.execute(
+            f"UPDATE industries SET status='archived' WHERE code IN ({placeholders})",
+            tuple(codes),
+        )
+        removed_labels = {
+            industry.label for industry in release.industries
+            if industry.code in codes
+        }
+    else:
+        links = tuple(
+            link
+            for scenario in scenarios
+            for link in (
+                scenario.department_links
+                if target == "department"
+                else scenario.pain_links
+            )
+        )
+        table = "departments" if target == "department" else "pain_points"
+        for link in links:
+            db.execute(
+                f"UPDATE {table} SET status='archived' WHERE code=? "
+                "AND industry_id=(SELECT id FROM industries WHERE code=?)",
+                (link.code, link.branch_code),
+            )
+        removed_labels = {
+            value.label
+            for industry in release.industries
+            for value in (
+                industry.departments
+                if target == "department"
+                else industry.pain_points
+            )
+            if any(
+                link.branch_code == industry.code and link.code == value.code
+                for link in links
+            )
+        }
+    db.commit()
+
+    projection = catalog.public_service(item["slug"], NOW)
+    response = published_services.get(f"/service-packages/{item['slug']}")
+    if target == "pain":
+        assert projection is not None
+        assert projection["pains"] == ()
+        assert response.status_code == 200
+        rendered = _page(response).get_text(" ", strip=True)
+        assert all(label not in rendered for label in removed_labels)
+    else:
+        assert projection is None
+        assert response.status_code == 404
+        assert "knowledge_assistant_pilot" not in {
+            service.code
+            for service in catalog.public_services(PageRequest(1, 50), NOW).items
+        }
+
+
 def test_008_migration_allows_exact_service_owner_and_seed_is_explicit(db):
     versions = tuple(row[0] for row in db.execute(
         "SELECT version FROM schema_migrations ORDER BY version"
@@ -466,6 +600,7 @@ def test_public_service_reads_one_sqlite_snapshot_during_concurrent_replacement(
     db.commit()
 
     original_get_db = catalog.models.get_db
+    original_active_rule_bundle = catalog._active_rule_bundle
 
     def replace_revision_and_authority():
         writer = original_get_db()
@@ -495,6 +630,15 @@ def test_public_service_reads_one_sqlite_snapshot_during_concurrent_replacement(
         original_get_db(), replace_revision_and_authority
     )
     monkeypatch.setattr(catalog.models, "get_db", lambda: interleaved)
+    monkeypatch.setattr(
+        catalog,
+        "_active_rule_bundle",
+        lambda connection: original_active_rule_bundle(
+            connection._connection
+            if isinstance(connection, _InterleavingReadConnection)
+            else connection
+        ),
+    )
     if surface == "list":
         page = catalog.public_services(PageRequest(1, 20), NOW)
         first_projection = next(
@@ -520,7 +664,7 @@ def test_public_service_reads_one_sqlite_snapshot_during_concurrent_replacement(
         later_projection = catalog.public_service("foundation-workshop", NOW)
         assert later_projection is not None
         later_pair = (later_projection["title"], later_projection["budget"])
-    assert later_pair == (replacement_title, new_budget)
+    assert later_pair == (replacement_title, old_budget)
 
 
 def test_service_projection_hides_a_persisted_legacy_case_relation(db):
@@ -639,11 +783,12 @@ def test_service_due_relation_publish_rechecks_case_completeness_and_isolates(
 
 
 def test_six_services_project_exact_codes_but_render_only_ordered_chinese_facets(
-    published_services,
+    published_services, db,
 ):
-    maturity_labels = {
-        "explore": "探索", "pilot": "试点", "scale": "规模化", "collaborate": "协同",
-    }
+    active_id = db.execute(
+        "SELECT assessment_version_id FROM active_assessment_version WHERE singleton_id=1"
+    ).fetchone()[0]
+    maturity_labels = load_release_draft(active_id).public_labels.maturities
     for code, expected in SERVICE_FACETS.items():
         response = published_services.get(f"/service-packages/{code.replace('_', '-')}")
         document = _page(response)
@@ -695,7 +840,7 @@ def test_six_services_project_exact_codes_but_render_only_ordered_chinese_facets
 
 
 def test_service_detail_formats_budget_weeks_fixed_labels_and_no_raw_values(
-    published_services,
+    published_services, db,
 ):
     expected = {
         "foundation_workshop": ("20,000—50,000 元", "2—4 周", "基础准备", ("低",)),
@@ -705,6 +850,11 @@ def test_service_detail_formats_budget_weeks_fixed_labels_and_no_raw_values(
         "data_insight": ("100,000—250,000 元", "8—16 周", "标准交付", ("中", "高")),
         "industry_integration": ("200,000—500,000 元", "12—24 周", "集成交付", ("高",)),
     }
+    active_id = db.execute(
+        "SELECT assessment_version_id FROM active_assessment_version WHERE singleton_id=1"
+    ).fetchone()[0]
+    integration_labels = load_release_draft(active_id).public_labels.integrations
+    fixed_integration_codes = {"低": "low", "中": "medium", "高": "high"}
     for code, (budget, weeks, category, integration) in expected.items():
         document = _page(published_services.get(f"/service-packages/{code.replace('_', '-')}"))
         assert document.select_one('[data-service-section="budget"]').get_text(" ", strip=True).endswith(budget)
@@ -712,17 +862,141 @@ def test_service_detail_formats_budget_weeks_fixed_labels_and_no_raw_values(
         assert document.select_one("[data-service-category]").get_text(strip=True) == category
         projection = catalog.public_service(code.replace("_", "-"), NOW)
         assert projection is not None
-        assert tuple(item.code for item in projection["integration"]) == tuple(
-            {"低": "low", "中": "medium", "高": "high"}[label]
-            for label in integration
-        )
+        expected_codes = tuple(fixed_integration_codes[label] for label in integration)
+        assert tuple(item.code for item in projection["integration"]) == expected_codes
         assert tuple(
             node.get_text(strip=True) for node in document.select("[data-service-integration]")
-        ) == integration
+        ) == tuple(integration_labels[code] for code in expected_codes)
         visible = document.get_text(" ", strip=True)
         assert code not in visible
         assert "_json" not in visible.lower()
         assert "[\"" not in visible
+
+
+def test_active_release_preserves_large_exact_decimal_budgets_in_list_and_detail(
+    published_services, db
+):
+    minimum = Decimal("20000.12345678901234567890123456789")
+    maximum = Decimal("1E+900")
+    release_id = copy_active_release(
+        "v2.1-exact-decimal-service",
+        "Exact decimal service",
+        "test-admin",
+        FLOW_NOW,
+    )
+    draft = load_release_draft(release_id)
+    source = next(
+        service for service in draft.services
+        if service.code == "foundation_workshop"
+    )
+    changed = replace(source, min_budget=minimum, max_budget=maximum)
+    edited = replace(
+        draft,
+        services=tuple(
+            changed if service.code == changed.code else service
+            for service in draft.services
+        ),
+    )
+    lock_version = save_release_draft(
+        release_id, draft.lock_version, edited, FLOW_NOW
+    )
+    publish_release(
+        release_id,
+        lock_version,
+        "test-admin",
+        FLOW_NOW + timedelta(minutes=1),
+    )
+
+    projection = catalog.public_service("foundation-workshop", NOW)
+    page_projection = catalog.public_services(PageRequest(1, 20), NOW)
+    assert projection is not None
+    assert projection["budget"] == (minimum, maximum)
+    card = next(
+        item for item in page_projection.items
+        if item.code == "foundation_workshop"
+    )
+    assert card.budget == (minimum, maximum)
+
+    response = published_services.get("/service-packages/foundation-workshop")
+    document = _page(response)
+    displayed = document.select_one(
+        '[data-service-section="budget"]'
+    ).get_text(" ", strip=True)
+    assert displayed.endswith(
+        f"{format(minimum, ',f')}—{format(maximum, ',f')} 元"
+    )
+    assert "E+" not in displayed
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum"),
+    (
+        (Decimal("1"), 2),
+        (1, Decimal("2")),
+        (Decimal("NaN"), Decimal("2")),
+        (Decimal("1"), Decimal("Infinity")),
+        (Decimal("1" * 257), Decimal("1" * 257)),
+        (Decimal("1"), Decimal("1E+2048")),
+        (Decimal("1E-2048"), Decimal("1")),
+    ),
+    ids=(
+        "decimal-int-mixed",
+        "int-decimal-mixed",
+        "decimal-nan",
+        "decimal-infinity",
+        "decimal-over-256-digits",
+        "decimal-positive-expansion-over-2048",
+        "decimal-negative-expansion-over-2048",
+    ),
+)
+def test_service_authority_budget_range_rejects_mixed_or_unbounded_decimals(
+    minimum, maximum
+):
+    assert catalog.valid_service_budget_range(minimum, maximum) is False
+
+
+class _BudgetInt(int):
+    pass
+
+
+class _BudgetFloat(float):
+    pass
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        False,
+        _BudgetInt(1),
+        _BudgetFloat(1.0),
+        0,
+        -1,
+        0.0,
+        float("nan"),
+        float("inf"),
+        Decimal("0"),
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("1" * 257),
+        Decimal("1E+2048"),
+        Decimal("1E-2048"),
+    ),
+)
+def test_public_budget_formatters_reject_nonexact_nonpositive_or_unbounded_values(
+    value,
+):
+    with pytest.raises((TypeError, ValueError)):
+        public_catalog_blueprint._format_cny_amount(value)
+    with pytest.raises((TypeError, ValueError)):
+        public_catalog_blueprint._format_budget_amount(value)
+
+
+def test_public_budget_formatters_preserve_bounded_large_exact_decimal():
+    value = Decimal("1E+900")
+    expected = format(value, ",f")
+
+    assert public_catalog_blueprint._format_cny_amount(value) == f"¥{expected}"
+    assert public_catalog_blueprint._format_budget_amount(value) == expected
 
 
 def test_delivery_authority_fields_and_optional_relations_render_without_placeholders(
@@ -814,6 +1088,99 @@ def test_service_authority_injection_never_falls_back_to_mutable_core_tables(db)
     ) is None
 
 
+def test_public_scenario_and_service_authority_switch_only_with_active_snapshot(
+    published_services, db
+):
+    service_item = _service_item(db, "foundation_workshop", "published")
+    scenario_rows = db.execute(
+        "SELECT ci.*,g.scenario_id,s.code FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios s ON s.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "ORDER BY s.sort_order,s.id"
+    ).fetchall()
+    scenario_item, before_scenario = next(
+        (item, projection)
+        for item in scenario_rows
+        if (projection := catalog.public_scenario(item["slug"], NOW)) is not None
+    )
+    before_service = catalog.public_service(service_item["slug"], NOW)
+    assert before_service is not None
+
+    release_id = copy_active_release(
+        "v2.1-public-authority", "Public authority", "test-admin", FLOW_NOW
+    )
+    draft = load_release_draft(release_id)
+    source_service = next(
+        item for item in draft.services if item.code == "foundation_workshop"
+    )
+    source_scenario = next(
+        item for item in draft.scenarios if item.code == scenario_item["code"]
+    )
+    replacement_risk = next(
+        code
+        for code in draft.public_labels.risk_labels
+        if code not in source_scenario.risk_codes
+    )
+    changed_service = replace(
+        source_service,
+        min_budget=source_service.min_budget + 1234,
+        support_description="活动快照支持说明",
+        public_disclaimer="活动快照公开声明",
+    )
+    changed_scenario = replace(source_scenario, risk_codes=(replacement_risk,))
+    changed = replace(
+        draft,
+        services=tuple(
+            changed_service if item.code == changed_service.code else item
+            for item in draft.services
+        ),
+        scenarios=tuple(
+            changed_scenario if item.code == changed_scenario.code else item
+            for item in draft.scenarios
+        ),
+    )
+    next_lock = save_release_draft(
+        release_id, draft.lock_version, changed, FLOW_NOW
+    )
+
+    staged_service = catalog.public_service(service_item["slug"], NOW)
+    staged_scenario = catalog.public_scenario(scenario_item["slug"], NOW)
+    assert staged_service["budget"] == before_service["budget"]
+    assert staged_scenario["risks"] == before_scenario["risks"]
+
+    publish_release(
+        release_id, next_lock, "test-admin", FLOW_NOW + timedelta(minutes=1)
+    )
+    active_service = catalog.public_service(service_item["slug"], NOW)
+    active_scenario = catalog.public_scenario(scenario_item["slug"], NOW)
+
+    assert active_service["title"] == before_service["title"]
+    assert active_service["budget"][0] == changed_service.min_budget
+    assert active_service["support_description"] == "活动快照支持说明"
+    assert active_service["public_disclaimer"] == "活动快照公开声明"
+    assert tuple(risk["label"] for risk in active_scenario["risks"]) == (
+        draft.public_labels.risk_labels[replacement_risk],
+    )
+
+    db.execute(
+        "UPDATE services SET min_budget=1,support_description='可变表污染',"
+        "public_disclaimer='可变表污染' WHERE id=?",
+        (service_item["service_id"],),
+    )
+    db.execute(
+        "UPDATE scenarios SET risk_codes_json='[\"data_security\"]' WHERE id=?",
+        (scenario_item["scenario_id"],),
+    )
+    db.commit()
+    stable_service = catalog.public_service(service_item["slug"], NOW)
+    stable_scenario = catalog.public_scenario(scenario_item["slug"], NOW)
+    assert stable_service["budget"] == active_service["budget"]
+    assert stable_service["support_description"] == active_service["support_description"]
+    assert stable_service["public_disclaimer"] == active_service["public_disclaimer"]
+    assert stable_scenario["risks"] == active_scenario["risks"]
+
+
 def test_malformed_injected_service_authority_fails_closed_without_type_leak(db):
     _publish_scenario_content(db)
     current = _publish_service(db, "foundation_workshop")
@@ -853,7 +1220,7 @@ def test_top_level_malformed_service_authority_injection_fails_closed(db):
         ) is None
 
 
-def test_service_list_omits_one_invalid_authority_without_hiding_healthy_services(
+def test_service_list_ignores_mutable_delivery_rows_after_snapshot_publication(
     published_services, db,
 ):
     invalid = _service_item(db, "foundation_workshop", "published")
@@ -873,10 +1240,10 @@ def test_service_list_omits_one_invalid_authority_without_hiding_healthy_service
 
     assert response.status_code == 200
     assert healthy["title"] in titles
-    assert invalid["title"] not in titles
+    assert invalid["title"] in titles
     assert published_services.get(
         f"/service-packages/{invalid['slug']}"
-    ).status_code == 404
+    ).status_code == 200
     assert published_services.get(
         f"/service-packages/{healthy['slug']}"
     ).status_code == 200
@@ -1041,7 +1408,12 @@ def test_formal_service_publish_rejects_invalid_shared_authority_without_replaci
         "SELECT COUNT(*) FROM content_audit_events WHERE content_item_id=? AND event_code='content_published'",
         (revision_id,),
     ).fetchone()[0] == 0
-    assert client.get(f"/service-packages/{current['slug']}").status_code == 404
+    expected_status = (
+        404
+        if source in {"service_code", "scenario_code", "department"}
+        else 200
+    )
+    assert client.get(f"/service-packages/{current['slug']}").status_code == expected_status
 
 
 def test_revision_local_maturity_failure_keeps_old_public_service_online(client, db):
@@ -1095,7 +1467,7 @@ def test_due_shared_authority_failure_does_not_replace_revision_or_write_success
         "WHERE content_item_id=? AND event_code='content_published'",
         (revision_id,),
     ).fetchone()[0] == 0
-    assert client.get(f"/service-packages/{current['slug']}").status_code == 404
+    assert client.get(f"/service-packages/{current['slug']}").status_code == 200
 
 
 def test_due_service_validation_failure_keeps_old_revision_and_has_no_success_audit(client, db):
@@ -1124,42 +1496,22 @@ def test_due_service_validation_failure_keeps_old_revision_and_has_no_success_au
 
 
 def _complete_assessment(client):
-    client.application.config.update({
-        "PRIVACY_PROCESSOR_NAME": "测试处理者",
-        "PRIVACY_CONTACT": "privacy@example.invalid",
-        "PRIVACY_POLICY_URL": "https://example.invalid/privacy",
-    })
-    config = client.get("/api/v2/assessment/config/manufacturing").get_json()
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(client)
+    payload = bound_completion_payload(
+        config, submission_key="00000000-0000-4000-8000-000000000021"
+    )
+    payload["contact"] = {
+        "company_name": "示例企业",
+        "contact_name": "张先生",
+        "phone": "13800138000",
+        "email": "private@example.invalid",
+        "wechat": "private-wechat",
+    }
+    payload["attribution"] = {"source": "website_assessment"}
     response = client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": str(uuid.uuid4()),
-            "assessment": {
-                "schema_version": "2.0",
-                "profile": {
-                    "branch_code": "manufacturing", "subbranch_code": "discrete_manufacturing",
-                    "department_code": "production", "company_size_code": "50_200",
-                    "pain_codes": ["production_reporting"],
-                },
-                "answers": {code: "level_3" for code in (
-                    "business_value_frequency", "business_value_scope", "process_documentation",
-                    "process_stability", "data_availability", "data_quality", "systems_foundation",
-                    "systems_automation", "organization_owner", "organization_adoption",
-                    "delivery_budget", "delivery_timeline",
-                )},
-                "roi_choices": {
-                    "headcount": "6_20", "monthly_hours": "20_80",
-                    "monthly_cost": "8000_15000", "loss_factor": "normal",
-                    "budget": "50000_200000",
-                },
-            },
-            "contact": {
-                "company_name": "示例企业", "contact_name": "张先生", "phone": "13800138000",
-                "email": "private@example.invalid", "wechat": "private-wechat",
-            },
-            "consent": {"accepted": True, "policy_version": "2026-08-19"},
-            "attribution": {"source": "website_assessment"},
-        },
+        json=payload,
         headers={"X-CSRF-Token": config["csrf_token"]},
     )
     assert response.status_code == 200

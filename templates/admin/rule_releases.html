@@ -14,7 +14,7 @@
 </form>
 <section class="card admin-section">
 {% if page.items %}<table><thead><tr><th>版本代码</th><th>名称</th><th>状态</th><th>锁版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
-{% for item in page.items %}<tr data-release-id="{{ item.id }}"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.lock_version }}</td><td>{{ item.updated_at }}</td><td><a href="/admin/rules/{{ item.id }}">{% if item.status == 'draft' %}编辑{% else %}查看{% endif %}</a></td></tr>{% endfor %}
+{% for item in page.items %}<tr data-release-id="{{ item.id }}"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.lock_version }}</td><td>{{ item.updated_at }}</td><td><a href="{{ url_for('admin.admin_rule_edit', release_id=item.id) }}">{% if item.status == 'draft' %}编辑{% else %}查看{% endif %}</a>{% if item.status == 'draft' %} <a href="{{ url_for('admin.admin_rule_publish', release_id=item.id) }}">发布</a>{% endif %}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p class="empty">暂无规则版本。</p>{% endif %}
 </section>
 {% if page.total_pages > 1 %}<nav aria-label="分页"><span data-page-current>{{ page.page }} / {{ page.total_pages }}</span>{% if page.page > 1 %}<a data-page="previous" href="{{ url_for('admin.admin_rule_releases', status=selected_status or '', per_page=page.per_page, page=page.page-1) }}">上一页</a>{% endif %}{% if page.page < page.total_pages %}<a data-page="next" href="{{ url_for('admin.admin_rule_releases', status=selected_status or '', per_page=page.per_page, page=page.page+1) }}">下一页</a>{% endif %}</nav>{% endif %}

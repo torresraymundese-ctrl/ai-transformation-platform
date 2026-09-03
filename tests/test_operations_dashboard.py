@@ -9,6 +9,7 @@ import pytest
 import models
 from content_clock import SHANGHAI
 from pagination import PageRequest
+from tests.assessment_flow_helpers import ensure_test_legal_bundle
 
 
 NOW = datetime(2026, 9, 2, 0, 30, tzinfo=SHANGHAI)
@@ -325,6 +326,7 @@ def test_workflow_counts_freeze_shanghai_boundaries_and_privacy_rules(
     db, admin_client
 ):
     repository = _operations()
+    privacy_id = ensure_test_legal_bundle()["privacy"]
     pending = _insert_lead(db, 1, status="pending_contact")
     new = _insert_lead(db, 2, status="new")
     today_start = _insert_lead(db, 3, status="contacted", followup="2026-09-02 00:00:00")
@@ -348,9 +350,10 @@ def test_workflow_counts_freeze_shanghai_boundaries_and_privacy_rules(
     )
     db.execute(
         "INSERT INTO lead_consents "
-        "(lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,'v1','2026-09-01 10:00:00','private-7','hidden-consent')",
-        (hidden,),
+        "(lead_id,policy_version,consented_at,source,identity_hash,legal_version_id) "
+        "VALUES (?,'test-privacy-v1','2026-09-01 10:00:00',"
+        "'private-7','hidden-consent',?)",
+        (hidden, privacy_id),
     )
     db.execute(
         "INSERT INTO appointments "

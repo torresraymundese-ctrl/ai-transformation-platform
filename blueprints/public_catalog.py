@@ -9,6 +9,7 @@ import case_repository as cases
 from content_clock import shanghai_now
 from pagination import parse_pagination
 import resource_repository as resources
+from service_authority import valid_service_decimal
 
 
 bp = Blueprint("public_catalog", __name__)
@@ -46,16 +47,24 @@ def _group_exact_integer(value):
 
 def _format_cny_amount(value):
     """Render one validated public budget without rounding or exponent notation."""
-    if type(value) not in (int, float):
-        raise TypeError("budget amount must be an exact int or float")
+    if type(value) not in (int, float, Decimal):
+        raise TypeError("budget amount must be an exact number")
     if type(value) is int:
+        if value <= 0:
+            raise ValueError("budget amount must be positive")
         suffix = ""
         if value >= 10000 and value % 10000 == 0:
             value //= 10000
             suffix = "万"
         return f"¥{_group_exact_integer(value)}{suffix}"
     source = str(value)
-    number = Decimal(source)
+    number = value if type(value) is Decimal else Decimal(source)
+    if (
+        not number.is_finite()
+        or number <= 0
+        or (type(value) is Decimal and not valid_service_decimal(value))
+    ):
+        raise ValueError("budget amount must be finite, positive, and bounded")
     suffix = ""
     if "e" not in source.lower() and number >= 10000 and number % 10000 == 0:
         number /= 10000
@@ -68,6 +77,29 @@ def _format_cny_amount(value):
     if separator:
         grouped = f"{grouped}.{fraction}"
     return f"¥{grouped}{suffix}"
+
+
+def _format_budget_amount(value):
+    """Render a service budget exactly, retaining the legacy whole-number form."""
+    if type(value) is int:
+        if value <= 0:
+            raise ValueError("budget amount must be positive")
+        return _group_exact_integer(value)
+    if type(value) not in (float, Decimal):
+        raise TypeError("budget amount must be an exact number")
+    number = value if type(value) is Decimal else Decimal(str(value))
+    if (
+        not number.is_finite()
+        or number <= 0
+        or (type(value) is Decimal and not valid_service_decimal(value))
+    ):
+        raise ValueError("budget amount must be finite, positive, and bounded")
+    plain = format(number, "f")
+    if "." in plain:
+        plain = plain.rstrip("0").rstrip(".")
+    whole, separator, fraction = plain.partition(".")
+    grouped = _group_decimal_whole(whole)
+    return f"{grouped}.{fraction}" if separator else grouped
 
 
 @bp.get("/industries")
@@ -131,6 +163,7 @@ def service_package_detail(slug):
         return redirect(f"/service-packages/{service['slug']}", code=301)
     return render_template(
         "service_package_detail.html", service=service,
+        format_budget_amount=_format_budget_amount,
         canonical=_canonical(f"/service-packages/{service['slug']}"),
     )
 

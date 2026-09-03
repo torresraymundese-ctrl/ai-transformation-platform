@@ -3,7 +3,6 @@
 from datetime import datetime
 import hashlib
 from urllib.parse import urlsplit
-import uuid
 
 from bs4 import BeautifulSoup
 import pytest
@@ -14,6 +13,12 @@ import content_repository
 from content_clock import SHANGHAI
 from publishing_service import archive_content, publish_content, schedule_content
 from source_url_checker import FetchResult
+from tests.assessment_flow_helpers import (
+    FLOW_NOW,
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 NOW = datetime(2026, 8, 25, 10, 0, tzinfo=SHANGHAI)
@@ -196,55 +201,28 @@ def _ready_pdf_asset(db):
 
 
 def _complete_matrix_assessment(client):
-    client.application.config.update(
-        {
-            "PRIVACY_PROCESSOR_NAME": "测试处理者",
-            "PRIVACY_CONTACT": "privacy@example.invalid",
-            "PRIVACY_POLICY_URL": "https://example.invalid/privacy",
-        }
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(client)
+    payload = bound_completion_payload(
+        config, submission_key="00000000-0000-4000-8000-000000000011"
     )
-    config = client.get("/api/v2/assessment/config/manufacturing")
-    assert config.status_code == 200
+    payload["contact"] = {
+        "company_name": "矩阵示例企业",
+        "contact_name": "张先生",
+        "phone": "13800138000",
+        "email": "matrix@example.invalid",
+        "wechat": "matrix-wechat",
+    }
+    payload["attribution"] = {
+        "source": "website_assessment",
+        "utm_source": "organic",
+        "utm_medium": "website",
+        "utm_campaign": "task-11-url-matrix",
+    }
     response = client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": str(uuid.uuid4()),
-            "assessment": {
-                "schema_version": "2.0",
-                "profile": {
-                    "branch_code": "manufacturing",
-                    "subbranch_code": "discrete_manufacturing",
-                    "department_code": "production",
-                    "company_size_code": "50_200",
-                    "pain_codes": ["production_reporting"],
-                },
-                "answers": {
-                    code: "level_3" for code in ASSESSMENT_QUESTION_CODES
-                },
-                "roi_choices": {
-                    "headcount": "6_20",
-                    "monthly_hours": "20_80",
-                    "monthly_cost": "8000_15000",
-                    "loss_factor": "normal",
-                    "budget": "50000_200000",
-                },
-            },
-            "contact": {
-                "company_name": "矩阵示例企业",
-                "contact_name": "张先生",
-                "phone": "13800138000",
-                "email": "matrix@example.invalid",
-                "wechat": "matrix-wechat",
-            },
-            "consent": {"accepted": True, "policy_version": "2026-08-19"},
-            "attribution": {
-                "source": "website_assessment",
-                "utm_source": "organic",
-                "utm_medium": "website",
-                "utm_campaign": "task-11-url-matrix",
-            },
-        },
-        headers={"X-CSRF-Token": config.get_json()["csrf_token"]},
+        json=payload,
+        headers={"X-CSRF-Token": config["csrf_token"]},
     )
     assert response.status_code == 200
     return response.get_json()["assessment_id"]
@@ -767,40 +745,31 @@ def test_privacy_policy_link_has_no_destination_before_validated_config(client):
 
 
 @pytest.mark.parametrize(
-    ("policy_url", "expected_status"),
+    "policy_url",
     (
-        ("https://example.invalid/privacy", 200),
-        ("http://example.invalid/privacy", 503),
-        ("https://example.invalid/%ZZ", 503),
+        "https://example.invalid/privacy",
+        "http://example.invalid/privacy",
+        "https://example.invalid/%ZZ",
     ),
 )
-def test_assessment_config_exposes_only_validated_https_policy_url(
-    client, policy_url, expected_status
-):
+def test_assessment_config_exposes_only_bound_internal_policy_path(client, policy_url):
+    ensure_test_legal_bundle()
     client.application.config.update(
         {
             "PRIVACY_PROCESSOR_NAME": "测试处理者",
             "PRIVACY_CONTACT": "privacy@example.invalid",
             "PRIVACY_POLICY_URL": policy_url,
+            "ASSESSMENT_FLOW_NOW_PROVIDER": lambda: FLOW_NOW,
         }
     )
 
     response = client.get("/api/v2/assessment/config/manufacturing")
 
-    assert response.status_code == expected_status
-    if expected_status == 200:
-        assert response.get_json()["privacy_disclosure"]["policy_url"] == policy_url
-        return
-    assert response.get_json() == {
-        "error": "assessment temporarily unavailable",
-        "recoverable": True,
-    }
-    assert policy_url.encode() not in response.data
-    policy_link = _page(client.get("/assessment")).select_one(
-        "#privacy-policy-link"
+    assert response.status_code == 200
+    assert response.get_json()["privacy_disclosure"]["policy_url"].startswith(
+        "/legal/privacy/test-privacy-"
     )
-    assert policy_link is not None
-    assert not policy_link.has_attr("href")
+    assert policy_url.encode() not in response.data
 
 
 def test_legacy_article_redirect_requires_current_clean_published_mapping(

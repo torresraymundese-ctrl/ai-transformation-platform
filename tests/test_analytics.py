@@ -4,6 +4,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Barrier, Lock
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -14,6 +15,12 @@ import models
 import report_pdf
 from blueprints import assessment as assessment_blueprint
 from conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
+from tests.assessment_flow_helpers import (
+    FLOW_NOW,
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 CLIENT_EVENTS = (
@@ -130,44 +137,18 @@ def _assert_exact_private_no_store(response):
 
 
 def _complete_assessment(client):
-    client.application.config.update(
-        PRIVACY_PROCESSOR_NAME="测试处理者",
-        PRIVACY_CONTACT="privacy@example.invalid",
-        PRIVACY_POLICY_URL="https://example.invalid/privacy",
-    )
-    config = client.get("/api/v2/assessment/config/manufacturing")
-    assert config.status_code == 200
-    csrf = config.get_json()["csrf_token"]
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(client)
+    csrf = config["csrf_token"]
+    payload = bound_completion_payload(config, submission_key=str(uuid.uuid4()))
+    payload["contact"] = {
+        "company_name": "埋点测试企业",
+        "contact_name": "埋点测试联系人",
+        "phone": "13800138000",
+    }
     response = client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": str(uuid.uuid4()),
-            "assessment": {
-                "schema_version": "2.0",
-                "profile": {
-                    "branch_code": "manufacturing",
-                    "subbranch_code": "discrete_manufacturing",
-                    "department_code": "production",
-                    "company_size_code": "50_200",
-                    "pain_codes": ["production_reporting"],
-                },
-                "answers": {code: "level_3" for code in QUESTION_CODES},
-                "roi_choices": {
-                    "headcount": "6_20",
-                    "monthly_hours": "20_80",
-                    "monthly_cost": "8000_15000",
-                    "loss_factor": "normal",
-                    "budget": "50000_200000",
-                },
-            },
-            "contact": {
-                "company_name": "埋点测试企业",
-                "contact_name": "埋点测试联系人",
-                "phone": "13800138000",
-            },
-            "consent": {"accepted": True, "policy_version": "2026-08-19"},
-            "attribution": {"source": "website_assessment"},
-        },
+        json=payload,
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 200
@@ -493,7 +474,11 @@ def test_session_analytics_identifier_stores_only_a_sha256_hash(
 ):
     random_bytes = b"task-12-random-session-analytics-id"
     expected_hash = hashlib.sha256(random_bytes).hexdigest()
-    monkeypatch.setattr(analytics_repository.secrets, "token_bytes", lambda size: random_bytes)
+    monkeypatch.setattr(
+        analytics_repository,
+        "secrets",
+        SimpleNamespace(token_bytes=lambda size: random_bytes),
+    )
     headers = _authorize_events(client)
 
     page = client.get("/")
@@ -520,16 +505,20 @@ def test_session_analytics_identifier_stores_only_a_sha256_hash(
 def test_successful_config_bootstrap_establishes_analytics_session_hash(
     client, monkeypatch
 ):
+    ensure_test_legal_bundle()
     client.application.config.update(
         PRIVACY_PROCESSOR_NAME="测试处理者",
         PRIVACY_CONTACT="privacy@example.invalid",
         PRIVACY_POLICY_URL="https://example.invalid/privacy",
+        ASSESSMENT_FLOW_NOW_PROVIDER=lambda: FLOW_NOW,
     )
     _authorize_events(client)
     random_bytes = b"task-12-config-session-analytics-id"
     expected_hash = hashlib.sha256(random_bytes).hexdigest()
     monkeypatch.setattr(
-        analytics_repository.secrets, "token_bytes", lambda size: random_bytes
+        analytics_repository,
+        "secrets",
+        SimpleNamespace(token_bytes=lambda size: random_bytes),
     )
 
     response = client.get("/api/v2/assessment/config/manufacturing")
@@ -557,7 +546,9 @@ def test_page_bootstrap_prevents_parallel_first_events_from_splitting_identity(
             return bytes([random_call_count]) * size
 
     monkeypatch.setattr(
-        analytics_repository.secrets, "token_bytes", unique_random_bytes
+        analytics_repository,
+        "secrets",
+        SimpleNamespace(token_bytes=unique_random_bytes),
     )
     page = client.get("/")
     assert page.status_code == 200
@@ -598,7 +589,9 @@ def test_unmatched_404_bootstraps_private_analytics_and_footer_post(
     random_bytes = b"task-12-unmatched-error-analytics-id"
     expected_hash = hashlib.sha256(random_bytes).hexdigest()
     monkeypatch.setattr(
-        analytics_repository.secrets, "token_bytes", lambda size: random_bytes
+        analytics_repository,
+        "secrets",
+        SimpleNamespace(token_bytes=lambda size: random_bytes),
     )
 
     response = client.get("/definitely-unmatched-task-12-page")
@@ -653,7 +646,9 @@ def test_unmatched_404_prevents_parallel_first_footer_events_splitting_hash(
             return bytes([random_call_count]) * size
 
     monkeypatch.setattr(
-        analytics_repository.secrets, "token_bytes", unique_random_bytes
+        analytics_repository,
+        "secrets",
+        SimpleNamespace(token_bytes=unique_random_bytes),
     )
     response = client.get("/another-unmatched-task-12-page")
     assert response.status_code == 404

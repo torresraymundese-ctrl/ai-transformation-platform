@@ -25,9 +25,13 @@ import publishing_repository
 import publishing_service
 from publishing_repository import ContentConflictError, ContentNotFoundError
 from service_authority import (
+    INTEGRATION_CODES,
     ServiceAuthority,
+    ServiceDeliverable,
     ServiceFacet,
+    ServiceScenario,
     load_service_authority,
+    valid_service_budget_range,
     valid_service_authority,
 )
 
@@ -234,6 +238,201 @@ class ScenarioAuthority:
     fallback_only: bool
 
 
+def _active_rule_bundle(db):
+    """Read the one strict active release through the caller's transaction."""
+    from rule_release_runtime import RuleRuntimeError, load_active_rule_bundle
+
+    try:
+        return load_active_rule_bundle(db, "manufacturing")
+    except RuleRuntimeError:
+        return None
+
+
+def _active_scenario_authority(db, bundle, scenario_id):
+    row = db.execute(
+        "SELECT id,code,status FROM scenarios WHERE id=?", (scenario_id,)
+    ).fetchone()
+    if row is None or row["status"] != "published":
+        return None
+    source = next(
+        (item for item in bundle.release.scenarios if item.code == row["code"]), None
+    )
+    if source is None:
+        return None
+    return ScenarioAuthority(
+        scenario_id=row["id"],
+        code=source.code,
+        category_code=source.category_code,
+        minimum_business_value=source.minimum_scores["business_value"],
+        minimum_process=source.minimum_scores["process"],
+        minimum_data=source.minimum_scores["data"],
+        minimum_systems=source.minimum_scores["systems"],
+        minimum_organization=source.minimum_scores["organization"],
+        minimum_delivery=source.minimum_scores["delivery"],
+        integration_level=source.integration_level,
+        min_weeks=source.min_weeks,
+        max_weeks=source.max_weeks,
+        risk_codes=tuple(source.risk_codes),
+        fallback_only=source.fallback_only,
+    )
+
+
+def _published_release_facet_keys(db, kind):
+    if kind == "industries":
+        return {
+            row["code"]
+            for row in db.execute(
+                "SELECT code FROM industries WHERE status='published'"
+            )
+        }
+    table = "departments" if kind == "departments" else "pain_points"
+    return {
+        (row["branch_code"], row["code"])
+        for row in db.execute(
+            f"SELECT i.code AS branch_code,value.code FROM {table} value "
+            "JOIN industries i ON i.id=value.industry_id "
+            "WHERE value.status='published' AND i.status='published'"
+        )
+    }
+
+
+def _release_facets(db, release, scenarios, kind):
+    selected = set()
+    published = _published_release_facet_keys(db, kind)
+    if kind == "industries":
+        selected.update(code for scenario in scenarios for code in scenario.branch_codes)
+        candidates = (
+            (industry.code, industry.label)
+            for industry in release.industries
+            if industry.code in published
+        )
+    else:
+        links = tuple(
+            link
+            for scenario in scenarios
+            for link in (
+                scenario.department_links if kind == "departments" else scenario.pain_links
+            )
+        )
+        selected.update((link.branch_code, link.code) for link in links)
+        candidates = tuple(
+            (value.sort_order, industry.sort_order, value.code, value.label)
+            for industry in release.industries
+            for value in (
+                industry.departments if kind == "departments" else industry.pain_points
+            )
+            if (
+                (industry.code, value.code) in selected
+                and (industry.code, value.code) in published
+            )
+        )
+        candidates = (
+            (code, label)
+            for _, _, code, label in sorted(candidates)
+        )
+    result = []
+    seen = set()
+    for code, label in candidates:
+        if code in seen or (kind == "industries" and code not in selected):
+            continue
+        seen.add(code)
+        result.append(ServiceFacet(code, label))
+    return tuple(result)
+
+
+def _active_service_authority(db, bundle, service_id, now):
+    row = db.execute(
+        "SELECT id,code,status FROM services WHERE id=?", (service_id,)
+    ).fetchone()
+    if row is None or row["status"] != "published":
+        return None
+    source = next(
+        (item for item in bundle.release.services if item.code == row["code"]), None
+    )
+    if source is None:
+        return None
+    release_scenarios = tuple(
+        scenario
+        for scenario in bundle.release.scenarios
+        if scenario.service_code == source.code
+    )
+    core_scenarios = {
+        item["code"]: item
+        for item in db.execute(
+            "SELECT id,code,status FROM scenarios WHERE status='published'"
+        )
+    }
+    scenarios = []
+    for release_scenario in release_scenarios:
+        core = core_scenarios.get(release_scenario.code)
+        if core is None:
+            return None
+        identity = (
+            None
+            if release_scenario.fallback_only
+            else _published_scenario_identity(db, core["id"], now)
+        )
+        scenarios.append(
+            ServiceScenario(
+                scenario_id=core["id"],
+                code=release_scenario.code,
+                core_name=release_scenario.public_name,
+                integration_code=release_scenario.integration_level,
+                title=identity["title"] if identity is not None else None,
+                slug=identity["slug"] if identity is not None else None,
+            )
+        )
+    authority = ServiceAuthority(
+        service_id=row["id"],
+        code=source.code,
+        category_code=source.category,
+        public_name=source.public_name,
+        min_budget=source.min_budget,
+        max_budget=source.max_budget,
+        min_weeks=source.min_weeks,
+        max_weeks=source.max_weeks,
+        implementation_steps=tuple(source.implementation_steps),
+        prerequisites=tuple(source.prerequisites),
+        not_included=tuple(source.not_included),
+        acceptance=tuple(source.acceptance),
+        support_days=source.support_days,
+        support_description=source.support_description,
+        public_disclaimer=source.public_disclaimer,
+        deliverables=tuple(
+            ServiceDeliverable(f"{source.code}:{index}", title, None)
+            for index, title in enumerate(source.deliverables, 1)
+        ),
+        scenarios=tuple(scenarios),
+        industries=_release_facets(db, bundle.release, release_scenarios, "industries"),
+        departments=_release_facets(db, bundle.release, release_scenarios, "departments"),
+        pains=_release_facets(db, bundle.release, release_scenarios, "pains"),
+        integration_codes=tuple(
+            code
+            for code in INTEGRATION_CODES
+            if any(item.integration_code == code for item in scenarios)
+        ),
+    )
+    return authority if valid_service_authority(authority) else None
+
+
+def _service_projection_row(authority):
+    return MappingProxyType(
+        {
+            "id": authority.service_id,
+            "code": authority.code,
+            "public_name": authority.public_name,
+            "min_budget": authority.min_budget,
+            "max_budget": authority.max_budget,
+            "min_weeks": authority.min_weeks,
+            "max_weeks": authority.max_weeks,
+            "steps": authority.implementation_steps,
+            "prerequisites": authority.prerequisites,
+            "acceptance": authority.acceptance,
+            "deliverables": tuple(item.title for item in authority.deliverables),
+        }
+    )
+
+
 @dataclass(frozen=True)
 class ServiceCard:
     code: str
@@ -278,7 +477,9 @@ def _names(db, sql, arguments):
     return tuple(row[0] for row in db.execute(sql, arguments))
 
 
-def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, now) -> Page[ScenarioCard]:
+def _public_scenarios(
+    db, filters: ScenarioFilters, page_request: PageRequest, now, rule_bundle=None
+) -> Page[ScenarioCard]:
     clause, arguments = _public_item_where(now)
     joins = [
         "FROM scenarios s JOIN content_groups g ON g.scenario_id=s.id "
@@ -286,31 +487,8 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
     ]
     conditions = [
         "s.status='published'", "ci.entry_type='scenario'", clause,
-        "EXISTS (SELECT 1 FROM scenario_branches visible_branch "
-        "JOIN industry_branches visible_industry_branch ON visible_industry_branch.id=visible_branch.industry_branch_id "
-        "JOIN industries visible_industry ON visible_industry.id=visible_industry_branch.industry_id "
-        "WHERE visible_branch.scenario_id=s.id AND visible_industry_branch.status='published' "
-        "AND visible_industry.status='published' AND trim(visible_industry.name)<>'')",
-        "EXISTS (SELECT 1 FROM scenario_departments visible_department_link "
-        "JOIN departments visible_department ON visible_department.id=visible_department_link.department_id "
-        "WHERE visible_department_link.scenario_id=s.id AND visible_department.status='published' "
-        "AND trim(visible_department.name)<>'')",
     ]
     parameters = list(arguments)
-    if filters.industry:
-        joins.append("JOIN scenario_branches filter_branch ON filter_branch.scenario_id=s.id "
-                     "JOIN industry_branches filter_industry_branch ON filter_industry_branch.id=filter_branch.industry_branch_id "
-                     "JOIN industries filter_industry ON filter_industry.id=filter_industry_branch.industry_id")
-        conditions.append(
-            "filter_industry.code=? AND filter_industry.status='published' "
-            "AND filter_industry_branch.status='published'"
-        )
-        parameters.append(filters.industry)
-    if filters.department:
-        joins.append("JOIN scenario_departments filter_department_link ON filter_department_link.scenario_id=s.id "
-                     "JOIN departments filter_department ON filter_department.id=filter_department_link.department_id")
-        conditions.append("filter_department.code=? AND filter_department.status='published'")
-        parameters.append(filters.department)
     if filters.maturity:
         joins.append("JOIN content_maturity_levels filter_maturity ON filter_maturity.content_item_id=ci.id")
         conditions.append("filter_maturity.maturity_code=?")
@@ -323,14 +501,45 @@ def _public_scenarios(db, filters: ScenarioFilters, page_request: PageRequest, n
     ).fetchall()
     cards = []
     for row in rows:
-        scenario = _scenario_projection(db, row, False, now)
+        authority = (
+            _active_scenario_authority(db, rule_bundle, row["scenario_id"])
+            if rule_bundle is not None
+            else None
+        )
+        if rule_bundle is not None and authority is None:
+            continue
+        release_scenario = next(
+            (
+                source
+                for source in rule_bundle.release.scenarios
+                if source.code == authority.code
+            ),
+            None,
+        )
+        if release_scenario is None:
+            continue
+        if filters.industry and filters.industry not in release_scenario.branch_codes:
+            continue
+        if filters.department and not any(
+            link.code == filters.department
+            for link in release_scenario.department_links
+        ):
+            continue
+        scenario = _scenario_projection(
+            db, row, False, now, authority=authority, rule_bundle=rule_bundle
+        )
         if scenario is None:
             continue
         cards.append(ScenarioCard(
-            code=row["scenario_code"], slug=scenario["slug"], title=scenario["title"],
+            code=authority.code, slug=scenario["slug"], title=scenario["title"],
             summary=scenario["summary"], industries=scenario["industries"],
             departments=scenario["departments"], maturity=scenario["maturity"],
         ))
+    scenario_order = {
+        item.code: position
+        for position, item in enumerate(rule_bundle.release.scenarios)
+    }
+    cards.sort(key=lambda item: scenario_order[item.code])
     total = len(cards)
     if total == 0:
         return Page((), 1, page_request.per_page, 0, 0)
@@ -344,6 +553,9 @@ def public_industries(now) -> tuple[Mapping[str, Any], ...]:
     db = models.get_db()
     try:
         db.execute("BEGIN")
+        rule_bundle = _active_rule_bundle(db)
+        if rule_bundle is None:
+            return ()
         clause, arguments = _public_item_where(now)
         rows = db.execute(
             "SELECT ci.* "
@@ -352,9 +564,22 @@ def public_industries(now) -> tuple[Mapping[str, Any], ...]:
             f"WHERE i.status='published' AND ci.entry_type='industry' AND {clause} ORDER BY i.sort_order,i.id",
             arguments,
         ).fetchall()
+        industries = tuple(
+            industry
+            for row in rows
+            if (
+                industry := _industry_projection(
+                    db, row, False, now, rule_bundle=rule_bundle
+                )
+            )
+            is not None
+        )
+        industry_order = {
+            item.code: position
+            for position, item in enumerate(rule_bundle.release.industries)
+        }
         return tuple(
-            industry for row in rows
-            if (industry := _industry_projection(db, row, False, now)) is not None
+            sorted(industries, key=lambda item: industry_order[item["code"]])
         )
     finally:
         db.rollback()
@@ -520,7 +745,9 @@ def _valid_services(services):
     for service in services:
         if (
             not is_exact_nonblank_text(service["public_name"])
-            or not is_valid_public_budget_range(service["min_budget"], service["max_budget"])
+            or not valid_service_budget_range(
+                service["min_budget"], service["max_budget"]
+            )
             or not is_valid_public_week_range(service["min_weeks"], service["max_weeks"])
             or not _nonblank_values(service["steps"])
             or not _nonblank_values(service["prerequisites"])
@@ -542,7 +769,9 @@ def _published_scenario_identity(db, scenario_id, now):
     ).fetchone()
     if item is None:
         return None
-    return _scenario_projection(db, item, False, now)
+    if not _valid_public_item_text(item):
+        return None
+    return MappingProxyType({"title": item["title"], "slug": item["slug"]})
 
 
 def _service_authority(db, service_id, now):
@@ -615,7 +844,14 @@ def _related_resources(db, content_id, now, owner_kind):
     return tuple(projected)
 
 
-def _service_projection(db, item, redirect, now, authority: ServiceAuthority | None = None):
+def _service_projection(
+    db,
+    item,
+    redirect,
+    now,
+    authority: ServiceAuthority | None = None,
+    public_labels=None,
+):
     if not _valid_public_item_text(item):
         return None
     group = db.execute(
@@ -653,11 +889,29 @@ def _service_projection(db, item, redirect, now, authority: ServiceAuthority | N
         "seo_title": item["seo_title"], "seo_description": item["seo_description"],
         "blocks": blocks, "category": SERVICE_CATEGORY_LABELS[authority.category_code],
         "integration": tuple(
-            ServiceFacet(code, INTEGRATION_LABELS[code]) for code in authority.integration_codes
+            ServiceFacet(
+                code,
+                (
+                    public_labels.integrations[code]
+                    if public_labels is not None
+                    else INTEGRATION_LABELS[code]
+                ),
+            )
+            for code in authority.integration_codes
         ),
         "industries": authority.industries, "departments": authority.departments,
         "pains": authority.pains,
-        "maturity": tuple(ServiceFacet(code, MATURITY_LABELS[code]) for code in maturity_codes),
+        "maturity": tuple(
+            ServiceFacet(
+                code,
+                (
+                    public_labels.maturities[code]
+                    if public_labels is not None
+                    else MATURITY_LABELS[code]
+                ),
+            )
+            for code in maturity_codes
+        ),
         "implementation_steps": authority.implementation_steps,
         "prerequisites": authority.prerequisites, "not_included": authority.not_included,
         "acceptance": authority.acceptance, "deliverables": authority.deliverables,
@@ -702,11 +956,19 @@ def _scenario_inputs(db, content_id):
     return public_input_texts(rows)
 
 
-def _public_risks(authority):
+def _public_risks(authority, public_labels=None):
     risks = []
     for code in authority.risk_codes:
-        label = RISK_LABELS.get(code)
-        description = RISK_EXPLANATIONS.get(code)
+        label = (
+            public_labels.risk_labels.get(code)
+            if public_labels is not None
+            else RISK_LABELS.get(code)
+        )
+        description = (
+            public_labels.risk_explanations.get(code)
+            if public_labels is not None
+            else RISK_EXPLANATIONS.get(code)
+        )
         if not label or not description:
             return ()
         risks.append(MappingProxyType({"label": label, "description": description}))
@@ -714,7 +976,12 @@ def _public_risks(authority):
 
 
 def _scenario_projection(
-    db, item, redirect, now, authority: ScenarioAuthority | None = None
+    db,
+    item,
+    redirect,
+    now,
+    authority: ScenarioAuthority | None = None,
+    rule_bundle=None,
 ):
     """Return a public scenario only when every required public section is real."""
     if not _valid_public_item_text(item):
@@ -733,20 +1000,75 @@ def _scenario_projection(
     authority = authority or _scenario_authority(db, scenario_id)
     if authority is None:
         return None
-    services = _services_for_scenario(db, authority.scenario_id)
+    if rule_bundle is None:
+        services = _services_for_scenario(db, authority.scenario_id)
+        release_scenario = None
+    else:
+        release_scenario = next(
+            (
+                scenario
+                for scenario in rule_bundle.release.scenarios
+                if scenario.code == authority.code
+            ),
+            None,
+        )
+        if release_scenario is not None and release_scenario.fallback_only:
+            return None
+        service_row = db.execute(
+            "SELECT id FROM services WHERE code=? AND status='published'",
+            (release_scenario.service_code if release_scenario is not None else None,),
+        ).fetchone()
+        service_authority = (
+            _active_service_authority(db, rule_bundle, service_row["id"], now)
+            if service_row is not None
+            else None
+        )
+        services = (
+            (_service_projection_row(service_authority),)
+            if service_authority is not None
+            else ()
+        )
     blocks = _blocks(db, item["id"])
-    departments = _names(
-        db,
-        "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
-        "WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id",
-        (authority.scenario_id,),
-    )
-    pains = _names(
-        db,
-        "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
-        "WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id",
-        (authority.scenario_id,),
-    )
+    if rule_bundle is None:
+        departments = _names(
+            db,
+            "SELECT d.name FROM scenario_departments link JOIN departments d ON d.id=link.department_id "
+            "WHERE link.scenario_id=? AND d.status='published' ORDER BY d.industry_id,d.sort_order,d.id",
+            (authority.scenario_id,),
+        )
+        pains = _names(
+            db,
+            "SELECT p.name FROM scenario_pains link JOIN pain_points p ON p.id=link.pain_point_id "
+            "WHERE link.scenario_id=? AND p.status='published' ORDER BY p.industry_id,p.sort_order,p.id",
+            (authority.scenario_id,),
+        )
+        industries = _names(
+            db,
+            "SELECT DISTINCT i.name FROM scenario_branches sb "
+            "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
+            "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
+            "AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id",
+            (authority.scenario_id,),
+        )
+    else:
+        departments = tuple(
+            facet.label
+            for facet in _release_facets(
+                db, rule_bundle.release, (release_scenario,), "departments"
+            )
+        )
+        pains = tuple(
+            facet.label
+            for facet in _release_facets(
+                db, rule_bundle.release, (release_scenario,), "pains"
+            )
+        )
+        industries = tuple(
+            facet.label
+            for facet in _release_facets(
+                db, rule_bundle.release, (release_scenario,), "industries"
+            )
+        )
     inputs = _scenario_inputs(db, item["id"])
     prerequisites = tuple(value for service in services for value in service["prerequisites"])
     outputs = tuple(value for service in services for value in service["deliverables"])
@@ -755,24 +1077,23 @@ def _scenario_projection(
         MappingProxyType({"label": "验收条件", "value": value})
         for service in services for value in service["acceptance"]
     )
-    risks = _public_risks(authority)
+    risks = _public_risks(
+        authority,
+        rule_bundle.release.public_labels if rule_bundle is not None else None,
+    )
     timeline = tuple((service["min_weeks"], service["max_weeks"]) for service in services)
     budget = tuple((service["min_budget"], service["max_budget"]) for service in services)
-    industries = _names(
-        db,
-        "SELECT DISTINCT i.name FROM scenario_branches sb "
-        "JOIN industry_branches ib ON ib.id=sb.industry_branch_id "
-        "JOIN industries i ON i.id=ib.industry_id WHERE sb.scenario_id=? "
-        "AND ib.status='published' AND i.status='published' ORDER BY i.sort_order,i.id",
-        (authority.scenario_id,),
-    )
     maturity_codes = _names(
         db, "SELECT maturity_code FROM content_maturity_levels WHERE content_item_id=? "
         "ORDER BY sort_order,maturity_code", (item["id"],),
     )
+    required_pain_facets = (
+        (pains, _nonblank_values(pains)) if rule_bundle is None else ()
+    )
     if not all((
-        industries, departments, pains,
-        _nonblank_values(industries), _nonblank_values(departments), _nonblank_values(pains),
+        industries, departments,
+        _nonblank_values(industries), _nonblank_values(departments),
+        *required_pain_facets,
         _nonblank_values(inputs), _meaningful_blocks(blocks), _valid_services(services),
         prerequisites, outputs, steps,
         _nonblank_values(prerequisites), _nonblank_values(outputs), _nonblank_values(steps),
@@ -781,7 +1102,7 @@ def _scenario_projection(
         maturity_codes, all(code in MATURITY_LABELS for code in maturity_codes), timeline, budget,
         is_valid_public_week_range(authority.min_weeks, authority.max_weeks),
         all(is_valid_public_week_range(*value) for value in timeline),
-        all(is_valid_public_budget_range(*value) for value in budget),
+        all(valid_service_budget_range(*value) for value in budget),
     )):
         return None
     return MappingProxyType({
@@ -790,7 +1111,14 @@ def _scenario_projection(
         "industries": industries,
         "departments": departments,
         "pains": pains,
-        "maturity": tuple(MATURITY_LABELS[code] for code in maturity_codes),
+        "maturity": tuple(
+            (
+                rule_bundle.release.public_labels.maturities[code]
+                if rule_bundle is not None
+                else MATURITY_LABELS[code]
+            )
+            for code in maturity_codes
+        ),
         "services": services,
         "prerequisites": prerequisites,
         "inputs": inputs,
@@ -804,46 +1132,103 @@ def _scenario_projection(
     })
 
 
-def _industry_projection(db, item, redirect, now):
+def _industry_projection(db, item, redirect, now, rule_bundle=None):
     row = db.execute(
-        "SELECT i.id,i.code,i.name FROM industries i JOIN content_groups g ON g.industry_id=i.id "
+        "SELECT i.id,i.code,i.status FROM industries i JOIN content_groups g ON g.industry_id=i.id "
         "WHERE g.id=? AND i.status='published'", (item["content_group_id"],)
     ).fetchone()
+    release_industry = (
+        next(
+            (
+                industry
+                for industry in rule_bundle.release.industries
+                if row is not None and industry.code == row["code"]
+            ),
+            None,
+        )
+        if rule_bundle is not None
+        else None
+    )
     if (
         row is None
         or not _valid_public_item_text(item)
-        or not is_exact_nonblank_text(row["name"])
+        or (rule_bundle is not None and release_industry is None)
     ):
         return None
     blocks = _blocks(db, item["id"])
-    pains = _names(
-        db, "SELECT name FROM pain_points WHERE industry_id=? AND status='published' "
-        "ORDER BY sort_order,id", (row["id"],),
-    )
-    departments = _names(
-        db, "SELECT name FROM departments WHERE industry_id=? AND status='published' "
-        "ORDER BY sort_order,id", (row["id"],),
-    )
-    company_sizes = _names(
-        db, "SELECT name FROM company_sizes WHERE status='published' ORDER BY sort_order,id", ()
-    )
-    page = _public_scenarios(db, ScenarioFilters(industry=row["code"]), PageRequest(1, 50), now)
-    service_ids = set()
-    for card in page.items:
-        scenario = db.execute("SELECT id FROM scenarios WHERE code=?", (card.code,)).fetchone()
-        if scenario is not None:
-            service_ids.update(service["id"] for service in _services_for_scenario(db, scenario["id"]))
-    services = ()
-    if service_ids:
-        placeholders = ",".join("?" for _ in service_ids)
-        services = tuple(
-            MappingProxyType(dict(service)) for service in db.execute(
-                f"SELECT id,code,public_name FROM services WHERE id IN ({placeholders}) "
-                "AND status='published' ORDER BY sort_order,id", tuple(sorted(service_ids))
-            )
+    if rule_bundle is None:
+        pains = _names(
+            db, "SELECT name FROM pain_points WHERE industry_id=? AND status='published' "
+            "ORDER BY sort_order,id", (row["id"],),
         )
+        departments = _names(
+            db, "SELECT name FROM departments WHERE industry_id=? AND status='published' "
+            "ORDER BY sort_order,id", (row["id"],),
+        )
+        company_sizes = _names(
+            db, "SELECT name FROM company_sizes WHERE status='published' ORDER BY sort_order,id", ()
+        )
+    else:
+        published_pains = _published_release_facet_keys(db, "pains")
+        published_departments = _published_release_facet_keys(db, "departments")
+        pains = tuple(
+            value.label
+            for value in release_industry.pain_points
+            if (release_industry.code, value.code) in published_pains
+        )
+        departments = tuple(
+            value.label
+            for value in release_industry.departments
+            if (release_industry.code, value.code) in published_departments
+        )
+        company_sizes = tuple(
+            value.label for value in rule_bundle.release.company_sizes
+        )
+    page = _public_scenarios(
+        db,
+        ScenarioFilters(industry=row["code"]),
+        PageRequest(1, 50),
+        now,
+        rule_bundle=rule_bundle,
+    )
+    if rule_bundle is None:
+        service_ids = set()
+        for card in page.items:
+            scenario = db.execute(
+                "SELECT id FROM scenarios WHERE code=?", (card.code,)
+            ).fetchone()
+            if scenario is not None:
+                service_ids.update(
+                    service["id"]
+                    for service in _services_for_scenario(db, scenario["id"])
+                )
+        services = ()
+        if service_ids:
+            placeholders = ",".join("?" for _ in service_ids)
+            services = tuple(
+                MappingProxyType(dict(service)) for service in db.execute(
+                    f"SELECT id,code,public_name FROM services WHERE id IN ({placeholders}) "
+                    "AND status='published' ORDER BY sort_order,id", tuple(sorted(service_ids))
+                )
+            )
+    else:
+        selected_codes = {
+            scenario.service_code
+            for scenario in rule_bundle.release.scenarios
+            if row["code"] in scenario.branch_codes
+        }
+        services = tuple(
+            MappingProxyType(
+                {"code": service.code, "public_name": service.public_name}
+            )
+            for service in rule_bundle.release.services
+            if service.code in selected_codes
+        )
+    required_pains = (
+        (_nonblank_values(pains),) if rule_bundle is None else ()
+    )
     if not all((
-        _meaningful_blocks(blocks), _nonblank_values(pains), _nonblank_values(departments),
+        _meaningful_blocks(blocks), *required_pains, _nonblank_values(departments),
         _nonblank_values(company_sizes), page.items,
         _nonblank_values(tuple(service["public_name"] for service in services)),
     )):
@@ -870,22 +1255,62 @@ def has_current_public_projection(db, content_id, now):
     if item["entry_type"] == "case":
         publishing_repository.validate_case_public_completeness(db, content_id, now)
         return True
-    projector = {
-        "industry": _industry_projection,
-        "scenario": _scenario_projection,
-        "service": _service_projection,
-    }.get(item["entry_type"])
-    if projector is None:
+    rule_bundle = _active_rule_bundle(db)
+    if rule_bundle is None:
         return False
-    return projector(db, item, False, now) is not None
+    if item["entry_type"] == "industry":
+        return _industry_projection(
+            db, item, False, now, rule_bundle=rule_bundle
+        ) is not None
+    if item["entry_type"] == "scenario":
+        group = db.execute(
+            "SELECT scenario_id FROM content_groups WHERE id=?",
+            (item["content_group_id"],),
+        ).fetchone()
+        authority = (
+            _active_scenario_authority(db, rule_bundle, group["scenario_id"])
+            if group is not None and group["scenario_id"] is not None
+            else None
+        )
+        return _scenario_projection(
+            db, item, False, now, authority=authority, rule_bundle=rule_bundle
+        ) is not None
+    if item["entry_type"] == "service":
+        group = db.execute(
+            "SELECT service_id FROM content_groups WHERE id=?",
+            (item["content_group_id"],),
+        ).fetchone()
+        authority = (
+            _active_service_authority(db, rule_bundle, group["service_id"], now)
+            if group is not None and group["service_id"] is not None
+            else None
+        )
+        return _service_projection(
+            db,
+            item,
+            False,
+            now,
+            authority=authority,
+            public_labels=rule_bundle.release.public_labels,
+        ) is not None
+    return False
 
 
 def public_industry(slug: str, now) -> Mapping[str, Any] | None:
     db = models.get_db()
     try:
         db.execute("BEGIN")
+        rule_bundle = _active_rule_bundle(db)
+        if rule_bundle is None:
+            return None
         item, redirect = _resolution(db, "industry", slug, now)
-        return _industry_projection(db, item, redirect, now) if item is not None else None
+        return (
+            _industry_projection(
+                db, item, redirect, now, rule_bundle=rule_bundle
+            )
+            if item is not None
+            else None
+        )
     finally:
         db.rollback()
         db.close()
@@ -895,7 +1320,10 @@ def public_scenarios(filters: ScenarioFilters, page: PageRequest, now) -> Page[S
     db = models.get_db()
     try:
         db.execute("BEGIN")
-        return _public_scenarios(db, filters, page, now)
+        rule_bundle = _active_rule_bundle(db)
+        if rule_bundle is None:
+            return Page((), 1, page.per_page, 0, 0)
+        return _public_scenarios(db, filters, page, now, rule_bundle=rule_bundle)
     finally:
         db.rollback()
         db.close()
@@ -908,7 +1336,25 @@ def public_scenario(slug: str, now, authority: ScenarioAuthority | None = None) 
         item, redirect = _resolution(db, "scenario", slug, now)
         if item is None:
             return None
-        return _scenario_projection(db, item, redirect, now, authority)
+        rule_bundle = None
+        if authority is None:
+            rule_bundle = _active_rule_bundle(db)
+            if rule_bundle is None:
+                return None
+            group = db.execute(
+                "SELECT scenario_id FROM content_groups WHERE id=?",
+                (item["content_group_id"],),
+            ).fetchone()
+            authority = (
+                _active_scenario_authority(db, rule_bundle, group["scenario_id"])
+                if group is not None and group["scenario_id"] is not None
+                else None
+            )
+            if authority is None:
+                return None
+        return _scenario_projection(
+            db, item, redirect, now, authority, rule_bundle=rule_bundle
+        )
     finally:
         db.rollback()
         db.close()
@@ -918,6 +1364,9 @@ def public_services(page_request: PageRequest, now) -> Page[ServiceCard]:
     db = models.get_db()
     try:
         db.execute("BEGIN")
+        rule_bundle = _active_rule_bundle(db)
+        if rule_bundle is None:
+            return Page((), 1, page_request.per_page, 0, 0)
         clause, arguments = _public_item_where(now)
         rows = db.execute(
             "SELECT ci.* FROM services service "
@@ -929,7 +1378,27 @@ def public_services(page_request: PageRequest, now) -> Page[ServiceCard]:
         ).fetchall()
         cards = []
         for row in rows:
-            service = _service_projection(db, row, False, now)
+            group = db.execute(
+                "SELECT service_id FROM content_groups WHERE id=?",
+                (row["content_group_id"],),
+            ).fetchone()
+            authority = (
+                _active_service_authority(db, rule_bundle, group["service_id"], now)
+                if group is not None and group["service_id"] is not None
+                else None
+            )
+            service = (
+                _service_projection(
+                    db,
+                    row,
+                    False,
+                    now,
+                    authority=authority,
+                    public_labels=rule_bundle.release.public_labels,
+                )
+                if authority is not None
+                else None
+            )
             if service is None:
                 continue
             cards.append(ServiceCard(
@@ -937,6 +1406,11 @@ def public_services(page_request: PageRequest, now) -> Page[ServiceCard]:
                 summary=service["summary"], category=service["category"],
                 budget=service["budget"], timeline=service["timeline"],
             ))
+        service_order = {
+            item.code: position
+            for position, item in enumerate(rule_bundle.release.services)
+        }
+        cards.sort(key=lambda item: service_order[item.code])
         total = len(cards)
         if total == 0:
             return Page((), 1, page_request.per_page, 0, 0)
@@ -961,7 +1435,31 @@ def public_service(
         item, redirect = _resolution(db, "service", slug, now)
         if item is None:
             return None
-        return _service_projection(db, item, redirect, now, authority)
+        public_labels = None
+        if authority is None:
+            rule_bundle = _active_rule_bundle(db)
+            if rule_bundle is None:
+                return None
+            group = db.execute(
+                "SELECT service_id FROM content_groups WHERE id=?",
+                (item["content_group_id"],),
+            ).fetchone()
+            authority = (
+                _active_service_authority(db, rule_bundle, group["service_id"], now)
+                if group is not None and group["service_id"] is not None
+                else None
+            )
+            if authority is None:
+                return None
+            public_labels = rule_bundle.release.public_labels
+        return _service_projection(
+            db,
+            item,
+            redirect,
+            now,
+            authority,
+            public_labels=public_labels,
+        )
     finally:
         db.rollback()
         db.close()

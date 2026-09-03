@@ -32,6 +32,9 @@ from assessment_validation import (
 
 
 SNAPSHOT_SCHEMA_VERSION = "2.0"
+MAX_RULE_SNAPSHOT_BYTES = 1024 * 1024
+MAX_RULE_DECIMAL_DIGITS = 256
+MAX_RULE_DECIMAL_FIXED_LENGTH = 2048
 CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 RELEASE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 EMAIL_PATTERN = re.compile(
@@ -418,7 +421,10 @@ def validate_canonical_release_json(
 ) -> bool:
     """Fail-closed validation used by SQLite release lifecycle triggers."""
     try:
-        if type(canonical_json) is not str:
+        if (
+            type(canonical_json) is not str
+            or len(canonical_json.encode("utf-8")) > MAX_RULE_SNAPSHOT_BYTES
+        ):
             return False
         payload = json.loads(
             canonical_json,
@@ -692,7 +698,14 @@ def validate_canonical_release_json(
         return len(set(scenario_codes)) == 13 and fallback_codes == [
             "data_process_foundation"
         ]
-    except (AttributeError, KeyError, TypeError, ValueError, ArithmeticError):
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        ArithmeticError,
+        RecursionError,
+    ):
         return False
 
 
@@ -729,13 +742,17 @@ def _canonical_labeled_list(values):
 
 
 def _canonical_decimal(value):
-    if type(value) is not str or not value:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > MAX_RULE_DECIMAL_FIXED_LENGTH
+    ):
         return None
     try:
         decimal = Decimal(value)
     except ArithmeticError:
         return None
-    return decimal if decimal.is_finite() and _decimal(decimal) == value else None
+    return decimal if _bounded_decimal(decimal) and _decimal(decimal) == value else None
 
 
 def _canonical_decimal_pair(values, *, positive=False):
@@ -963,6 +980,8 @@ def compile_release_snapshot(draft: RuleReleaseDraft) -> RuleReleaseSnapshot:
     canonical = json.dumps(
         payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
+    if len(canonical.encode("utf-8")) > MAX_RULE_SNAPSHOT_BYTES:
+        raise ValueError("invalid rule release: snapshot_size")
     return RuleReleaseSnapshot(
         schema_version=SNAPSHOT_SCHEMA_VERSION,
         canonical_json=canonical,
@@ -1041,14 +1060,42 @@ def _integer_range(low, high):
 
 def _decimal_triple(values, *, unit):
     return type(values) is tuple and len(values) == 3 and all(
-        type(value) is Decimal and value.is_finite() for value in values
+        _bounded_decimal(value) for value in values
     ) and Decimal(0) <= values[0] <= values[1] <= values[2] and (
         not unit or values[2] <= Decimal(1)
     )
 
 
 def _decimal_pair(low, high):
-    return type(low) is Decimal and type(high) is Decimal and low.is_finite() and high.is_finite() and Decimal(0) <= low <= high
+    return (
+        _bounded_decimal(low)
+        and _bounded_decimal(high)
+        and Decimal(0) <= low <= high
+    )
+
+
+def _bounded_decimal(value):
+    if type(value) is not Decimal or not value.is_finite():
+        return False
+    sign, raw_digits, exponent = value.as_tuple()
+    digits = list(raw_digits)
+    while digits and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    if max(1, len(digits)) > MAX_RULE_DECIMAL_DIGITS:
+        return False
+    if not digits:
+        fixed_length = 1 + sign
+    elif exponent >= 0:
+        fixed_length = sign + len(digits) + exponent
+    else:
+        point = len(digits) + exponent
+        fixed_length = (
+            sign + len(digits) + 1
+            if point > 0
+            else sign + 2 + (-point) + len(digits)
+        )
+    return fixed_length <= MAX_RULE_DECIMAL_FIXED_LENGTH
 
 
 def _code_label(code, label):

@@ -138,6 +138,10 @@ def test_v2_migrations_preserve_legacy_assessment_and_create_core_schema(
         "010_ingestion_operations",
         "011_private_http_resource_drafts",
         "012_operations_query_indexes",
+        "013_admin_export_audit",
+        "014_legal_documents",
+        "015_assessment_rule_releases",
+        "016_assessment_flow_enforcement",
     ]
     assert {
         "submission_key",

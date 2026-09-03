@@ -100,6 +100,17 @@ def load_release_draft(release_id: int) -> RuleReleaseDraft:
         db.close()
 
 
+def load_release_draft_from_db(
+    db: sqlite3.Connection, release_id: int
+) -> RuleReleaseDraft:
+    """Load a draft through a caller-owned connection without transaction control."""
+    if not isinstance(db, sqlite3.Connection):
+        raise ValueError("invalid database connection")
+    if type(release_id) is not int or release_id <= 0:
+        raise ValueError("invalid release id")
+    return _load_release_draft_from_db(db, release_id)
+
+
 def save_release_draft(
     release_id: int,
     expected_lock_version: int,

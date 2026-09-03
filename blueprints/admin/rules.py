@@ -18,7 +18,7 @@ from rule_release_repository import (
     query_rule_releases,
     save_release_draft,
 )
-from rule_release_service import PreviewRequest, preview_release
+from rule_release_service import PreviewRequest, preview_release, publish_release
 from rule_release_validation import compile_release_snapshot, validate_release_draft
 
 
@@ -168,6 +168,35 @@ def _render_edit(draft, *, errors=(), status=200):
     )
 
 
+def _publication_context(draft):
+    validation_errors = validate_release_draft(draft)
+    digest = None
+    if not validation_errors:
+        try:
+            digest = compile_release_snapshot(draft).sha256
+        except ValueError:
+            validation_errors = ("规则草稿未通过验证",)
+    return {
+        "draft": draft,
+        "validation_errors": validation_errors,
+        "compiled_digest": digest,
+        "can_publish": draft.status == "draft" and not validation_errors,
+    }
+
+
+def _render_publication(draft, *, errors=(), status=200):
+    context = _publication_context(draft)
+    if errors:
+        context["validation_errors"] = tuple(errors)
+        context["can_publish"] = False
+    return _no_store(
+        make_response(
+            render_template("admin/rule_release_publish.html", **context),
+            status,
+        )
+    )
+
+
 @bp.get("/admin/rules")
 def admin_rule_releases():
     status = _list_status(request.args)
@@ -200,6 +229,46 @@ def admin_rule_copy():
     return _no_store(
         redirect(url_for("admin.admin_rule_edit", release_id=release_id), code=303)
     )
+
+
+@bp.route("/admin/rules/<int:release_id>/publish", methods=("GET", "POST"))
+def admin_rule_publish(release_id):
+    draft = _load_or_404(release_id)
+    if request.method == "GET":
+        if draft.status != "draft":
+            return _render_publication(
+                draft, errors=("当前版本不可发布",), status=409
+            )
+        return _render_publication(draft)
+    if draft.status != "draft":
+        return _render_publication(
+            draft, errors=("当前版本不可发布",), status=409
+        )
+    expected = {"csrf_token", "expected_lock_version"}
+    if set(request.form) != expected or any(
+        len(request.form.getlist(name)) != 1 for name in expected
+    ):
+        return _render_publication(
+            draft, errors=("提交内容无效",), status=400
+        )
+    try:
+        expected_lock = _integer(
+            request.form, "expected_lock_version", minimum=1
+        )
+        publish_release(release_id, expected_lock, _actor(), _now())
+    except RuleFormError:
+        return _render_publication(
+            draft, errors=("提交内容无效",), status=400
+        )
+    except DataConflictError:
+        return _render_publication(
+            draft, errors=("发布冲突",), status=409
+        )
+    except ValueError:
+        return _render_publication(
+            draft, errors=("规则草稿未通过验证",), status=400
+        )
+    return _no_store(redirect(url_for("admin.admin_rule_releases"), code=303))
 
 
 @bp.route("/admin/rules/<int:release_id>", methods=("GET", "POST"))

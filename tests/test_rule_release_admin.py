@@ -1,6 +1,7 @@
 """Admin rule-release editing and real-pipeline preview contracts."""
 
 from dataclasses import FrozenInstanceError, replace
+from datetime import timedelta
 from decimal import Decimal
 import hashlib
 from itertools import product
@@ -23,6 +24,7 @@ from rule_release_repository import (
     load_release_draft,
     save_release_draft,
 )
+from tests.assessment_flow_helpers import FLOW_NOW
 
 
 TOKEN = "test-csrf-token"
@@ -71,6 +73,65 @@ def test_rule_release_list_exact_status_pagination_and_query_preservation(
     assert "status=draft" in previous
     assert "per_page=50" in previous
     assert "page=1" in previous
+
+
+def test_publish_confirmation_is_exact_and_post_switches_active_release_atomically(
+    admin_client, db, monkeypatch
+):
+    from rule_release_validation import compile_release_snapshot
+    import blueprints.admin.rules as admin_rules
+
+    release_id = copy_active_release(
+        "v2.1-admin-publish",
+        "管理发布确认",
+        "test-admin",
+        FLOW_NOW - timedelta(minutes=1),
+    )
+    draft = load_release_draft(release_id)
+    expected_digest = compile_release_snapshot(draft).sha256
+    monkeypatch.setattr(admin_rules, "shanghai_now", lambda: FLOW_NOW)
+
+    confirmation = admin_client.get(f"/admin/rules/{release_id}/publish")
+    assert confirmation.status_code == 200
+    assert confirmation.headers["Cache-Control"] == "private, no-store"
+    document = BeautifulSoup(confirmation.data, "html.parser")
+    assert document.select_one("[data-release-code]").get_text(strip=True) == draft.code
+    assert document.select_one("[data-validation-status]").get_text(strip=True) == "通过"
+    assert document.select_one("[data-compiled-digest]").get_text(strip=True) == expected_digest
+    form = document.select_one("form[data-rule-publish]")
+    assert form is not None
+    assert form.select_one('[name="expected_lock_version"]')["value"] == "1"
+
+    rejected = admin_client.post(
+        f"/admin/rules/{release_id}/publish",
+        data={
+            "csrf_token": TOKEN,
+            "expected_lock_version": "1",
+            "unexpected": "x",
+        },
+    )
+    assert rejected.status_code == 400
+    assert db.execute(
+        "SELECT COUNT(*) FROM assessment_version_snapshots "
+        "WHERE assessment_version_id=?",
+        (release_id,),
+    ).fetchone()[0] == 0
+
+    published = admin_client.post(
+        f"/admin/rules/{release_id}/publish",
+        data={"csrf_token": TOKEN, "expected_lock_version": "1"},
+    )
+    assert published.status_code == 303
+    assert db.execute(
+        "SELECT assessment_version_id FROM active_assessment_version WHERE singleton_id=1"
+    ).fetchone()[0] == release_id
+    assert db.execute(
+        "SELECT sha256 FROM assessment_version_snapshots WHERE assessment_version_id=?",
+        (release_id,),
+    ).fetchone()[0] == expected_digest
+    assert tuple(db.execute(
+        "SELECT action,status_code FROM admin_audit_logs ORDER BY id DESC LIMIT 1"
+    ).fetchone()) == ("admin_rule_publish", 303)
 
 
 def _published_archived_and_draft_release_ids(db):

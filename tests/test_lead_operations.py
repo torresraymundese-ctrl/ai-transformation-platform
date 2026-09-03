@@ -9,6 +9,7 @@ import lead_repository
 import manage
 import models
 from validation import ValidationError
+from tests.assessment_flow_helpers import ensure_test_legal_bundle
 
 
 FIXED_NOW = datetime(2026, 8, 21, 10, 30)
@@ -910,6 +911,7 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         sort_keys=True,
     )
     hostile_source = f"{private_values[0]} {hostile_landline}"
+    legal_ids = ensure_test_legal_bundle()
     db = models.get_db()
     try:
         version_id = db.execute(
@@ -936,14 +938,15 @@ def test_verified_withdrawal_or_deletion_anonymizes_atomically_but_keeps_metrics
         )
         db.execute(
             "INSERT INTO lead_consents "
-            "(lead_id,policy_version,consented_at,source,identity_hash) "
-            "VALUES (?,?,?,?,?)",
+            "(lead_id,policy_version,consented_at,source,identity_hash,legal_version_id) "
+            "VALUES (?,?,?,?,?,?)",
             (
                 lead_id,
-                "2026-08-19",
+                "test-privacy-v1",
                 "2026-08-20 09:00:00",
                 "website_assessment",
                 "b" * 32,
+                legal_ids["privacy"],
             ),
         )
         db.execute(

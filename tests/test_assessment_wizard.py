@@ -86,7 +86,7 @@ def test_storage_snapshot_is_non_contact_and_restores_one_submission_key():
     """A storage regression must never persist lead contact fields or rotate keys."""
     source = SCRIPT.read_text(encoding="utf-8")
     snapshot = re.search(
-        r"function storedStateSnapshot\(\) \{(?P<body>.*?)\n  \}",
+        r"function storageSafeAssessmentState\(source\) \{(?P<body>.*?)\n  \}",
         source,
         re.DOTALL,
     )
@@ -113,6 +113,10 @@ def test_storage_snapshot_is_non_contact_and_restores_one_submission_key():
         "email",
         "wechat",
         "consent",
+        "flow_id",
+        "flowId",
+        "rule_version",
+        "legal_ids",
     ):
         assert contact_key not in stored_body
 

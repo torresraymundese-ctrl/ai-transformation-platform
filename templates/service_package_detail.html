@@ -7,7 +7,7 @@
 {% block head %}<meta name="description" content="{{ service.seo_description }}"><link rel="canonical" href="{{ canonical }}">{% endblock %}
 {% block content %}
 {% set timeline_value %}{% if service.timeline %}{{ service.timeline[0] }}—{{ service.timeline[1] }} 周{% else %}评估后确认{% endif %}{% endset %}
-{% set budget_value %}{% if service.budget %}{{ '{:,.0f}'.format(service.budget[0]) }}—{{ '{:,.0f}'.format(service.budget[1]) }} 元{% else %}评估后确认{% endif %}{% endset %}
+{% set budget_value %}{% if service.budget %}{{ format_budget_amount(service.budget[0]) }}—{{ format_budget_amount(service.budget[1]) }} 元{% else %}评估后确认{% endif %}{% endset %}
 <div class="detail-theme">
   <div class="public-container">{{ breadcrumb('/service-packages', '返回服务与交付列表', service.title) }}</div>
   {{ detail_hero(service.title, service.summary, service.category, '/static/images/ui/public-delivery-system.webp', '') }}

@@ -112,6 +112,41 @@ test("configuration retry is recoverable and stale responses are rejected", asyn
 });
 
 
+test("flow credentials never enter browser recovery storage", function () {
+  const snapshot = wizard.storageSafeAssessmentState({
+    step: 2,
+    branchCode: "manufacturing",
+    subbranchCode: "discrete_manufacturing",
+    departmentCode: "production",
+    companySizeCode: "50_200",
+    painCodes: ["production_reporting"],
+    answers: { process_documentation: "level_3" },
+    roiChoices: { headcount: "6_20" },
+    submissionKey: "00000000-0000-4000-8000-000000000021",
+    attribution: { utm_source: "organic" },
+    flow_id: "secret-flow-id",
+    flowId: "secret-flow-id",
+    rule_version: "secret-rule-version",
+    legal_ids: { privacy: 41 },
+  });
+
+  assert.deepEqual(Object.keys(snapshot).sort(), [
+    "answers",
+    "attribution",
+    "branchCode",
+    "companySizeCode",
+    "departmentCode",
+    "painCodes",
+    "roiChoices",
+    "step",
+    "subbranchCode",
+    "submissionKey",
+  ]);
+  assert.equal(JSON.stringify(snapshot).includes("secret-flow-id"), false);
+  assert.equal(JSON.stringify(snapshot).includes("secret-rule-version"), false);
+});
+
+
 test("initial attribution drops normalized contact-like values", function () {
   assert.equal(wizard.privacySafeAttribution("organic-search"), "organic-search");
   assert.equal(wizard.privacySafeAttribution("ｌｅａｄ＠ｅｘａｍｐｌｅ．ｃｏｍ"), "");

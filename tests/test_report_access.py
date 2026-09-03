@@ -21,6 +21,11 @@ from assessment.seed import load_core_catalog_manifest
 import models
 import pytest
 import report_pdf
+from tests.assessment_flow_helpers import (
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 PRIVACY_CONFIG = {
@@ -87,52 +92,36 @@ LEGACY_SERVICE_EXCLUSIONS = {
 
 
 def _complete_assessment(client, answers=None):
-    client.application.config.update(PRIVACY_CONFIG)
-    config = client.get("/api/v2/assessment/config/manufacturing")
-    assert config.status_code == 200
-    csrf_token = config.get_json()["csrf_token"]
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(client)
+    payload = bound_completion_payload(config, submission_key=str(uuid.uuid4()))
+    payload["assessment"]["profile"]["company_size_code"] = "50_200"
+    payload["assessment"]["roi_choices"] = {
+        "headcount": "6_20",
+        "monthly_hours": "20_80",
+        "monthly_cost": "8000_15000",
+        "loss_factor": "normal",
+        "budget": "50000_200000",
+    }
+    if answers is not None:
+        payload["assessment"]["answers"] = answers
+    payload["contact"] = {
+        "company_name": PRIVATE_VALUES[0],
+        "contact_name": PRIVATE_VALUES[1],
+        "phone": PRIVATE_VALUES[2],
+        "email": PRIVATE_VALUES[3],
+        "wechat": PRIVATE_VALUES[4],
+    }
+    payload["attribution"] = {
+        "source": "website_assessment",
+        "utm_source": "organic",
+        "utm_medium": "website",
+        "utm_campaign": "task-10",
+    }
     response = client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": str(uuid.uuid4()),
-            "assessment": {
-                "schema_version": "2.0",
-                "profile": {
-                    "branch_code": "manufacturing",
-                    "subbranch_code": "discrete_manufacturing",
-                    "department_code": "production",
-                    "company_size_code": "50_200",
-                    "pain_codes": ["production_reporting"],
-                },
-                "answers": (
-                    {code: "level_3" for code in QUESTION_CODES}
-                    if answers is None
-                    else answers
-                ),
-                "roi_choices": {
-                    "headcount": "6_20",
-                    "monthly_hours": "20_80",
-                    "monthly_cost": "8000_15000",
-                    "loss_factor": "normal",
-                    "budget": "50000_200000",
-                },
-            },
-            "contact": {
-                "company_name": PRIVATE_VALUES[0],
-                "contact_name": PRIVATE_VALUES[1],
-                "phone": PRIVATE_VALUES[2],
-                "email": PRIVATE_VALUES[3],
-                "wechat": PRIVATE_VALUES[4],
-            },
-            "consent": {"accepted": True, "policy_version": "2026-08-19"},
-            "attribution": {
-                "source": "website_assessment",
-                "utm_source": "organic",
-                "utm_medium": "website",
-                "utm_campaign": "task-10",
-            },
-        },
-        headers={"X-CSRF-Token": csrf_token},
+        json=payload,
+        headers={"X-CSRF-Token": config["csrf_token"]},
     )
     assert response.status_code == 200
     return response.get_json()["assessment_id"]
@@ -211,7 +200,7 @@ def _roi_basis_rows(page):
 EXPECTED_ROI_BASIS_ROWS = [
     ["参与人数", "6—20 人", "6 人", "13 人", "20 人"],
     ["每人每月耗时", "20—80 小时", "20 小时", "50 小时", "80 小时"],
-    ["人均月综合成本", "8,000—15,000 元", "¥8,000", "¥11,500", "¥15,000"],
+    ["人均月综合成本", "0.8—1.5 万元", "¥8,000", "¥11,500", "¥15,000"],
     ["返工或损耗程度", "一般", "5%", "10%", "15%"],
     ["可接受投入", "5—20 万元", "¥50,000", "¥125,000", "¥200,000"],
 ]
@@ -382,7 +371,7 @@ def test_all_paired_answer_score_extrema_survive_sorted_json_roundtrip(
         roundtripped = json.loads(
             json.dumps(candidate, ensure_ascii=False, sort_keys=True)
         )
-        if not assessment_repository._valid_report_snapshot(roundtripped):
+        if not assessment_repository._valid_report_snapshot_dispatch(roundtripped):
             rejected.append(selected_levels)
 
     assert not rejected, (
@@ -726,6 +715,211 @@ def test_html_report_renders_every_required_snapshot_section(
         assert private_value not in response.get_data(as_text=True)
 
 
+def test_report_21_renders_only_persisted_release_display_copy(
+    completed_assessment, client, monkeypatch
+):
+    import assessment.reporting as reporting
+    import blueprints.assessment as assessment_blueprint
+
+    snapshot = _snapshot(completed_assessment)
+    labels = snapshot["display_labels"]
+    recommendation = snapshot["recommendations"][0]
+    scenario = recommendation["scenario"]
+    package = recommendation["package"]
+    selected_choices = snapshot["calculation_basis"]["selected_roi_choices"]
+
+    assert set(labels) == {
+        "dimensions",
+        "maturities",
+        "scenarios",
+        "integrations",
+        "service_categories",
+        "risk_labels",
+        "roi_bands",
+        "roi_groups",
+        "roi_options",
+    }
+    assert set(labels["dimensions"]) == set(DIMENSION_ORDER)
+    assert len(labels["scenarios"]) == 13
+    assert len(labels["risk_labels"]) == 29
+    assert set(labels["roi_groups"]) == set(labels["roi_options"])
+    assert all(len(options) == 4 for options in labels["roi_options"].values())
+    expected_visible = {
+        labels["dimensions"]["business_value"],
+        labels["maturities"][snapshot["scores"]["maturity_code"]],
+        labels["scenarios"][scenario["code"]],
+        labels["integrations"][scenario["integration_level"]],
+        labels["service_categories"][package["category"]],
+        labels["risk_labels"][recommendation["risks"][0]["code"]],
+        labels["roi_bands"]["conservative"],
+        labels["roi_groups"]["headcount"],
+        labels["roi_options"]["headcount"][selected_choices["headcount"]],
+        *package["not_included"],
+    }
+
+    monkeypatch.setattr(
+        assessment_blueprint,
+        "REPORT_DIMENSIONS",
+        tuple((code, f"POISON-{code}") for code, _ in assessment_blueprint.REPORT_DIMENSIONS),
+    )
+    for name in (
+        "MATURITY_LABELS",
+        "SCENARIO_LABELS",
+        "INTEGRATION_LABELS",
+        "SERVICE_CATEGORY_LABELS",
+        "RISK_LABELS",
+    ):
+        source = getattr(assessment_blueprint, name)
+        monkeypatch.setattr(
+            assessment_blueprint,
+            name,
+            {code: f"POISON-{code}" for code in source},
+        )
+    monkeypatch.setattr(
+        assessment_blueprint,
+        "ROI_BANDS",
+        tuple((code, f"POISON-{code}") for code, _ in assessment_blueprint.ROI_BANDS),
+    )
+    monkeypatch.setattr(
+        assessment_blueprint,
+        "ROI_INPUT_FIELDS",
+        tuple(
+            (
+                group,
+                f"POISON-{group}",
+                {code: f"POISON-{code}" for code in descriptions},
+            )
+            for group, _, descriptions in assessment_blueprint.ROI_INPUT_FIELDS
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "_PUBLIC_SERVICE_NOT_INCLUDED",
+        {package["code"]: ("POISON-exclusion",)},
+    )
+    captured = {}
+
+    def render(html, _base_url):
+        captured["html"] = html
+        return b"%PDF-test"
+
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    html = client.get(f"/assessment/report/{completed_assessment}")
+    pdf = client.get(f"/assessment/report/{completed_assessment}/pdf")
+
+    assert html.status_code == pdf.status_code == 200
+    rendered = (html.get_data(as_text=True), captured["html"])
+    for value in rendered:
+        assert "POISON-" not in value
+        assert all(expected in value for expected in expected_visible)
+
+    malformed = deepcopy(snapshot)
+    malformed["display_labels"]["roi_options"]["headcount"].pop("1_5")
+    _replace_snapshot(completed_assessment, malformed)
+    assert assessment_repository.load_report_snapshot(completed_assessment) is None
+
+
+def test_report_21_completion_keeps_bound_release_exclusions_when_legacy_global_changes(
+    client, monkeypatch
+):
+    import assessment.reporting as reporting
+    from rule_release_repository import load_release_draft
+
+    db = models.get_db()
+    try:
+        active_id = db.execute(
+            "SELECT assessment_version_id FROM active_assessment_version "
+            "WHERE singleton_id=1"
+        ).fetchone()[0]
+    finally:
+        db.close()
+    services = {
+        service.code: service for service in load_release_draft(active_id).services
+    }
+    monkeypatch.setattr(
+        reporting,
+        "public_service_not_included",
+        lambda _package: ("POISON-exclusion",),
+    )
+
+    assessment_id = _complete_assessment(client)
+    snapshot = _snapshot(assessment_id)
+
+    assert snapshot["schema_version"] == "2.1"
+    for recommendation in snapshot["recommendations"]:
+        package = recommendation["package"]
+        assert tuple(package["not_included"]) == services[package["code"]].not_included
+        assert all(
+            not value.startswith("POISON-")
+            for value in package["not_included"]
+        )
+
+
+@pytest.mark.parametrize(
+    "target",
+    ("roi", "package", "coefficient", "selected_band"),
+)
+def test_report_21_rejects_unbounded_decimal_strings(
+    completed_assessment, target
+):
+    snapshot = _snapshot(completed_assessment)
+    value = "1E+999999999"
+    if target == "roi":
+        snapshot["roi"]["conservative"]["annual_savings"] = value
+    elif target == "package":
+        snapshot["recommendations"][0]["package"]["budget_range"]["max"] = value
+    elif target == "coefficient":
+        snapshot["calculation_basis"]["coefficients"]["efficiency"][2] = value
+    else:
+        snapshot["calculation_basis"]["selected_roi_bands"]["budget"]["high"] = value
+    _replace_snapshot(completed_assessment, snapshot)
+
+    assert assessment_repository.load_report_snapshot(completed_assessment) is None
+
+
+def test_unbounded_report_decimal_returns_404_before_html_or_pdf_formatting(
+    completed_assessment, client, monkeypatch
+):
+    import blueprints.assessment as assessment_blueprint
+
+    snapshot = _snapshot(completed_assessment)
+    snapshot["roi"]["conservative"]["annual_savings"] = "1E+999999999"
+    _replace_snapshot(completed_assessment, snapshot)
+    formatted = []
+    rendered = []
+    monkeypatch.setattr(
+        assessment_blueprint,
+        "_format_currency",
+        lambda *_args, **_kwargs: formatted.append(True) or "POISON",
+    )
+    monkeypatch.setattr(
+        report_pdf,
+        "render_pdf",
+        lambda *_args, **_kwargs: rendered.append(True) or b"%PDF-test",
+    )
+
+    assert client.get(f"/assessment/report/{completed_assessment}").status_code == 404
+    assert client.get(f"/assessment/report/{completed_assessment}/pdf").status_code == 404
+    assert formatted == []
+    assert rendered == []
+
+
+def test_report_decimal_formatters_reject_overbound_fixed_expansion():
+    import blueprints.assessment as assessment_blueprint
+
+    with pytest.raises(ValueError):
+        assessment_blueprint._format_currency("1E+2048", decimal_places=2)
+    with pytest.raises(ValueError):
+        assessment_blueprint._format_roi_input("headcount", "1E-2048")
+
+    currency = assessment_blueprint._format_currency(
+        "1E+900", decimal_places=2
+    )
+    roi_input = assessment_blueprint._format_roi_input("headcount", "1E+900")
+    assert "E+" not in currency
+    assert "E+" not in roi_input
+
+
 def test_authorized_html_report_uses_one_focusable_shared_main(
     completed_assessment, client
 ):
@@ -811,10 +1005,17 @@ def test_reinit_reconciles_stale_catalog_and_preserves_legacy_snapshot_digest(
     manifest = load_core_catalog_manifest()
     frozen_services = {service["code"]: service for service in manifest["services"]}
     legacy_snapshot = _snapshot(completed_assessment)
+    legacy_snapshot["schema_version"] = "2.0"
+    legacy_snapshot.pop("display_labels")
+    legacy_snapshot.pop("legal")
+    legacy_snapshot.pop("legal_notices")
     for recommendation in legacy_snapshot["recommendations"]:
         code = recommendation["package"]["code"]
         recommendation["package"]["not_included"] = list(
             LEGACY_SERVICE_EXCLUSIONS[code]
+        )
+        recommendation["package"]["acceptance"] = list(
+            frozen_services[code]["acceptance"]
         )
     _replace_snapshot(completed_assessment, legacy_snapshot)
     raw_legacy_snapshot = _raw_snapshot(completed_assessment)
@@ -906,7 +1107,7 @@ def test_reinit_reconciles_stale_catalog_and_preserves_legacy_snapshot_digest(
     }
 
 
-def test_unknown_custom_service_snapshot_remains_private_404(
+def test_release_owned_custom_service_snapshot_renders_from_persisted_21(
     completed_assessment, client, monkeypatch
 ):
     snapshot = _snapshot(completed_assessment)
@@ -915,15 +1116,21 @@ def test_unknown_custom_service_snapshot_remains_private_404(
     ]
     _replace_snapshot(completed_assessment, snapshot)
 
-    def unexpected_render(*args, **kwargs):
-        pytest.fail("custom snapshot reached the PDF renderer")
+    captured = {}
 
-    monkeypatch.setattr(report_pdf, "render_pdf", unexpected_render)
+    def render(html, _base_url):
+        captured["html"] = html
+        return b"%PDF-test"
 
-    for suffix in ("", "/pdf"):
-        response = client.get(f"/assessment/report/{completed_assessment}{suffix}")
-        assert response.status_code == 404
-        _assert_private_cache_headers(response)
+    monkeypatch.setattr(report_pdf, "render_pdf", render)
+    html = client.get(f"/assessment/report/{completed_assessment}")
+    pdf = client.get(f"/assessment/report/{completed_assessment}/pdf")
+
+    assert html.status_code == pdf.status_code == 200
+    assert "客户自定义边界" in html.get_data(as_text=True)
+    assert "客户自定义边界" in captured["html"]
+    _assert_private_cache_headers(html)
+    _assert_private_cache_headers(pdf)
 
 
 def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
@@ -947,13 +1154,7 @@ def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
     assert pdf.status_code == 200
     browser_page = BeautifulSoup(html.data, "html.parser")
     pdf_page = BeautifulSoup(captured["html"], "html.parser")
-    expected_integrations = {"low": "低", "medium": "中", "high": "高"}
-    expected_categories = {
-        "foundation": "基础准备",
-        "pilot": "试点验证",
-        "standard": "标准交付",
-        "integration": "集成交付",
-    }
+    display_labels = snapshot["display_labels"]
     english_exclusions = (
         "software development",
         "system integration",
@@ -990,13 +1191,20 @@ def test_shared_report_localizes_codes_formats_money_and_defines_safe_pdf_pages(
             scenario = recommendation["scenario"]
             package = recommendation["package"]
             assert (
-                f"集成级别：{expected_integrations[scenario['integration_level']]}"
+                "集成级别："
+                f"{display_labels['integrations'][scenario['integration_level']]}"
                 in visible
             )
-            assert expected_categories[package["category"]] in visible
-            assert scenario["code"] not in visible
-            assert scenario["integration_level"] not in visible
-            assert package["category"] not in visible
+            scenario_label = display_labels["scenarios"][scenario["code"]]
+            category_label = display_labels["service_categories"][package["category"]]
+            assert scenario_label in visible
+            assert category_label in visible
+            if scenario_label != scenario["code"]:
+                assert scenario["code"] not in visible
+            if display_labels["integrations"][scenario["integration_level"]] != scenario["integration_level"]:
+                assert scenario["integration_level"] not in visible
+            if category_label != package["category"]:
+                assert package["category"] not in visible
             for risk in recommendation["risks"]:
                 assert risk["code"] not in visible
         assert all(item not in visible for item in english_exclusions)

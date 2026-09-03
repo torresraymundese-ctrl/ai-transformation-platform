@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+import sqlite3
 from types import MappingProxyType
 
 from assessment.contracts import (
@@ -20,7 +21,15 @@ from assessment.roi import calculate_roi
 from assessment.scoring import score_assessment
 from assessment_repository import build_public_config
 from assessment_validation import parse_preview_payload, validate_profile_membership
-from rule_release_repository import load_release_draft
+from content_clock import format_shanghai
+from ingestion_repository import write_governance_audit_event
+from models import get_db
+from repository import DataConflictError
+from rule_release_repository import (
+    ACTOR_PATTERN,
+    load_release_draft,
+    load_release_draft_from_db,
+)
 from rule_release_validation import compile_release_snapshot
 from validation import ValidationError
 
@@ -107,33 +116,37 @@ def preview_release(release_id: int, request: PreviewRequest) -> ReleasePreview:
         raise TypeError("invalid preview request")
     try:
         draft = load_release_draft(release_id)
-        compile_release_snapshot(draft)
-        catalog = _draft_catalog(draft, request.branch_code)
-        public_config = _draft_public_config(draft, catalog, request.branch_code)
-        profile = parse_preview_payload(_preview_payload(request))
-        validate_profile_membership(profile, catalog, public_config)
-        scores = score_assessment(catalog, profile)
-        scenarios = _draft_scenarios(draft, request.branch_code)
-        services = _draft_services(draft)
-        matches = match_scenarios(profile, scores, scenarios, services)
-        primary = matches[0]
-        roi = calculate_roi(
-            profile.roi_choices,
-            draft.roi_ranges,
-            primary.scenario,
-            primary.service,
-        )
-        report = build_report_snapshot(
-            profile,
-            scores,
-            matches,
-            roi,
-            catalog,
-            draft.roi_ranges,
-            public_copy=ReportPublicCopy(draft.public_labels.risk_explanations),
-        )
+        return _preview_draft(draft, request)
     except (AssessmentInputError, LookupError, ValidationError, ValueError) as error:
         raise ValueError("invalid rule release preview") from error
+
+
+def _preview_draft(draft, request):
+    compile_release_snapshot(draft)
+    catalog = _draft_catalog(draft, request.branch_code)
+    public_config = _draft_public_config(draft, catalog, request.branch_code)
+    profile = parse_preview_payload(_preview_payload(request))
+    validate_profile_membership(profile, catalog, public_config)
+    scores = score_assessment(catalog, profile)
+    scenarios = _draft_scenarios(draft, request.branch_code)
+    services = _draft_services(draft)
+    matches = match_scenarios(profile, scores, scenarios, services)
+    primary = matches[0]
+    roi = calculate_roi(
+        profile.roi_choices,
+        draft.roi_ranges,
+        primary.scenario,
+        primary.service,
+    )
+    report = build_report_snapshot(
+        profile,
+        scores,
+        matches,
+        roi,
+        catalog,
+        draft.roi_ranges,
+        public_copy=ReportPublicCopy(draft.public_labels.risk_explanations),
+    )
     return ReleasePreview(
         public_config=public_config,
         scores=report["scores"],
@@ -142,6 +155,122 @@ def preview_release(release_id: int, request: PreviewRequest) -> ReleasePreview:
         report_snapshot=report,
         services=_preview_services(draft, matches),
     )
+
+
+def publish_release(
+    version_id: int, expected_lock_version: int, actor: str, now
+) -> str:
+    """Validate and atomically publish one draft, returning its snapshot digest."""
+    if type(version_id) is not int or version_id <= 0:
+        raise ValueError("invalid rule release publication")
+    if type(expected_lock_version) is not int or expected_lock_version <= 0:
+        raise ValueError("invalid rule release publication")
+    if type(actor) is not str or ACTOR_PATTERN.fullmatch(actor) is None:
+        raise ValueError("invalid rule release publication")
+    try:
+        timestamp = format_shanghai(now)
+    except (TypeError, ValueError) as error:
+        raise ValueError("invalid rule release publication") from error
+
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        draft = load_release_draft_from_db(db, version_id)
+        if (
+            draft.status != "draft"
+            or draft.lock_version != expected_lock_version
+        ):
+            raise DataConflictError("rule release publication conflict")
+        pointer = db.execute(
+            "SELECT assessment_version_id FROM active_assessment_version "
+            "WHERE singleton_id=1"
+        ).fetchone()
+        prior_id = None if pointer is None else pointer["assessment_version_id"]
+        if draft.copied_from_id is None or draft.copied_from_id != prior_id:
+            raise DataConflictError("rule release publication conflict")
+        snapshot = compile_release_snapshot(draft)
+        _validate_fixed_publication_previews(draft)
+        updated = db.execute(
+            "UPDATE assessment_versions SET validated_digest=? "
+            "WHERE id=? AND status='draft' AND lock_version=?",
+            (snapshot.sha256, version_id, expected_lock_version),
+        ).rowcount
+        if updated != 1:
+            raise DataConflictError("rule release publication conflict")
+        db.execute(
+            "INSERT INTO assessment_version_snapshots "
+            "(assessment_version_id,schema_version,canonical_json,sha256,created_at) "
+            "VALUES (?,?,?,?,?)",
+            (
+                version_id,
+                snapshot.schema_version,
+                snapshot.canonical_json,
+                snapshot.sha256,
+                timestamp,
+            ),
+        )
+        published = db.execute(
+            "UPDATE assessment_versions SET status='published',published_at=?,"
+            "updated_at=?,lock_version=lock_version+1 "
+            "WHERE id=? AND status='draft' AND lock_version=?",
+            (timestamp, timestamp, version_id, expected_lock_version),
+        ).rowcount
+        if published != 1:
+            raise DataConflictError("rule release publication conflict")
+        switched = db.execute(
+            "UPDATE active_assessment_version SET assessment_version_id=?,"
+            "updated_at=? WHERE singleton_id=1 AND assessment_version_id=?",
+            (version_id, timestamp, prior_id),
+        ).rowcount
+        if switched != 1:
+            raise DataConflictError("rule release publication conflict")
+        if prior_id is not None and prior_id != version_id:
+            archived = db.execute(
+                "UPDATE assessment_versions SET status='archived',updated_at=?,"
+                "lock_version=lock_version+1 WHERE id=? AND status='published'",
+                (timestamp, prior_id),
+            ).rowcount
+            if archived != 1:
+                raise DataConflictError("rule release publication conflict")
+        write_governance_audit_event(
+            db,
+            action="assessment_release_published",
+            target_type="assessment_version",
+            target_id=version_id,
+            actor=actor,
+            metadata={"sha256": snapshot.sha256},
+            now=now,
+        )
+        db.commit()
+        return snapshot.sha256
+    except sqlite3.IntegrityError as error:
+        db.rollback()
+        raise DataConflictError("rule release publication conflict") from error
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _validate_fixed_publication_previews(draft):
+    for industry in draft.industries:
+        request = PreviewRequest(
+            branch_code=industry.code,
+            subbranch_code=industry.subbranches[0].code,
+            department_code=industry.departments[0].code,
+            company_size_code=draft.company_sizes[0].code,
+            pain_codes=(industry.pain_points[0].code,),
+            answers={
+                question.code: question.options[-1].code
+                for question in draft.questions
+            },
+            roi_choices={
+                group: next(iter(options))
+                for group, options in draft.roi_ranges.items()
+            },
+        )
+        _preview_draft(draft, request)
 
 
 def _preview_services(draft, matches):

@@ -89,6 +89,7 @@
       emitAssessmentEvent: emitAssessmentEvent,
       privacySafeAttribution: privacySafeAttribution,
       setMutableControlsBusy: setMutableControlsBusy,
+      storageSafeAssessmentState: storageSafeAssessmentState,
       trackAssessmentStartOnce: trackAssessmentStartOnce,
       validateContactValues: validateContactValues,
     };
@@ -176,17 +177,21 @@
   }
 
   function storedStateSnapshot() {
+    return storageSafeAssessmentState(state);
+  }
+
+  function storageSafeAssessmentState(source) {
     return {
-      step: state.step,
-      branchCode: state.branchCode,
-      subbranchCode: state.subbranchCode,
-      departmentCode: state.departmentCode,
-      companySizeCode: state.companySizeCode,
-      painCodes: state.painCodes.slice(),
-      answers: Object.assign({}, state.answers),
-      roiChoices: Object.assign({}, state.roiChoices),
-      submissionKey: state.submissionKey,
-      attribution: Object.assign({}, state.attribution),
+      step: source.step,
+      branchCode: source.branchCode,
+      subbranchCode: source.subbranchCode,
+      departmentCode: source.departmentCode,
+      companySizeCode: source.companySizeCode,
+      painCodes: source.painCodes.slice(),
+      answers: Object.assign({}, source.answers),
+      roiChoices: Object.assign({}, source.roiChoices),
+      submissionKey: source.submissionKey,
+      attribution: Object.assign({}, source.attribution),
     };
   }
 
@@ -591,6 +596,8 @@
 
   function buildAssessmentPayload() {
     return {
+      flow_id: configuration.flow_id,
+      rule_version: configuration.rule_version,
       schema_version: "2.0",
       profile: {
         branch_code: state.branchCode,
@@ -737,8 +744,13 @@
           "X-CSRF-Token": configuration.csrf_token,
         },
         body: JSON.stringify({
+          flow_id: configuration.flow_id,
           submission_key: state.submissionKey,
-          assessment: buildAssessmentPayload(),
+          assessment: Object.fromEntries(
+            Object.entries(buildAssessmentPayload()).filter(function (entry) {
+              return entry[0] !== "flow_id";
+            })
+          ),
           contact: contact.values,
           consent: {
             accepted: consentField.checked,

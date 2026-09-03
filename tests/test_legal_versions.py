@@ -14,6 +14,32 @@ TOMORROW = datetime(2026, 9, 1, 10, 0, 0, tzinfo=SHANGHAI)
 FAR_FUTURE = datetime(2099, 1, 1, 10, 0, 0, tzinfo=SHANGHAI)
 
 
+def _insert_pre016_consent(db, lead_id, policy_version, identity_hash):
+    """Create the exact nullable historical shape that existed before migration 016."""
+    trigger = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='lead_consent_insert_legal_guard'"
+    ).fetchone()
+    assert trigger is not None
+    db.execute("DROP TRIGGER lead_consent_insert_legal_guard")
+    try:
+        consent_id = db.execute(
+            "INSERT INTO lead_consents"
+            "(lead_id,policy_version,consented_at,source,identity_hash) "
+            "VALUES (?,?,?,?,?)",
+            (
+                lead_id,
+                policy_version,
+                "2026-08-31 10:00:00",
+                "assessment",
+                identity_hash,
+            ),
+        ).lastrowid
+    finally:
+        db.execute(trigger["sql"])
+    return consent_id
+
+
 def _raw_digest(
     document_type,
     version_code,
@@ -557,16 +583,8 @@ def test_external_privacy_reconciliation_links_matching_history_and_exact_repeat
         "INSERT INTO leads(company_name,contact_name,created_at,updated_at) VALUES ('c','n',?,?)",
         ("2026-08-31 10:00:00", "2026-08-31 10:00:00"),
     ).lastrowid
-    matching = db.execute(
-        "INSERT INTO lead_consents(lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,?,?,?,?)",
-        (lead_id, "2026-08-19", "2026-08-31 10:00:00", "assessment", "hash1"),
-    ).lastrowid
-    other = db.execute(
-        "INSERT INTO lead_consents(lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,?,?,?,?)",
-        (lead_id, "old", "2026-08-31 10:00:00", "assessment", "hash2"),
-    ).lastrowid
+    matching = _insert_pre016_consent(db, lead_id, "2026-08-19", "hash1")
+    other = _insert_pre016_consent(db, lead_id, "old", "hash2")
     db.commit()
 
     version_id = reconcile_external_privacy_reference(
@@ -620,17 +638,9 @@ def test_internal_privacy_switch_archives_external_and_preserves_consent_fk(db):
         "VALUES ('c','n',?,?)",
         ("2026-08-31 10:00:00", "2026-08-31 10:00:00"),
     ).lastrowid
-    consent_id = db.execute(
-        "INSERT INTO lead_consents(lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,?,?,?,?)",
-        (
-            lead_id,
-            "legacy-policy-v1",
-            "2026-08-31 10:00:00",
-            "assessment",
-            "identity-hash",
-        ),
-    ).lastrowid
+    consent_id = _insert_pre016_consent(
+        db, lead_id, "legacy-policy-v1", "identity-hash"
+    )
     db.commit()
     external_id = reconcile_external_privacy_reference(
         db,

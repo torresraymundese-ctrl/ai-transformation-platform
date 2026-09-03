@@ -32,6 +32,8 @@ from models import get_db
 
 DEFAULT_VERSION_CODE = "v2.0-2026-08-19"
 MAX_REPORT_SNAPSHOT_BYTES = 128 * 1024
+MAX_REPORT_DECIMAL_DIGITS = 256
+MAX_REPORT_DECIMAL_FIXED_LENGTH = 2048
 PRIVATE_REPORT_KEYS = frozenset(
     {
         "company",
@@ -60,6 +62,17 @@ REPORT_SNAPSHOT_KEYS = frozenset(
         "roadmap_years_1_3",
         "disclaimer",
     }
+)
+REPORT_21_KEYS = REPORT_SNAPSHOT_KEYS | {
+    "display_labels",
+    "legal",
+    "legal_notices",
+}
+LEGAL_DOCUMENT_ORDER = (
+    "privacy",
+    "terms",
+    "roi_disclaimer",
+    "ai_content_notice",
 )
 ROI_BAND_KEYS = frozenset(
     {
@@ -425,9 +438,21 @@ def build_public_config(
 
 def find_by_submission_key(db, submission_key: str):
     return db.execute(
-        "SELECT id,lead_id FROM assessments WHERE submission_key=?",
+        "SELECT id,lead_id,rule_version_id,branch_code FROM assessments "
+        "WHERE submission_key=?",
         (submission_key,),
     ).fetchone()
+
+
+def load_assessment_legal_ids(db, assessment_id: int):
+    return {
+        row["document_type"]: row["legal_version_id"]
+        for row in db.execute(
+            "SELECT document_type,legal_version_id FROM assessment_legal_versions "
+            "WHERE assessment_id=?",
+            (assessment_id,),
+        )
+    }
 
 
 def load_report_snapshot(assessment_id: int):
@@ -457,7 +482,7 @@ def load_report_snapshot(assessment_id: int):
         try:
             snapshot = json.loads(row["report_snapshot_json"])
             stored_dimensions = json.loads(row["dimension_scores_json"])
-            if not _valid_report_snapshot(snapshot):
+            if not _valid_report_snapshot_dispatch(snapshot):
                 return None
             assessment = snapshot["assessment"]
             scores = snapshot["scores"]
@@ -479,6 +504,10 @@ def load_report_snapshot(assessment_id: int):
                 return None
             if scores["maturity_code"] != row["maturity_code"]:
                 return None
+            if snapshot["schema_version"] == "2.1" and not _legal_snapshot_matches(
+                db, assessment_id, snapshot
+            ):
+                return None
             return snapshot
         except (json.JSONDecodeError, ValueError, TypeError, RecursionError):
             return None
@@ -496,8 +525,7 @@ def report_summary_from_snapshot(serialized_snapshot):
         snapshot = json.loads(serialized_snapshot)
         if (
             not isinstance(snapshot, dict)
-            or snapshot.get("schema_version") != "2.0"
-            or not _valid_report_snapshot(snapshot)
+            or not _valid_report_snapshot_dispatch(snapshot)
         ):
             return None
         return (
@@ -514,6 +542,378 @@ def report_summary_from_snapshot(serialized_snapshot):
         return None
 
 
+def _valid_report_snapshot_dispatch(snapshot) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if snapshot.get("schema_version") == "2.0":
+        return _valid_report_snapshot(snapshot)
+    if snapshot.get("schema_version") == "2.1":
+        return _valid_report_snapshot_21(snapshot)
+    return False
+
+
+def _legal_snapshot_matches(db, assessment_id, snapshot) -> bool:
+    rows = {
+        row["document_type"]: row
+        for row in db.execute(
+            "SELECT a.document_type,a.legal_version_id,a.version_code,a.digest,"
+            "d.mode,d.external_url,d.body_summary,d.content_sha256 "
+            "FROM assessment_legal_versions a JOIN legal_documents d "
+            "ON d.id=a.legal_version_id WHERE a.assessment_id=?",
+            (assessment_id,),
+        )
+    }
+    if set(rows) != set(LEGAL_DOCUMENT_ORDER):
+        return False
+    for item in snapshot["legal"]:
+        row = rows[item["document_type"]]
+        if item != {
+            "document_type": row["document_type"],
+            "legal_version_id": row["legal_version_id"],
+            "version_code": row["version_code"],
+            "content_sha256": row["digest"],
+            "public_path": f'/legal/{row["document_type"]}/{row["version_code"]}',
+            "external_url": row["external_url"],
+        }:
+            return False
+        if row["content_sha256"] != row["digest"]:
+            return False
+    notices = snapshot["legal_notices"]
+    return (
+        notices["roi_disclaimer"] == rows["roi_disclaimer"]["body_summary"]
+        and notices["ai_content_notice"]
+        == rows["ai_content_notice"]["body_summary"]
+    )
+
+
+def _valid_report_snapshot_21(snapshot) -> bool:
+    if _contains_private_report_key(snapshot) or set(snapshot) != REPORT_21_KEYS:
+        return False
+    assessment = snapshot["assessment"]
+    scores = snapshot["scores"]
+    recommendations = snapshot["recommendations"]
+    return (
+        snapshot["schema_version"] == "2.1"
+        and _bounded_text(snapshot["rule_version"], 64)
+        and _bounded_text(snapshot["disclaimer"], 2_000)
+        and _valid_report_assessment_21(assessment)
+        and _valid_report_scores_21(scores)
+        and _valid_recommendations_21(recommendations)
+        and _valid_roi_21(snapshot["roi"])
+        and _valid_calculation_basis_21(
+            snapshot["calculation_basis"], assessment, recommendations
+        )
+        and _valid_roadmap(snapshot["roadmap_90_days"], "days", 4)
+        and _valid_roadmap(snapshot["roadmap_years_1_3"], "year", 3)
+        and _valid_display_labels_21(snapshot["display_labels"])
+        and _valid_legal_21(snapshot["legal"], snapshot["legal_notices"])
+    )
+
+
+def _valid_display_labels_21(value) -> bool:
+    expected = {
+        "dimensions": set(DIMENSION_ORDER),
+        "maturities": {"explore", "pilot", "scale", "collaborate"},
+        "scenarios": set(SCENARIO_CODES),
+        "integrations": {"low", "medium", "high"},
+        "service_categories": {"foundation", "pilot", "standard", "integration"},
+        "risk_labels": set(RISK_EXPLANATIONS),
+        "roi_bands": {"conservative", "midpoint", "ideal"},
+        "roi_groups": set(ROI_OPTION_CODES),
+    }
+    if not isinstance(value, dict) or set(value) != set(expected) | {"roi_options"}:
+        return False
+    if any(
+        not _valid_label_map(value[name], codes)
+        for name, codes in expected.items()
+    ):
+        return False
+    options = value["roi_options"]
+    return (
+        isinstance(options, dict)
+        and set(options) == set(ROI_OPTION_CODES)
+        and all(
+            _valid_label_map(options[group], set(ROI_OPTION_CODES[group]))
+            for group in ROI_OPTION_CODES
+        )
+    )
+
+
+def _valid_label_map(value, expected_codes) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(expected_codes)
+        and all(_bounded_text(label, 200) for label in value.values())
+    )
+
+
+def _valid_report_assessment_21(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "branch_code",
+        "subbranch_code",
+        "department_code",
+        "company_size_code",
+        "pain_codes",
+        "answers",
+        "roi_choices",
+    }:
+        return False
+    pains = value["pain_codes"]
+    answers = value["answers"]
+    choices = value["roi_choices"]
+    return (
+        value["branch_code"] in BRANCH_CODES
+        and all(
+            _bounded_text(value[name], 64)
+            for name in ("subbranch_code", "department_code", "company_size_code")
+        )
+        and isinstance(pains, list)
+        and 1 <= len(pains) <= 3
+        and len(pains) == len(set(pains))
+        and all(_bounded_text(code, 64) for code in pains)
+        and isinstance(answers, dict)
+        and set(answers) == set(QUESTION_CODES)
+        and all(option in ANSWER_OPTION_CODES for option in answers.values())
+        and isinstance(choices, dict)
+        and set(choices) == set(ROI_OPTION_CODES)
+        and all(choices[group] in ROI_OPTION_CODES[group] for group in ROI_OPTION_CODES)
+    )
+
+
+def _valid_report_scores_21(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "overall_score",
+        "maturity_code",
+        "dimension_scores",
+        "reference_line",
+        "strongest",
+        "weakest",
+    }:
+        return False
+    overall = value["overall_score"]
+    dimensions = value["dimension_scores"]
+    reference = value["reference_line"]
+    return (
+        type(overall) is int
+        and 0 <= overall <= 100
+        and _bounded_text(value["maturity_code"], 64)
+        and _valid_dimension_values(dimensions)
+        and _valid_dimension_values(reference)
+        and _valid_dimension_explanation(value["strongest"])
+        and _valid_dimension_explanation(value["weakest"])
+        and value["strongest"]["dimension"]
+        == max(DIMENSION_ORDER, key=dimensions.get)
+        and value["weakest"]["dimension"]
+        == min(DIMENSION_ORDER, key=dimensions.get)
+    )
+
+
+def _valid_recommendations_21(value) -> bool:
+    if not isinstance(value, list) or not 1 <= len(value) <= 3:
+        return False
+    if not all(_valid_recommendation_21(item) for item in value):
+        return False
+    codes = [item["scenario"]["code"] for item in value]
+    return len(codes) == len(set(codes))
+
+
+def _valid_recommendation_21(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "scenario",
+        "match_score",
+        "components",
+        "reason_codes",
+        "reasons",
+        "risks",
+        "package",
+    }:
+        return False
+    scenario = value["scenario"]
+    components = value["components"]
+    match_score = value["match_score"]
+    if not isinstance(scenario, dict) or set(scenario) != {
+        "code",
+        "category_code",
+        "integration_level",
+        "delivery_weeks",
+    }:
+        return False
+    weeks = scenario["delivery_weeks"]
+    if not (
+        scenario["code"] in SCENARIO_CODES
+        and _bounded_text(scenario["category_code"], 64)
+        and scenario["integration_level"] in {"low", "medium", "high"}
+        and _valid_weeks(weeks)
+        and type(match_score) is int
+        and 0 <= match_score <= 100
+        and isinstance(components, dict)
+        and set(components) == set(COMPONENT_MAX)
+        and all(
+            type(components[name]) is int
+            and 0 <= components[name] <= maximum
+            for name, maximum in COMPONENT_MAX.items()
+        )
+        and sum(components.values()) == match_score
+    ):
+        return False
+    reason_codes = value["reason_codes"]
+    reasons = value["reasons"]
+    risks = value["risks"]
+    return (
+        isinstance(reason_codes, list)
+        and 1 <= len(reason_codes) <= len(REASON_TEMPLATES)
+        and len(reason_codes) == len(set(reason_codes))
+        and all(code in REASON_TEMPLATES for code in reason_codes)
+        and isinstance(reasons, list)
+        and len(reasons) == len(reason_codes)
+        and all(_bounded_text(item) for item in reasons)
+        and isinstance(risks, list)
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"code", "explanation"}
+            and item["code"] in RISK_EXPLANATIONS
+            and _bounded_text(item["explanation"])
+            for item in risks
+        )
+        and _valid_package_21(value["package"])
+    )
+
+
+def _valid_package_21(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "code",
+        "category",
+        "public_name",
+        "budget_range",
+        "delivery_weeks",
+        "deliverables",
+        "implementation_steps",
+        "prerequisites",
+        "not_included",
+        "acceptance",
+        "support_days",
+    }:
+        return False
+    budget = value["budget_range"]
+    low = _decimal_21(budget.get("min")) if isinstance(budget, dict) else None
+    high = _decimal_21(budget.get("max")) if isinstance(budget, dict) else None
+    return (
+        value["code"] in FROZEN_SERVICES
+        and value["category"] in {"foundation", "pilot", "standard", "integration"}
+        and _bounded_text(value["public_name"], 200)
+        and isinstance(budget, dict)
+        and set(budget) == {"min", "max"}
+        and low is not None
+        and high is not None
+        and Decimal(0) <= low <= high
+        and _valid_weeks(value["delivery_weeks"])
+        and all(
+            _valid_text_list(value[name])
+            for name in (
+                "deliverables",
+                "implementation_steps",
+                "prerequisites",
+                "not_included",
+                "acceptance",
+            )
+        )
+        and type(value["support_days"]) is int
+        and 0 <= value["support_days"] <= 3650
+    )
+
+
+def _valid_calculation_basis_21(value, assessment, recommendations) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "selected_scenario",
+        "selected_roi_choices",
+        "coefficients",
+        "selected_roi_bands",
+    }:
+        return False
+    if (
+        value["selected_scenario"] != recommendations[0]["scenario"]["code"]
+        or value["selected_roi_choices"] != assessment["roi_choices"]
+    ):
+        return False
+    coefficients = value["coefficients"]
+    bands = value["selected_roi_bands"]
+    return (
+        isinstance(coefficients, dict)
+        and set(coefficients)
+        == {"efficiency", "loss_improvement", "annual_support_rate"}
+        and all(
+            isinstance(items, list)
+            and len(items) == 3
+            and all(_decimal_21(item) is not None for item in items)
+            for items in coefficients.values()
+        )
+        and isinstance(bands, dict)
+        and set(bands) == set(ROI_OPTION_CODES)
+        and all(
+            isinstance(bands[group], dict)
+            and set(bands[group]) == {"low", "mid", "high"}
+            and all(
+                _decimal_21(item) is not None
+                for item in bands[group].values()
+            )
+            for group in ROI_OPTION_CODES
+        )
+    )
+
+
+def _valid_legal_21(legal, notices) -> bool:
+    if (
+        not isinstance(legal, list)
+        or tuple(item.get("document_type") for item in legal if isinstance(item, dict))
+        != LEGAL_DOCUMENT_ORDER
+        or not isinstance(notices, dict)
+        or set(notices) != {"roi_disclaimer", "ai_content_notice"}
+        or not all(_bounded_text(value, 2_000) for value in notices.values())
+    ):
+        return False
+    for item in legal:
+        if not isinstance(item, dict) or set(item) != {
+            "document_type",
+            "legal_version_id",
+            "version_code",
+            "content_sha256",
+            "public_path",
+            "external_url",
+        }:
+            return False
+        if not (
+            type(item["legal_version_id"]) is int
+            and item["legal_version_id"] > 0
+            and _bounded_text(item["version_code"], 64)
+            and isinstance(item["content_sha256"], str)
+            and len(item["content_sha256"]) == 64
+            and all(char in "0123456789abcdef" for char in item["content_sha256"])
+            and item["public_path"]
+            == f'/legal/{item["document_type"]}/{item["version_code"]}'
+            and item["external_url"] is None
+        ):
+            return False
+    return True
+
+
+def _valid_weeks(value):
+    return (
+        isinstance(value, dict)
+        and set(value) == {"min", "max"}
+        and type(value["min"]) is int
+        and type(value["max"]) is int
+        and 1 <= value["min"] <= value["max"] <= 520
+    )
+
+
+def _valid_text_list(value):
+    return (
+        isinstance(value, list)
+        and 1 <= len(value) <= 100
+        and all(_bounded_text(item, 2_000) for item in value)
+    )
+
+
 def insert_completed(
     db,
     lead_id,
@@ -523,6 +923,7 @@ def insert_completed(
     scores,
     matches,
     report_snapshot,
+    legal_bundle,
     completed_at,
 ):
     timestamp = completed_at.isoformat(sep=" ")
@@ -562,6 +963,24 @@ def insert_completed(
             timestamp,
         ),
     )
+    for document_type, version in (
+        ("privacy", legal_bundle.privacy),
+        ("terms", legal_bundle.terms),
+        ("roi_disclaimer", legal_bundle.roi_disclaimer),
+        ("ai_content_notice", legal_bundle.ai_content_notice),
+    ):
+        db.execute(
+            "INSERT INTO assessment_legal_versions "
+            "(assessment_id,document_type,legal_version_id,version_code,digest) "
+            "VALUES (?,?,?,?,?)",
+            (
+                assessment_id,
+                document_type,
+                version.id,
+                version.version_code,
+                version.content_sha256,
+            ),
+        )
     return assessment_id
 
 
@@ -911,6 +1330,38 @@ def _valid_roi(value) -> bool:
     return True
 
 
+def _valid_roi_21(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "conservative",
+        "midpoint",
+        "ideal",
+    }:
+        return False
+    nonnegative_money = (
+        "current_annual_cost",
+        "labor_savings",
+        "loss_savings",
+        "annual_savings",
+        "initial_investment",
+        "annual_support",
+        "three_year_support",
+    )
+    for band in value.values():
+        if not isinstance(band, dict) or set(band) != ROI_BAND_KEYS:
+            return False
+        parsed = {name: _decimal_21(item) for name, item in band.items()}
+        if any(parsed[field] is None or parsed[field] < 0 for field in nonnegative_money):
+            return False
+        if parsed["three_year_net"] is None:
+            return False
+        payback = parsed["payback_months"]
+        if band["payback_months"] is not None and (
+            payback is None or payback <= 0
+        ):
+            return False
+    return True
+
+
 def _valid_roadmap(value, position_key, expected_length) -> bool:
     if not (
         isinstance(value, list)
@@ -989,6 +1440,37 @@ def _valid_calculation_basis(value, assessment, recommendations) -> bool:
 
 def _finite_decimal(value) -> bool:
     return _decimal(value) is not None
+
+
+def _decimal_21(value):
+    if type(value) is not str or not value or len(value) > MAX_REPORT_DECIMAL_FIXED_LENGTH:
+        return None
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+    if not parsed.is_finite() or str(parsed) != value:
+        return None
+    sign, raw_digits, exponent = parsed.as_tuple()
+    digits = list(raw_digits)
+    while digits and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    effective_digits = max(1, len(digits))
+    if effective_digits > MAX_REPORT_DECIMAL_DIGITS:
+        return None
+    if not digits:
+        fixed_length = 1 + sign
+    elif exponent >= 0:
+        fixed_length = sign + len(digits) + exponent
+    else:
+        point = len(digits) + exponent
+        fixed_length = (
+            sign + len(digits) + 1
+            if point > 0
+            else sign + 2 + (-point) + len(digits)
+        )
+    return parsed if fixed_length <= MAX_REPORT_DECIMAL_FIXED_LENGTH else None
 
 
 def _exact_integer_mapping(value, expected) -> bool:

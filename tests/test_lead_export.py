@@ -18,10 +18,16 @@ from assessment.contracts import (
     Contact,
 )
 from assessment_completion_service import complete_assessment
+from assessment.matching import match_scenarios
+from assessment.reporting import build_report_snapshot
+from assessment.roi import calculate_roi
+from assessment.scoring import score_assessment
 import lead_export
 import lead_repository
 import models
+from rule_release_runtime import load_active_rule_bundle
 from validation import ValidationError
+from tests.assessment_flow_helpers import issue_test_service_flow
 
 
 EXPECTED_EXPORT_HEADERS = (
@@ -85,13 +91,17 @@ def _completion_request(*, suffix="one"):
             email=f"{suffix}@example.invalid",
             wechat=f"wx_{suffix}",
         ),
-        consent=Consent(accepted=True, policy_version="2026-08-19"),
+        consent=Consent(accepted=True, policy_version="test-privacy-v1"),
         attribution=Attribution(source="website_assessment"),
     )
 
 
 def _create_completed_lead(*, suffix="one", status="new"):
-    result = complete_assessment(_completion_request(suffix=suffix), "ip-hash")
+    result = complete_assessment(
+        _completion_request(suffix=suffix),
+        "ip-hash",
+        issue_test_service_flow(),
+    )
     db = models.get_db()
     try:
         db.execute(
@@ -106,6 +116,35 @@ def _create_completed_lead(*, suffix="one", status="new"):
     finally:
         db.close()
     return result.lead_id, result.assessment_id
+
+
+def _historical_v20_snapshot():
+    profile = _completion_request(suffix="historical").profile
+    db = models.get_db()
+    try:
+        bundle = load_active_rule_bundle(db, profile.branch_code)
+    finally:
+        db.close()
+    scores = score_assessment(bundle.catalog, profile)
+    matches = match_scenarios(
+        profile, scores, bundle.scenarios, bundle.services
+    )
+    roi = calculate_roi(
+        profile.roi_choices,
+        bundle.roi_ranges,
+        matches[0].scenario,
+        matches[0].service,
+    )
+    snapshot = build_report_snapshot(
+        profile,
+        scores,
+        matches,
+        roi,
+        bundle.catalog,
+        bundle.roi_ranges,
+    )
+    snapshot["recommendations"] = snapshot["recommendations"][:1]
+    return snapshot
 
 
 def _post_export(admin_client, **filters):
@@ -163,7 +202,7 @@ def test_csv_normalizes_nfkc_controls_quotes_newlines_and_phone_as_text():
     assert rows[1][3] == "'=SUM(A1)"
 
 
-def test_report_summary_dispatcher_accepts_only_complete_frozen_v2_snapshot(client):
+def test_report_summary_dispatcher_accepts_complete_20_and_21_snapshots(client):
     _, assessment_id = _create_completed_lead(suffix="dispatcher")
     raw = _db_row(
         "SELECT report_snapshot_json FROM assessments WHERE id=?",
@@ -177,11 +216,35 @@ def test_report_summary_dispatcher_accepts_only_complete_frozen_v2_snapshot(clie
 
     assert assessment_repository.report_summary_from_snapshot(raw) == expected
 
-    snapshot["schema_version"] = "2.1"
-    assert assessment_repository.report_summary_from_snapshot(json.dumps(snapshot)) is None
-    snapshot["schema_version"] = "2.0"
-    snapshot["contact_email"] = "private@example.invalid"
-    assert assessment_repository.report_summary_from_snapshot(json.dumps(snapshot)) is None
+    historical = _historical_v20_snapshot()
+    assert assessment_repository._valid_report_assessment(historical["assessment"])
+    assert assessment_repository._valid_report_scores(
+        historical["scores"], historical["assessment"]
+    )
+    for recommendation in historical["recommendations"]:
+        assert assessment_repository._valid_recommendation(
+            recommendation
+        ), recommendation
+    assert assessment_repository._valid_roi(historical["roi"])
+    assert assessment_repository._valid_calculation_basis(
+        historical["calculation_basis"],
+        historical["assessment"],
+        historical["recommendations"],
+    )
+    assert assessment_repository.report_summary_from_snapshot(
+        json.dumps(historical)
+    ) == expected
+
+    malformed = json.loads(raw)
+    malformed["legal"] = malformed["legal"][:-1]
+    assert assessment_repository.report_summary_from_snapshot(
+        json.dumps(malformed)
+    ) is None
+    malformed = json.loads(raw)
+    malformed["contact_email"] = "private@example.invalid"
+    assert assessment_repository.report_summary_from_snapshot(
+        json.dumps(malformed)
+    ) is None
     assert assessment_repository.report_summary_from_snapshot("not-json") is None
     assert assessment_repository.report_summary_from_snapshot(
         " " * (assessment_repository.MAX_REPORT_SNAPSHOT_BYTES + 1)

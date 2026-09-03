@@ -221,7 +221,7 @@
         <section class="package-deliverables"><h4>交付物</h4><ul>{% for item in package.deliverables %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-steps"><h4>实施步骤</h4><ol>{% for item in package.implementation_steps %}<li>{{ item }}</li>{% endfor %}</ol></section>
         <section class="package-cooperation"><h4>客户配合</h4><ul>{% for item in package.prerequisites %}<li>{{ item }}</li>{% endfor %}</ul></section>
-        <section class="package-exclusions"><h4>明确不包含</h4><ul>{% for item in public_service_not_included(package) %}<li>{{ item }}</li>{% endfor %}</ul></section>
+        <section class="package-exclusions"><h4>明确不包含</h4><ul>{% for item in (package.not_included if snapshot.schema_version == "2.1" else public_service_not_included(package)) %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-acceptance"><h4>验收标准</h4><ul>{% for item in package.acceptance %}<li>{{ item }}</li>{% endfor %}</ul></section>
         <section class="package-support"><h4>培训、质保与支持</h4><p>交付后支持 {{ package.support_days }} 天。</p></section>
       </div>
@@ -246,6 +246,25 @@
       {% endfor %}
     </ul>
   </section>
+
+  {% if snapshot.schema_version == "2.1" %}
+  <section id="legal-notices" class="report-section" aria-labelledby="legal-notices-title">
+    <div class="report-section-heading">
+      <p class="report-section-number">08</p>
+      <div>
+        <h2 id="legal-notices-title">版本化法律说明</h2>
+        <p>以下说明和链接均来自本次评估完成时冻结的版本。</p>
+      </div>
+    </div>
+    <p>{{ snapshot.legal_notices.roi_disclaimer }}</p>
+    <p>{{ snapshot.legal_notices.ai_content_notice }}</p>
+    <ul>
+      {% for document in snapshot.legal %}
+      <li><a href="{{ document.public_path }}">{{ document.document_type }} · {{ document.version_code }}</a></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
 
   <footer id="report-disclaimer" class="report-disclaimer">
     <h2>重要说明</h2>

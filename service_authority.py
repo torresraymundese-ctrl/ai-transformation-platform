@@ -1,6 +1,7 @@
 """Exact live-V2 service authority shared by publication and public reads."""
 
 from dataclasses import dataclass
+from decimal import Decimal
 import re
 
 from content_json import ContentJsonError, decode_database_json
@@ -15,6 +16,8 @@ SERVICE_CATEGORY_CODES = frozenset({"foundation", "pilot", "standard", "integrat
 INTEGRATION_CODES = ("low", "medium", "high")
 CORE_CODE = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 DELIVERABLE_CODE = re.compile(r"^[a-z0-9]+(?:(?:_|:|-)[a-z0-9]+)*$")
+MAX_DECIMAL_DIGITS = 256
+MAX_DECIMAL_FIXED_LENGTH = 2048
 
 
 @dataclass(frozen=True)
@@ -46,8 +49,8 @@ class ServiceAuthority:
     code: str
     category_code: str
     public_name: str
-    min_budget: int | float
-    max_budget: int | float
+    min_budget: int | float | Decimal
+    max_budget: int | float | Decimal
     min_weeks: int
     max_weeks: int
     implementation_steps: tuple[str, ...]
@@ -83,6 +86,42 @@ def _exact_core_code(value):
 
 def _exact_deliverable_code(value):
     return type(value) is str and DELIVERABLE_CODE.fullmatch(value) is not None
+
+
+def valid_service_decimal(value):
+    if type(value) is not Decimal or not value.is_finite():
+        return False
+    _sign, digits, exponent = value.as_tuple()
+    digits = list(digits)
+    while len(digits) > 1 and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    digit_count = max(len(digits), 1)
+    if digit_count > MAX_DECIMAL_DIGITS:
+        return False
+    if exponent >= 0:
+        fixed_length = digit_count + exponent
+    else:
+        decimal_position = digit_count + exponent
+        fixed_length = (
+            2 - decimal_position + digit_count
+            if decimal_position <= 0
+            else digit_count + 1
+        )
+    return fixed_length <= MAX_DECIMAL_FIXED_LENGTH
+
+
+def valid_service_budget_range(minimum, maximum):
+    if type(minimum) is Decimal or type(maximum) is Decimal:
+        return (
+            valid_service_decimal(minimum)
+            and valid_service_decimal(maximum)
+            and minimum > 0
+            and minimum <= maximum
+        )
+    if type(minimum) not in (int, float) or type(maximum) not in (int, float):
+        return False
+    return is_valid_public_budget_range(minimum, maximum)
 
 
 def _deduplicated_facets(rows):
@@ -175,7 +214,7 @@ def valid_service_authority(authority):
         and type(authority.category_code) is str
         and authority.category_code in SERVICE_CATEGORY_CODES
         and is_exact_nonblank_text(authority.public_name)
-        and is_valid_public_budget_range(authority.min_budget, authority.max_budget)
+        and valid_service_budget_range(authority.min_budget, authority.max_budget)
         and is_valid_public_week_range(authority.min_weeks, authority.max_weeks)
         and all(
             values and all(is_exact_nonblank_text(value) for value in values)

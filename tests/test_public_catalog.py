@@ -24,6 +24,18 @@ import publishing_repository
 from publishing_service import copy_revision, create_content_draft, publish_content, publish_due_content, save_content_draft, schedule_content
 from publishing_service import archive_content
 from pagination import Page
+from rule_release_repository import (
+    copy_active_release,
+    load_release_draft,
+    save_release_draft,
+)
+from rule_release_service import publish_release
+from tests.assessment_flow_helpers import (
+    FLOW_NOW,
+    bound_completion_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 @pytest.mark.parametrize(
@@ -318,28 +330,16 @@ def test_scenario_has_one_terminal_assessment_action_pair(published_catalog):
 def test_scenario_summary_preserves_exact_published_budget_values(
     published_catalog, db, monkeypatch, minimum, maximum, expected,
 ):
-    """Rounding a legal published budget to a shorter 万 value must fail."""
-    if type(minimum) is int and minimum > 2**63 - 1:
-        scenario = dict(catalog.public_scenario(
-            "mfg-knowledge-assistant", NOW_DATETIME
-        ))
-        scenario["budget"] = ((minimum, maximum),)
-        monkeypatch.setattr(
-            public_catalog_blueprint.catalog,
-            "public_scenario",
-            lambda slug, now: scenario,
-        )
-    else:
-        service = db.execute(
-            "SELECT service_id FROM scenario_services link "
-            "JOIN scenarios scenario ON scenario.id=link.scenario_id "
-            "WHERE scenario.code='mfg_knowledge_assistant' LIMIT 1"
-        ).fetchone()
-        db.execute(
-            "UPDATE services SET min_budget=?,max_budget=? WHERE id=?",
-            (minimum, maximum, service["service_id"]),
-        )
-        db.commit()
+    """The renderer preserves exact values supplied by its catalog projection."""
+    scenario = dict(catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    ))
+    scenario["budget"] = ((minimum, maximum),)
+    monkeypatch.setattr(
+        public_catalog_blueprint.catalog,
+        "public_scenario",
+        lambda slug, now: scenario,
+    )
 
     document = page(published_catalog.get("/scenarios/mfg-knowledge-assistant"))
     budget = document.select_one('[data-detail-facts] [data-content-section="budget"] dd')
@@ -347,7 +347,307 @@ def test_scenario_summary_preserves_exact_published_budget_values(
     assert budget.get_text(" ", strip=True) == expected
 
 
-def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_catalog):
+def test_scenario_rule_facts_switch_only_with_active_release_while_narrative_revisions_independently(
+    published_catalog, db,
+):
+    ensure_test_legal_bundle()
+    config = issue_real_config_flow(published_catalog)
+    completion = published_catalog.post(
+        "/api/v2/assessment/complete",
+        json=bound_completion_payload(
+            config,
+            submission_key="00000000-0000-4000-8000-000000000044",
+        ),
+        headers={"X-CSRF-Token": config["csrf_token"]},
+    )
+    assert completion.status_code == 200
+    assessment_id = completion.get_json()["assessment_id"]
+    report_before = db.execute(
+        "SELECT report_snapshot_json FROM assessments WHERE id=?",
+        (assessment_id,),
+    ).fetchone()[0]
+    before = catalog.public_scenario("mfg-knowledge-assistant", NOW_DATETIME)
+    assert before is not None
+    scenario_row = db.execute(
+        "SELECT ci.id,ci.lock_version,g.scenario_id FROM content_items ci "
+        "JOIN content_groups g ON g.id=ci.content_group_id "
+        "JOIN scenarios scenario ON scenario.id=g.scenario_id "
+        "WHERE ci.entry_type='scenario' AND ci.status='published' "
+        "AND scenario.code='mfg_knowledge_assistant'"
+    ).fetchone()
+    service_row = db.execute(
+        "SELECT service.id FROM scenario_services link "
+        "JOIN services service ON service.id=link.service_id "
+        "WHERE link.scenario_id=? ORDER BY service.id LIMIT 1",
+        (scenario_row["scenario_id"],),
+    ).fetchone()
+
+    db.execute(
+        "UPDATE services SET min_budget=10001,max_budget=12345 WHERE id=?",
+        (service_row["id"],),
+    )
+    db.commit()
+    after_tamper = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
+    assert after_tamper["budget"] == before["budget"]
+    release_id = copy_active_release(
+        "v2.1-public-catalog-authority",
+        "Public catalog authority",
+        "test-admin",
+        FLOW_NOW,
+    )
+    draft = load_release_draft(release_id)
+    release_scenario = next(
+        item for item in draft.scenarios
+        if item.code == "mfg_knowledge_assistant"
+    )
+    release_service = next(
+        item for item in draft.services
+        if item.code == release_scenario.service_code
+    )
+    changed_service = replace(
+        release_service,
+        min_budget=release_service.min_budget + 1234,
+        max_budget=release_service.max_budget + 2345,
+    )
+    changed_draft = replace(
+        draft,
+        services=tuple(
+            changed_service if item.code == changed_service.code else item
+            for item in draft.services
+        ),
+        public_labels=replace(
+            draft.public_labels,
+            maturities={
+                **draft.public_labels.maturities,
+                "explore": "快照探索阶段",
+            },
+        ),
+    )
+    next_lock = save_release_draft(
+        release_id, draft.lock_version, changed_draft, FLOW_NOW
+    )
+    publish_release(
+        release_id,
+        next_lock,
+        "test-admin",
+        FLOW_NOW + timedelta(minutes=1),
+    )
+    after_publish = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
+    assert after_publish["budget"] == (
+        (changed_service.min_budget, changed_service.max_budget),
+    )
+    assert after_publish["title"] == before["title"]
+    detail_document = page(
+        published_catalog.get("/scenarios/mfg-knowledge-assistant")
+    )
+    list_document = page(published_catalog.get("/scenarios"))
+    assert "快照探索阶段" in detail_document.get_text(" ", strip=True)
+    matching_card = list_document.select_one(
+        '[data-scenario-code="mfg_knowledge_assistant"]'
+    )
+    assert "快照探索阶段" in matching_card.get_text(" ", strip=True)
+    assert db.execute(
+        "SELECT report_snapshot_json FROM assessments WHERE id=?",
+        (assessment_id,),
+    ).fetchone()[0] == report_before
+
+
+    revision_id = copy_revision(
+        scenario_row["id"], actor="test-admin", now=NOW_DATETIME
+    )
+    narrative = publishing_repository.load_content_draft(db, revision_id)
+    narrative = replace(
+        narrative,
+        title="独立叙事版本",
+        summary="叙事发布不改变活动规则快照事实。",
+    )
+    narrative_lock = save_content_draft(
+        revision_id, 1, narrative, actor="test-admin", now=NOW_DATETIME
+    )
+    publish_content(
+        revision_id,
+        narrative_lock,
+        actor="test-admin",
+        now=NOW_DATETIME,
+    )
+    after_narrative = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
+    assert after_narrative["title"] == "独立叙事版本"
+    assert after_narrative["summary"] == "叙事发布不改变活动规则快照事实。"
+    assert after_narrative["budget"] == after_publish["budget"]
+    assert db.execute(
+        "SELECT report_snapshot_json FROM assessments WHERE id=?",
+        (assessment_id,),
+    ).fetchone()[0] == report_before
+
+
+def test_active_catalog_uses_narrative_identity_with_rule_bundle_relations(
+    published_catalog, db
+):
+    scenario_slug = "mfg-knowledge-assistant"
+    before_scenario = catalog.public_scenario(scenario_slug, NOW_DATETIME)
+    before_industry = catalog.public_industry("manufacturing", NOW_DATETIME)
+    assert before_scenario is not None
+    assert before_industry is not None
+    scenario_row = db.execute(
+        "SELECT g.scenario_id FROM content_items ci JOIN content_groups g "
+        "ON g.id=ci.content_group_id WHERE ci.entry_type='scenario' "
+        "AND ci.slug=? AND ci.status='published'",
+        (scenario_slug,),
+    ).fetchone()
+    service_row = db.execute(
+        "SELECT service_id FROM scenario_services WHERE scenario_id=?",
+        (scenario_row["scenario_id"],),
+    ).fetchone()
+    assert service_row is not None
+
+    for table in (
+        "scenario_services",
+        "scenario_departments",
+        "scenario_pains",
+        "scenario_branches",
+    ):
+        db.execute(
+            f"DELETE FROM {table} WHERE scenario_id=?",
+            (scenario_row["scenario_id"],),
+        )
+    db.execute(
+        "UPDATE scenarios SET public_name='可变场景污染',"
+        "minimum_business_value=0,minimum_process=0,minimum_data=0,"
+        "minimum_systems=0,minimum_organization=0,minimum_delivery=0,"
+        "integration_level='high',min_weeks=1,max_weeks=1,risk_codes_json='[]' "
+        "WHERE id=?",
+        (scenario_row["scenario_id"],),
+    )
+    db.execute(
+        "UPDATE services SET public_name='可变服务污染',min_budget=1,max_budget=1,"
+        "min_weeks=1,max_weeks=1,support_days=1,"
+        "support_description='可变支持污染',public_disclaimer='可变声明污染' "
+        "WHERE id=?",
+        (service_row["service_id"],),
+    )
+    db.commit()
+
+    after_scenario = catalog.public_scenario(scenario_slug, NOW_DATETIME)
+    after_industry = catalog.public_industry("manufacturing", NOW_DATETIME)
+    assert after_scenario == before_scenario
+    assert after_industry == before_industry
+    assert after_scenario["title"] == before_scenario["title"]
+    assert after_scenario["slug"] == scenario_slug
+    assert tuple(
+        (service["code"], service["public_name"])
+        for service in after_industry["services"]
+    ) == tuple(
+        (service["code"], service["public_name"])
+        for service in before_industry["services"]
+    )
+    identities = db.execute(
+        "SELECT s.code,s.status,svc.code,svc.status FROM scenarios s,services svc "
+        "WHERE s.id=? AND svc.id=?",
+        (scenario_row["scenario_id"], service_row["service_id"]),
+    ).fetchone()
+    assert tuple(identities) == (
+        "mfg_knowledge_assistant",
+        "published",
+        "knowledge_assistant_pilot",
+        "published",
+    )
+
+
+def test_active_catalog_top_level_order_ignores_mutable_sort_order(
+    published_catalog, db
+):
+    page_request = catalog.PageRequest(1, 50)
+    before = (
+        tuple(item["code"] for item in catalog.public_industries(NOW_DATETIME)),
+        tuple(
+            item.code for item in catalog.public_scenarios(
+                catalog.ScenarioFilters(), page_request, NOW_DATETIME
+            ).items
+        ),
+    )
+    for table in ("industries", "scenarios"):
+        db.execute(
+            f"UPDATE {table} SET sort_order=1000-sort_order "
+            "WHERE status='published'"
+        )
+    db.commit()
+
+    after = (
+        tuple(item["code"] for item in catalog.public_industries(NOW_DATETIME)),
+        tuple(
+            item.code for item in catalog.public_scenarios(
+                catalog.ScenarioFilters(), page_request, NOW_DATETIME
+            ).items
+        ),
+    )
+
+    assert after == before
+
+
+def test_active_catalog_top_level_order_switches_with_published_release(
+    published_catalog, db
+):
+    page_request = catalog.PageRequest(1, 50)
+    before = (
+        tuple(item["code"] for item in catalog.public_industries(NOW_DATETIME)),
+        tuple(
+            item.code for item in catalog.public_scenarios(
+                catalog.ScenarioFilters(), page_request, NOW_DATETIME
+            ).items
+        ),
+    )
+    release_id = copy_active_release(
+        "v2.1-public-order",
+        "Public order",
+        "test-admin",
+        FLOW_NOW,
+    )
+    draft = load_release_draft(release_id)
+
+    def swap_first(items):
+        return (
+            replace(items[1], sort_order=1),
+            replace(items[0], sort_order=2),
+            *items[2:],
+        )
+
+    reordered = replace(
+        draft,
+        industries=swap_first(draft.industries),
+        scenarios=swap_first(draft.scenarios),
+    )
+    next_lock = save_release_draft(
+        release_id, draft.lock_version, reordered, FLOW_NOW
+    )
+    publish_release(
+        release_id,
+        next_lock,
+        "test-admin",
+        FLOW_NOW + timedelta(minutes=1),
+    )
+
+    after = (
+        tuple(item["code"] for item in catalog.public_industries(NOW_DATETIME)),
+        tuple(
+            item.code for item in catalog.public_scenarios(
+                catalog.ScenarioFilters(), page_request, NOW_DATETIME
+            ).items
+        ),
+    )
+    assert after == tuple(
+        (values[1], values[0], *values[2:]) for values in before
+    )
+
+
+def test_scenario_filter_groups_controls_and_cards_show_real_metadata(
+    published_catalog, db
+):
     """Ungrouped controls or a title-only scenario card must break the catalog design."""
     document = page(published_catalog.get(
         "/scenarios?industry=manufacturing&department=production&maturity=explore"
@@ -386,7 +686,17 @@ def test_scenario_filter_groups_controls_and_cards_show_real_metadata(published_
         "成熟度",
     ]
     metadata_text = metadata.get_text(" ", strip=True)
-    for published_label in ("制造业", "生产", "探索", "试点"):
+    active_id = db.execute(
+        "SELECT assessment_version_id FROM active_assessment_version "
+        "WHERE singleton_id=1"
+    ).fetchone()[0]
+    maturity_labels = load_release_draft(active_id).public_labels.maturities
+    for published_label in (
+        "制造业",
+        "生产",
+        maturity_labels["explore"],
+        maturity_labels["pilot"],
+    ):
         assert published_label in metadata_text
     assert "mfg_knowledge_assistant" not in rows[0].get_text(" ", strip=True)
 
@@ -1126,15 +1436,30 @@ def test_scenario_required_sections_use_explicit_reviewed_inputs(published_catal
     assert all("_" not in node.get_text() for node in risks)
 
 
-def test_scenario_with_missing_required_structured_data_is_not_publicly_available(published_catalog, db):
+def test_active_snapshot_prerequisites_ignore_mutable_service_tampering(
+    published_catalog, db
+):
+    before = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
+    assert before is not None
     service = db.execute(
         "SELECT service_id FROM scenario_services link JOIN scenarios s ON s.id=link.scenario_id "
         "WHERE s.code='mfg_knowledge_assistant' LIMIT 1"
     ).fetchone()
     db.execute("UPDATE services SET prerequisites_json='[]' WHERE id=?", (service["service_id"],))
     db.commit()
+    assert db.execute(
+        "SELECT prerequisites_json FROM services WHERE id=?",
+        (service["service_id"],),
+    ).fetchone()[0] == "[]"
 
-    assert published_catalog.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    ) == before
+    assert published_catalog.get(
+        "/scenarios/mfg-knowledge-assistant"
+    ).status_code == 200
 
 
 def _saved_scenario_revision(db):
@@ -1387,40 +1712,17 @@ def _archive_knowledge_service_with_published_replacement(db):
     return scenario
 
 
-def test_industry_nested_scenario_ignores_archived_service_with_published_replacement(
+def test_archived_snapshot_service_identity_is_not_replaced_by_mutable_relation(
     client, db
 ):
     current, industry_revision = _saved_industry_revision(db)
     scenario = _archive_knowledge_service_with_published_replacement(db)
-    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    _assert_public_service_section(client, scenario["slug"])
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 404
+    assert "mfg_knowledge_assistant" not in {
+        item["data-scenario-code"]
+        for item in page(client.get("/scenarios")).select("[data-scenario-code]")
+    }
     assert client.get("/industries/manufacturing").status_code == 200
-
-    candidates = _published_scenario_candidates(db, current["industry_id"])
-    other_candidates = tuple(
-        candidate_id for candidate_id, _ in candidates if candidate_id != scenario["id"]
-    )
-    assert other_candidates
-    for candidate_id in other_candidates:
-        lock_version = db.execute(
-            "SELECT lock_version FROM content_items WHERE id=?", (candidate_id,)
-        ).fetchone()[0]
-        archive_content(
-            candidate_id,
-            lock_version,
-            actor="test-admin",
-            now=NOW_DATETIME + timedelta(minutes=1),
-        )
-    assert _published_scenario_candidates(db, current["industry_id"]) == (
-        (scenario["id"], "mfg_knowledge_assistant"),
-    )
-    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    assert client.get("/industries/manufacturing").status_code == 200
-    industry_before = _publication_state_snapshot(
-        db, (current["id"], industry_revision)
-    )
-    scenario_before = _publication_state_snapshot(db, (scenario["id"],))
-    services_before = _scenario_service_state_snapshot(db, scenario["scenario_id"])
 
     result = publish_content(
         industry_revision,
@@ -1433,38 +1735,7 @@ def test_industry_nested_scenario_ignores_archived_service_with_published_replac
         industry_revision,
         current["id"],
     )
-    assert _publication_state_snapshot(db, (scenario["id"],)) == scenario_before
-    assert _scenario_service_state_snapshot(
-        db, scenario["scenario_id"]
-    ) == services_before
-    old = db.execute(
-        "SELECT status,lock_version,archived_at FROM content_items WHERE id=?",
-        (current["id"],),
-    ).fetchone()
-    new = db.execute(
-        "SELECT status,lock_version,published_at FROM content_items WHERE id=?",
-        (industry_revision,),
-    ).fetchone()
-    assert (old["status"], old["lock_version"], old["archived_at"]) == (
-        "archived", 2, "2026-08-24 10:02:00",
-    )
-    assert (new["status"], new["lock_version"], new["published_at"]) == (
-        "published", 2, "2026-08-24 10:02:00",
-    )
-    assert industry_before != _publication_state_snapshot(
-        db, (current["id"], industry_revision)
-    )
-    published_audits = db.execute(
-        "SELECT details_json FROM content_audit_events WHERE content_item_id=? "
-        "AND event_code='content_published' ORDER BY id",
-        (industry_revision,),
-    ).fetchall()
-    assert len(published_audits) == 1
-    assert json.loads(published_audits[0]["details_json"]) == {
-        "archived_id": current["id"],
-    }
-    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    _assert_public_service_section(client, scenario["slug"])
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 404
     assert client.get("/industries/manufacturing").status_code == 200
 
 
@@ -1473,8 +1744,7 @@ def test_direct_scenario_publish_remains_strict_with_archived_service_and_publis
 ):
     publish_catalog(db)
     scenario = _archive_knowledge_service_with_published_replacement(db)
-    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    _assert_public_service_section(client, scenario["slug"])
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 404
     assert client.get("/industries/manufacturing").status_code == 200
     revision_id = copy_revision(
         scenario["id"], actor="test-admin", now=NOW_DATETIME
@@ -1493,8 +1763,7 @@ def test_direct_scenario_publish_remains_strict_with_archived_service_and_publis
     _assert_unpublished_revision(
         db, scenario["id"], revision_id, lock_version=1
     )
-    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    _assert_public_service_section(client, scenario["slug"])
+    assert client.get(f"/scenarios/{scenario['slug']}").status_code == 404
     assert client.get("/industries/manufacturing").status_code == 200
 
 
@@ -1643,10 +1912,10 @@ def test_industry_candidate_requires_a_published_branch_in_that_industry(client,
     assert _published_scenario_candidates(db, current["industry_id"]) == ()
     assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
     filtered = page(client.get("/scenarios?industry=manufacturing"))
-    assert "mfg_knowledge_assistant" not in {
+    assert "mfg_knowledge_assistant" in {
         card["data-scenario-code"] for card in filtered.select("[data-scenario-code]")
     }
-    assert client.get("/industries/manufacturing").status_code == 404
+    assert client.get("/industries/manufacturing").status_code == 200
     industry_before = _publication_state_snapshot(
         db, (current["id"], industry_revision)
     )
@@ -1669,7 +1938,7 @@ def test_industry_candidate_requires_a_published_branch_in_that_industry(client,
         db, current["id"], industry_revision, lock_version=1
     )
     assert client.get(f"/scenarios/{scenario['slug']}").status_code == 200
-    assert client.get("/industries/manufacturing").status_code == 404
+    assert client.get("/industries/manufacturing").status_code == 200
 
 
 def test_industry_publish_keeps_public_scenario_healthy_after_relation_target_archive(
@@ -2121,16 +2390,40 @@ def test_public_scenario_read_gate_rejects_a_mixed_blob_required_text_source(cli
         "ON g.scenario_id=s.id JOIN content_items ci ON ci.content_group_id=g.id "
         "WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
     ).fetchone()
+    release_owned = {"industry", "department", "pain", "deliverable"}
+    before = None
+    if source in release_owned:
+        publish_catalog(db)
+        before = catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        )
     _corrupt_one_scenario_text_source(
         db, scenario["id"], scenario["content_item_id"], source, sqlite3.Binary(b"not-text")
     )
-    publish_catalog(db)
+    if source != "deliverable":
+        publish_catalog(db)
 
-    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    expected_status = 200 if source in release_owned else 404
+    assert client.get(
+        "/scenarios/mfg-knowledge-assistant"
+    ).status_code == expected_status
     document = page(client.get("/scenarios"))
-    assert "mfg_knowledge_assistant" not in {
+    codes = {
         card["data-scenario-code"] for card in document.select("[data-scenario-code]")
     }
+    assert ("mfg_knowledge_assistant" in codes) is (source in release_owned)
+    if source == "deliverable":
+        stored = db.execute(
+            "SELECT title FROM service_deliverables WHERE service_id IN ("
+            "SELECT service_id FROM scenario_services WHERE scenario_id=?) "
+            "AND status='published' ORDER BY id LIMIT 1",
+            (scenario["id"],),
+        ).fetchone()[0]
+        assert stored == b"not-text"
+    if source in release_owned:
+        assert catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        ) == before
 
 
 @pytest.mark.parametrize("source", ("pain", "department", "company_size"))
@@ -2142,10 +2435,10 @@ def test_public_industry_read_gate_rejects_a_mixed_blob_required_text_source(cli
     publish_catalog(db)
 
     document = page(client.get("/industries"))
-    assert "manufacturing" not in {
+    assert "manufacturing" in {
         card["data-industry-code"] for card in document.select("[data-industry-code]")
     }
-    assert client.get("/industries/manufacturing").status_code == 404
+    assert client.get("/industries/manufacturing").status_code == 200
 
 
 def test_archived_invalid_industry_text_row_does_not_block_a_complete_replacement(db):
@@ -2532,11 +2825,21 @@ def test_due_surrogate_block_failure_is_validation_failed_and_does_not_stop_a_he
 @pytest.mark.parametrize("source", (
     "implementation_steps_json", "prerequisites_json", "acceptance_json",
 ))
-def test_surrogate_service_json_is_private_and_rejected_by_formal_publication(client, db, source):
+def test_surrogate_service_json_is_rejected_for_content_publish_but_not_read_from_mutable_rows(
+    client, db, source
+):
     current, revision_id, lock_version = _saved_scenario_revision(db)
+    before = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
     _replace_scenario_json_source(
         db, current["scenario_id"], revision_id, source, r'["\ud800"]'
     )
+    assert db.execute(
+        f"SELECT {source} FROM services WHERE id=("
+        "SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)",
+        (current["scenario_id"],),
+    ).fetchone()[0] == r'["\ud800"]'
 
     with pytest.raises(ContentValidationError) as error:
         publish_content(revision_id, lock_version, actor="test-admin", now=NOW_DATETIME)
@@ -2554,10 +2857,13 @@ def test_surrogate_service_json_is_private_and_rejected_by_formal_publication(cl
     db.commit()
     detail = client.get("/scenarios/mfg-knowledge-assistant")
     listing = client.get("/scenarios")
-    assert detail.status_code == 404
-    assert "mfg_knowledge_assistant" not in {
+    assert detail.status_code == 200
+    assert "mfg_knowledge_assistant" in {
         card["data-scenario-code"] for card in page(listing).select("[data-scenario-code]")
     }
+    assert catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    ) == before
 
 
 def test_bounded_database_json_keeps_normal_chinese_and_emoji_text():
@@ -2834,7 +3140,17 @@ def test_formal_publish_rejects_non_text_json_without_archiving_current_scenario
 
 
 @pytest.mark.parametrize("source", ("steps", "acceptance", "budget", "core_name", "narrative", "malformed_json"))
-def test_public_scenario_fails_closed_for_incomplete_or_malformed_required_data(client, db, source):
+def test_public_scenario_separates_snapshot_rules_from_narrative_integrity(
+    client, db, source
+):
+    service_rule_sources = {"steps", "acceptance", "budget", "malformed_json"}
+    release_owned = service_rule_sources | {"core_name"}
+    before = None
+    if source in release_owned:
+        publish_catalog(db)
+        before = catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        )
     scenario = db.execute("SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'").fetchone()
     if source == "steps":
         db.execute("UPDATE services SET implementation_steps_json='[null]' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
@@ -2849,9 +3165,29 @@ def test_public_scenario_fails_closed_for_incomplete_or_malformed_required_data(
     else:
         db.execute("UPDATE services SET implementation_steps_json='{' WHERE id=(SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)", (scenario["id"],))
     db.commit()
-    publish_catalog(db)
+    if source not in release_owned:
+        publish_catalog(db)
 
-    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    expected_status = 200 if source in release_owned else 404
+    assert client.get(
+        "/scenarios/mfg-knowledge-assistant"
+    ).status_code == expected_status
+    if source in service_rule_sources:
+        column, expected = {
+            "steps": ("implementation_steps_json", "[null]"),
+            "acceptance": ("acceptance_json", '[""]'),
+            "budget": ("min_budget", 0),
+            "malformed_json": ("implementation_steps_json", "{"),
+        }[source]
+        stored = db.execute(
+            f"SELECT {column} FROM services WHERE id=("
+            "SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)",
+            (scenario["id"],),
+        ).fetchone()[0]
+        assert stored == expected
+        assert catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        ) == before
 
 
 def test_all_public_complete_seeded_scenario_drafts_pass_the_formal_publish_gate(db):
@@ -2936,7 +3272,7 @@ def test_archived_industry_branch_cannot_match_public_industry_filter(published_
     db.commit()
 
     document = page(published_catalog.get("/scenarios?industry=manufacturing"))
-    assert "mfg_knowledge_assistant" not in {
+    assert "mfg_knowledge_assistant" in {
         card["data-scenario-code"] for card in document.select("[data-scenario-code]")
     }
 
@@ -2985,7 +3321,7 @@ def test_scenario_without_published_pains_is_private_404(client, db):
     db.execute("DELETE FROM scenario_pains WHERE scenario_id=?", (scenario_id,))
     db.commit()
 
-    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
 
 
 @pytest.mark.parametrize(("column", "raw_json"), (
@@ -3006,10 +3342,16 @@ def test_scenario_without_published_pains_is_private_404(client, db):
     ("risk_codes_json", '"process_variance"'),
     ("risk_codes_json", '{"process_variance":"风险"}'),
 ))
-def test_wrong_json_containers_are_private_404_not_iterated_as_values(client, db, column, raw_json):
+def test_active_snapshot_ignores_wrong_json_containers_in_mutable_rule_rows(
+    client, db, column, raw_json
+):
     scenario = db.execute(
         "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
     ).fetchone()
+    publish_catalog(db)
+    before = catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    )
     if column == "risk_codes_json":
         db.execute("UPDATE scenarios SET risk_codes_json=? WHERE id=?", (raw_json, scenario["id"]))
     else:
@@ -3018,10 +3360,22 @@ def test_wrong_json_containers_are_private_404_not_iterated_as_values(client, db
             (raw_json, scenario["id"]),
         )
     db.commit()
-    publish_catalog(db)
     client.application.config["PROPAGATE_EXCEPTIONS"] = False
 
-    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
+    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 200
+    stored = db.execute(
+        (
+            "SELECT risk_codes_json FROM scenarios WHERE id=?"
+            if column == "risk_codes_json"
+            else f"SELECT {column} FROM services WHERE id=("
+            "SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)"
+        ),
+        (scenario["id"],),
+    ).fetchone()[0]
+    assert stored == raw_json
+    assert catalog.public_scenario(
+        "mfg-knowledge-assistant", NOW_DATETIME
+    ) == before
 
 
 @pytest.mark.parametrize(("source", "raw"), (
@@ -3034,7 +3388,7 @@ def test_wrong_json_containers_are_private_404_not_iterated_as_values(client, db
     ("prerequisites_json", sqlite3.Binary(b'["prerequisite"]')),
     ("acceptance_json", sqlite3.Binary(b'["acceptance"]')),
 ))
-def test_public_catalog_fails_closed_for_non_text_or_unbounded_json(
+def test_public_catalog_separates_narrative_json_from_snapshot_rule_json(
     client, db, source, raw
 ):
     scenario = db.execute(
@@ -3042,18 +3396,44 @@ def test_public_catalog_fails_closed_for_non_text_or_unbounded_json(
         "ON g.scenario_id=s.id JOIN content_items ci ON ci.content_group_id=g.id "
         "WHERE s.code='mfg_knowledge_assistant' AND ci.status='draft'"
     ).fetchone()
+    is_narrative = source == "settings_json"
+    before = None
+    if not is_narrative:
+        publish_catalog(db)
+        before = catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        )
     _replace_scenario_json_source(db, scenario["id"], scenario["content_item_id"], source, raw)
-    publish_catalog(db)
+    if is_narrative:
+        publish_catalog(db)
     client.application.config["PROPAGATE_EXCEPTIONS"] = False
 
     detail = client.get("/scenarios/mfg-knowledge-assistant")
     listing = client.get("/scenarios")
 
-    assert detail.status_code == 404
+    assert detail.status_code == (404 if is_narrative else 200)
     assert listing.status_code == 200
-    assert "mfg_knowledge_assistant" not in {
+    codes = {
         card["data-scenario-code"] for card in page(listing).select("[data-scenario-code]")
     }
+    assert ("mfg_knowledge_assistant" in codes) is (not is_narrative)
+    if not is_narrative:
+        expected_raw = bytes(raw) if isinstance(raw, memoryview) else raw
+        if source == "risk_codes_json":
+            stored = db.execute(
+                "SELECT risk_codes_json FROM scenarios WHERE id=?",
+                (scenario["id"],),
+            ).fetchone()[0]
+        else:
+            stored = db.execute(
+                f"SELECT {source} FROM services WHERE id=("
+                "SELECT service_id FROM scenario_services WHERE scenario_id=? LIMIT 1)",
+                (scenario["id"],),
+            ).fetchone()[0]
+        assert stored == expected_raw
+        assert catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME
+        ) == before
 
 
 @pytest.mark.parametrize(("missing", "expected_total"), (("inputs", 11), ("services", 9)))
@@ -3120,8 +3500,14 @@ def test_industry_list_and_detail_require_real_published_sections(client, db, mi
     publish_catalog(db)
 
     document = page(client.get("/industries"))
-    assert "manufacturing" not in {card["data-industry-code"] for card in document.select("[data-industry-code]")}
-    assert client.get("/industries/manufacturing").status_code == 404
+    is_optional_release_copy = missing in {"pains", "company_sizes"}
+    assert ("manufacturing" in {
+        card["data-industry-code"]
+        for card in document.select("[data-industry-code]")
+    }) is is_optional_release_copy
+    assert client.get("/industries/manufacturing").status_code == (
+        200 if is_optional_release_copy else 404
+    )
 
 
 def _corrupt_scenario_range(db, scenario_id, source, minimum, maximum):
@@ -3176,26 +3562,51 @@ def test_formal_publish_rejects_nonfinite_budget_and_nonintegral_weeks_without_r
     (
         ("service_budget", float("inf"), float("inf")),
         ("service_budget", float("-inf"), float("-inf")),
+        ("service_budget", float("nan"), float("nan")),
         ("core_weeks", 1.5, 2.5),
         ("service_weeks", 1.5, 2.5),
     ),
-    ids=("positive-infinity-budget", "negative-infinity-budget", "fractional-core-weeks", "fractional-service-weeks"),
+    ids=(
+        "positive-infinity-budget",
+        "negative-infinity-budget",
+        "nan-budget",
+        "fractional-core-weeks",
+        "fractional-service-weeks",
+    ),
 )
-def test_public_scenario_fails_closed_for_legacy_nonfinite_budget_and_nonintegral_weeks(
-    client, db, source, minimum, maximum
+def test_public_authority_dto_rejects_nonfinite_budget_and_nonintegral_weeks(
+    db, source, minimum, maximum
 ):
-    """Never keep a legacy range on a public card when its detail is unsafe."""
-    scenario_id = db.execute(
-        "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
-    ).fetchone()[0]
-    _corrupt_scenario_range(db, scenario_id, source, minimum, maximum)
+    """Boundary validation remains covered without consulting mutable rule rows."""
     publish_catalog(db)
+    if source == "core_weeks":
+        scenario = db.execute(
+            "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
+        ).fetchone()
+        authority = catalog._scenario_authority(db, scenario["id"])
+        malformed = replace(
+            authority, min_weeks=minimum, max_weeks=maximum
+        )
+        assert catalog.public_scenario(
+            "mfg-knowledge-assistant", NOW_DATETIME, authority=malformed
+        ) is None
+        return
 
-    assert client.get("/scenarios/mfg-knowledge-assistant").status_code == 404
-    assert "mfg_knowledge_assistant" not in {
-        card["data-scenario-code"]
-        for card in page(client.get("/scenarios")).select("[data-scenario-code]")
-    }
+    service = db.execute(
+        "SELECT id FROM services WHERE code='foundation_workshop' "
+        "AND status='published'"
+    ).fetchone()
+    authority = catalog._service_authority(db, service["id"], NOW_DATETIME)
+    assert authority is not None
+    if source == "service_budget":
+        malformed = replace(
+            authority, min_budget=minimum, max_budget=maximum
+        )
+    else:
+        malformed = replace(
+            authority, min_weeks=minimum, max_weeks=maximum
+        )
+    assert catalog.valid_service_authority(malformed) is False
 
 
 def test_due_nonintegral_core_weeks_failure_is_isolated_from_a_healthy_scenario(client, db):

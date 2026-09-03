@@ -5,7 +5,6 @@ query repositories or the database, so a passing result proves the same linked
 records and Session boundaries that an operator or visitor can observe.
 """
 
-from copy import deepcopy
 from datetime import datetime, timezone
 import uuid
 
@@ -13,6 +12,12 @@ from bs4 import BeautifulSoup
 
 from conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 import report_pdf
+from tests.assessment_flow_helpers import (
+    bound_completion_payload,
+    bound_preview_payload,
+    ensure_test_legal_bundle,
+    issue_real_config_flow,
+)
 
 
 PRIVACY_CONFIG = {
@@ -24,24 +29,7 @@ PRIVACY_CONFIG = {
 
 def complete_answer_payload(config):
     """Build one complete assessment solely from the published HTTP config."""
-    return {
-        "schema_version": config["schema_version"],
-        "profile": {
-            "branch_code": config["branch"]["code"],
-            "subbranch_code": config["subbranches"][0]["code"],
-            "department_code": config["departments"][0]["code"],
-            "company_size_code": config["company_sizes"][1]["code"],
-            "pain_codes": [config["pain_points"][0]["code"]],
-        },
-        "answers": {
-            question["code"]: question["options"][-1]["code"]
-            for question in config["questions"]
-        },
-        "roi_choices": {
-            code: options[1]
-            for code, options in config["roi_options"].items()
-        },
-    }
+    return bound_preview_payload(config)
 
 
 def complete_with_contact_and_consent(
@@ -54,24 +42,18 @@ def complete_with_contact_and_consent(
     consent=True,
 ):
     """Submit the real completion endpoint with the config's CSRF/policy data."""
+    payload = bound_completion_payload(config, submission_key=submission_key)
+    payload["contact"] = {
+        "company_name": company_name,
+        "contact_name": "核心旅程联系人",
+        "phone": phone,
+        "email": "journey@example.invalid",
+        "wechat": "journey_wechat",
+    }
+    payload["consent"]["accepted"] = consent
     return client.post(
         "/api/v2/assessment/complete",
-        json={
-            "submission_key": submission_key,
-            "assessment": complete_answer_payload(config),
-            "contact": {
-                "company_name": company_name,
-                "contact_name": "核心旅程联系人",
-                "phone": phone,
-                "email": "journey@example.invalid",
-                "wechat": "journey_wechat",
-            },
-            "consent": {
-                "accepted": consent,
-                "policy_version": config["consent_policy_version"],
-            },
-            "attribution": {"source": "website_assessment"},
-        },
+        json=payload,
         headers={"X-CSRF-Token": config["csrf_token"]},
     )
 
@@ -159,6 +141,7 @@ def admin_can_see_linked_records(
 
 
 def _enable_core_journey(client):
+    ensure_test_legal_bundle()
     client.application.config.update(PRIVACY_CONFIG)
     client.application.config["APPOINTMENT_NOW_PROVIDER"] = lambda: datetime(
         2026, 8, 21, 2, 0, tzinfo=timezone.utc
@@ -169,9 +152,7 @@ def test_user_can_assess_unlock_report_download_pdf_and_request_appointment(
     client, monkeypatch
 ):
     _enable_core_journey(client)
-    config_response = client.get("/api/v2/assessment/config/manufacturing")
-    assert config_response.status_code == 200
-    config = config_response.get_json()
+    config = issue_real_config_flow(client)
 
     preview = client.post(
         "/api/v2/assessment/preview",
@@ -219,9 +200,7 @@ def test_user_can_assess_unlock_report_download_pdf_and_request_appointment(
 
 def test_session_consent_and_idempotency_boundaries_are_visible_over_http(client):
     _enable_core_journey(client)
-    config = client.get(
-        "/api/v2/assessment/config/manufacturing"
-    ).get_json()
+    config = issue_real_config_flow(client)
     completion_key = str(uuid.uuid4())
     appointment_key = str(uuid.uuid4())
     company_name = "核心边界验证企业"
@@ -269,22 +248,15 @@ def test_session_consent_and_idempotency_boundaries_are_visible_over_http(client
     assert appointment_replay.get_json() == first_appointment.get_json()
 
     invalid_company = "无同意不得写入企业"
-    invalid_payload = deepcopy(
-        {
-            "submission_key": str(uuid.uuid4()),
-            "assessment": complete_answer_payload(config),
-            "contact": {
-                "company_name": invalid_company,
-                "contact_name": "无同意联系人",
-                "phone": "13700137000",
-            },
-            "consent": {
-                "accepted": False,
-                "policy_version": config["consent_policy_version"],
-            },
-            "attribution": {"source": "website_assessment"},
-        }
+    invalid_payload = bound_completion_payload(
+        config, submission_key=str(uuid.uuid4())
     )
+    invalid_payload["contact"] = {
+        "company_name": invalid_company,
+        "contact_name": "无同意联系人",
+        "phone": "13700137000",
+    }
+    invalid_payload["consent"]["accepted"] = False
     rejected = client.post(
         "/api/v2/assessment/complete",
         json=invalid_payload,

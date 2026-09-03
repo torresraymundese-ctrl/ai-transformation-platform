@@ -497,16 +497,28 @@ def find_or_create(
     return lead_id
 
 
-def record_consent(db, lead_id, consent, identity_hash, consented_at=None):
+def record_consent(
+    db, lead_id, consent, identity_hash, legal_version_id, consented_at=None
+):
     policy_version, source = validate_consent(consent, identity_hash)
+    if type(legal_version_id) is not int or legal_version_id <= 0:
+        raise ValidationError("legal_version_id has an invalid value")
     timestamp = (consented_at or current_shanghai_datetime()).isoformat(
         sep=" "
     )
     return db.execute(
         "INSERT INTO lead_consents "
-        "(lead_id,policy_version,consented_at,source,identity_hash,created_at) "
-        "VALUES (?,?,?,?,?,?)",
-        (lead_id, policy_version, timestamp, source, identity_hash, timestamp),
+        "(lead_id,policy_version,consented_at,source,identity_hash,created_at,legal_version_id) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (
+            lead_id,
+            policy_version,
+            timestamp,
+            source,
+            identity_hash,
+            timestamp,
+            legal_version_id,
+        ),
     ).lastrowid
 
 

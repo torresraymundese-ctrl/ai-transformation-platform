@@ -13,6 +13,7 @@ import pytest
 import resource_repository
 from bs4 import BeautifulSoup
 from pagination import PageRequest, parse_pagination
+from tests.assessment_flow_helpers import ensure_test_legal_bundle
 
 
 def test_page_request_accepts_only_documented_sizes_and_safe_defaults():
@@ -132,6 +133,7 @@ def test_followup_queue_excludes_nulls_and_orders_ascending(db):
 
 
 def test_search_escapes_sql_wildcards_and_never_recovers_anonymized_contacts(db):
+    privacy_id = ensure_test_legal_bundle()["privacy"]
     literal = db.execute(
         "INSERT INTO leads (company_name,contact_name,status,created_at,updated_at) "
         "VALUES ('literal%company','visible','new','2026-08-01 10:00:00','2026-08-01 10:00:00')"
@@ -151,9 +153,17 @@ def test_search_escapes_sql_wildcards_and_never_recovers_anonymized_contacts(db)
         (hidden, "private-marker", "private@example.invalid", '{"text":"private-marker"}', "2026-08-01 10:00:00"),
     )
     db.execute(
-        "INSERT INTO lead_consents (lead_id,policy_version,consented_at,source,identity_hash) "
-        "VALUES (?,?,?,?,?)",
-        (hidden, "v1", "2026-08-01 10:00:00", "private-marker", "digest"),
+        "INSERT INTO lead_consents "
+        "(lead_id,policy_version,consented_at,source,identity_hash,legal_version_id) "
+        "VALUES (?,?,?,?,?,?)",
+        (
+            hidden,
+            "test-privacy-v1",
+            "2026-08-01 10:00:00",
+            "private-marker",
+            "digest",
+            privacy_id,
+        ),
     )
     db.commit()
 

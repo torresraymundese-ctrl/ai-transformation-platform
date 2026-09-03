@@ -25,9 +25,20 @@ import analytics_repository
 import assessment_repository
 import appointment_repository
 import report_pdf
+from assessment_flow import (
+    AssessmentFlowError,
+    issue_config_flow,
+    load_issued_flow_bundles,
+    require_assessment_flow,
+)
+from content_clock import as_shanghai, shanghai_now
 from assessment.contracts import AssessmentInputError
-from assessment.reporting import RISK_LABELS, public_service_not_included
-from assessment.scoring import score_assessment
+from assessment.reporting import (
+    ROI_CHOICE_ORDER,
+    RISK_LABELS,
+    public_service_not_included,
+)
+from assessment.scoring import DIMENSION_ORDER, score_assessment
 from assessment_completion_service import complete_assessment
 from assessment_validation import (
     AssessmentRulesUnavailable,
@@ -35,6 +46,8 @@ from assessment_validation import (
     appointment_date_window,
     current_shanghai_datetime,
     parse_appointment_payload,
+    parse_bound_completion_payload,
+    parse_bound_preview_payload,
     parse_completion_payload,
     parse_preview_payload,
     validate_profile_membership,
@@ -168,8 +181,13 @@ ROI_INPUT_FIELDS = (
 def assessment_config(branch_code):
     try:
         branch_code = validated_branch_code(branch_code)
-        privacy = _privacy_disclosure()
-        catalog, public_config = _published_context(branch_code)
+        now = _assessment_flow_now()
+        issued_flow = issue_config_flow(session, branch_code, now)
+        rule_bundle = issued_flow.rule_bundle
+        legal_bundle = issued_flow.legal_bundle
+        privacy = _privacy_disclosure(legal_bundle.privacy)
+        catalog = rule_bundle.catalog
+        public_config = rule_bundle.public_config
     except ValidationError:
         return _invalid_response()
     except _RULE_FAILURES as error:
@@ -178,8 +196,9 @@ def assessment_config(branch_code):
     return jsonify(
         {
             "schema_version": "2.0",
+            "flow_id": issued_flow.flow_id,
             "rule_version": catalog.version_code,
-            "consent_policy_version": CONSENT_POLICY_VERSION,
+            "consent_policy_version": legal_bundle.privacy.version_code,
             "branch": public_config["branch"],
             "subbranches": public_config["subbranches"],
             "departments": public_config["departments"],
@@ -216,12 +235,20 @@ def assessment_config(branch_code):
 @bp.post("/api/v2/assessment/preview")
 def assessment_preview():
     try:
-        profile = parse_preview_payload(request.get_json(silent=True))
-        _privacy_disclosure()
-        catalog, public_config = _published_context(profile.branch_code)
+        flow_id, displayed_rule_version, profile = parse_bound_preview_payload(
+            request.get_json(silent=True)
+        )
+        issued_flow = require_assessment_flow(
+            session, flow_id, profile.branch_code, _assessment_flow_now()
+        )
+        rule_bundle, legal_bundle = load_issued_flow_bundles(issued_flow)
+        _privacy_disclosure(legal_bundle.privacy)
+        if displayed_rule_version != rule_bundle.version_code:
+            raise ValidationError("invalid assessment payload")
+        catalog, public_config = rule_bundle.catalog, rule_bundle.public_config
         validate_profile_membership(profile, catalog, public_config)
         scores = score_assessment(catalog, profile)
-    except ValidationError:
+    except (ValidationError, AssessmentFlowError):
         return _invalid_response()
     except AssessmentInputError:
         return _invalid_response()
@@ -248,16 +275,27 @@ def assessment_preview():
 def assessment_complete():
     require_public_csrf()
     try:
-        completion_request = parse_completion_payload(request.get_json(silent=True))
-        _privacy_disclosure()
-        catalog, public_config = _published_context(
-            completion_request.profile.branch_code
+        flow_id, displayed_rule_version, completion_request = parse_bound_completion_payload(
+            request.get_json(silent=True)
         )
+        issued_flow = require_assessment_flow(
+            session,
+            flow_id,
+            completion_request.profile.branch_code,
+            _assessment_flow_now(),
+        )
+        rule_bundle, legal_bundle = load_issued_flow_bundles(issued_flow)
+        _privacy_disclosure(legal_bundle.privacy)
+        if displayed_rule_version != rule_bundle.version_code:
+            raise ValidationError("invalid assessment payload")
+        if completion_request.consent.policy_version != legal_bundle.privacy.version_code:
+            raise ValidationError("invalid assessment payload")
+        catalog, public_config = rule_bundle.catalog, rule_bundle.public_config
         validate_profile_membership(
             completion_request.profile, catalog, public_config
         )
         score_assessment(catalog, completion_request.profile)
-    except ValidationError:
+    except (ValidationError, AssessmentFlowError):
         return _invalid_response()
     except AssessmentInputError:
         return _invalid_response()
@@ -272,13 +310,15 @@ def assessment_complete():
             current_app.config["ASSESSMENT_COMPLETE_RATE_WINDOW"]
         )
     try:
-        result = complete_assessment(completion_request, request_identity_hash())
+        result = complete_assessment(
+            completion_request, request_identity_hash(), issued_flow
+        )
     except ValidationError:
         return _invalid_response()
     except AssessmentInputError:
         return _invalid_response()
     except DataConflictError:
-        return _unavailable_response(DataConflictError())
+        return jsonify({"error": "assessment conflict"}), 409
     except _RULE_FAILURES as error:
         return _unavailable_response(error)
 
@@ -469,8 +509,39 @@ def _authorized_report_snapshot(assessment_id):
 
 def _report_template_context(assessment_id, snapshot, pdf_mode):
     scores = snapshot["scores"]
+    if snapshot["schema_version"] == "2.1":
+        display = snapshot["display_labels"]
+        report_dimensions = tuple(
+            (code, display["dimensions"][code]) for code in DIMENSION_ORDER
+        )
+        maturity_labels = display["maturities"]
+        scenario_labels = display["scenarios"]
+        integration_labels = display["integrations"]
+        service_category_labels = display["service_categories"]
+        risk_labels = display["risk_labels"]
+        roi_bands = tuple(
+            (code, display["roi_bands"][code])
+            for code in ("conservative", "midpoint", "ideal")
+        )
+        roi_input_fields = tuple(
+            (
+                group,
+                display["roi_groups"][group],
+                display["roi_options"][group],
+            )
+            for group in ROI_CHOICE_ORDER
+        )
+    else:
+        report_dimensions = REPORT_DIMENSIONS
+        maturity_labels = MATURITY_LABELS
+        scenario_labels = SCENARIO_LABELS
+        integration_labels = INTEGRATION_LABELS
+        service_category_labels = SERVICE_CATEGORY_LABELS
+        risk_labels = RISK_LABELS
+        roi_bands = ROI_BANDS
+        roi_input_fields = ROI_INPUT_FIELDS
     dimension_rows = []
-    for code, label in REPORT_DIMENSIONS:
+    for code, label in report_dimensions:
         dimension_rows.append(
             {
                 "code": code,
@@ -491,15 +562,17 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
             ).encode("utf-8")
         ).hexdigest(),
         "dimension_rows": dimension_rows,
-        "dimension_labels": dict(REPORT_DIMENSIONS),
+        "dimension_labels": dict(report_dimensions),
         "radar": _radar_context(dimension_rows),
-        "maturity_label": MATURITY_LABELS[scores["maturity_code"]],
-        "scenario_labels": SCENARIO_LABELS,
-        "integration_labels": INTEGRATION_LABELS,
-        "service_category_labels": SERVICE_CATEGORY_LABELS,
-        "risk_labels": RISK_LABELS,
-        "roi_bands": ROI_BANDS,
-        "roi_choice_rows": _roi_choice_rows(snapshot["calculation_basis"]),
+        "maturity_label": maturity_labels[scores["maturity_code"]],
+        "scenario_labels": scenario_labels,
+        "integration_labels": integration_labels,
+        "service_category_labels": service_category_labels,
+        "risk_labels": risk_labels,
+        "roi_bands": roi_bands,
+        "roi_choice_rows": _roi_choice_rows(
+            snapshot["calculation_basis"], roi_input_fields
+        ),
         "format_roi_currency": _format_roi_currency,
         "format_budget_currency": _format_budget_currency,
         "public_service_not_included": public_service_not_included,
@@ -517,7 +590,7 @@ def _report_template_context(assessment_id, snapshot, pdf_mode):
     return context
 
 
-def _roi_choice_rows(calculation_basis):
+def _roi_choice_rows(calculation_basis, roi_input_fields=ROI_INPUT_FIELDS):
     choices = calculation_basis["selected_roi_choices"]
     bands = calculation_basis["selected_roi_bands"]
     return [
@@ -528,12 +601,14 @@ def _roi_choice_rows(calculation_basis):
             "mid": _format_roi_input(group, bands[group]["mid"]),
             "high": _format_roi_input(group, bands[group]["high"]),
         }
-        for group, label, descriptions in ROI_INPUT_FIELDS
+        for group, label, descriptions in roi_input_fields
     ]
 
 
 def _format_roi_input(group, value):
-    number = Decimal(value)
+    number = assessment_repository._decimal_21(value)
+    if number is None:
+        raise ValueError("invalid report decimal")
     if group == "loss_factor":
         return f"{format((number * 100).normalize(), 'f')}%"
     formatted = f"{number:,.0f}"
@@ -553,7 +628,9 @@ def _format_budget_currency(value):
 
 
 def _format_currency(value, decimal_places):
-    number = Decimal(value)
+    number = assessment_repository._decimal_21(value)
+    if number is None:
+        raise ValueError("invalid report decimal")
     sign = "-" if number < 0 else ""
     return f"{sign}¥{abs(number):,.{decimal_places}f}"
 
@@ -614,21 +691,36 @@ def _published_context(branch_code):
     return catalog, public_config
 
 
-def _privacy_disclosure():
+def _assessment_flow_now():
+    now_provider = current_app.config.get("ASSESSMENT_FLOW_NOW_PROVIDER")
+    return as_shanghai(now_provider()) if now_provider is not None else shanghai_now()
+
+
+def _privacy_disclosure(privacy_version=None):
     values = {
         "processor_name": current_app.config.get("PRIVACY_PROCESSOR_NAME"),
         "contact": current_app.config.get("PRIVACY_CONTACT"),
         "policy_url": current_app.config.get("PRIVACY_POLICY_URL"),
     }
-    if any(not isinstance(value, str) or not value.strip() for value in values.values()):
-        raise AssessmentRulesUnavailable("privacy_configuration")
-    policy_url, policy_error = normalize_source_url(values["policy_url"].strip())
-    if (
-        policy_error is not None
-        or policy_url is None
-        or urlsplit(policy_url).scheme != "https"
+    if any(
+        not isinstance(values[name], str) or not values[name].strip()
+        for name in ("processor_name", "contact")
     ):
-        raise AssessmentRulesUnavailable("privacy_policy_url")
+        raise AssessmentRulesUnavailable("privacy_configuration")
+    if privacy_version is None:
+        if not isinstance(values["policy_url"], str) or not values["policy_url"].strip():
+            raise AssessmentRulesUnavailable("privacy_configuration")
+        policy_url, policy_error = normalize_source_url(values["policy_url"].strip())
+        if (
+            policy_error is not None
+            or policy_url is None
+            or urlsplit(policy_url).scheme != "https"
+        ):
+            raise AssessmentRulesUnavailable("privacy_policy_url")
+    else:
+        if privacy_version.mode != "internal":
+            raise AssessmentRulesUnavailable("privacy_policy_version")
+        policy_url = f"/legal/privacy/{privacy_version.version_code}"
     return {
         "processor_name": values["processor_name"].strip(),
         "contact": values["contact"].strip(),

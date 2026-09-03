@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
+import re
+import unicodedata
 
 from .contracts import (
     AssessmentCatalog,
@@ -34,6 +36,37 @@ ROI_CHOICE_ORDER = (
     "loss_factor",
     "budget",
 )
+
+ROI_OPTION_ORDER = {
+    "headcount": ("1_5", "6_20", "21_50", "50_plus"),
+    "monthly_hours": ("under_20", "20_80", "80_160", "160_plus"),
+    "monthly_cost": (
+        "under_8000",
+        "8000_15000",
+        "15000_30000",
+        "30000_plus",
+    ),
+    "loss_factor": ("rare", "normal", "high", "severe"),
+    "budget": (
+        "under_50000",
+        "50000_200000",
+        "200000_500000",
+        "500000_plus",
+    ),
+}
+
+REPORT_SERVICE_CATEGORY_LABELS = {
+    "foundation": "基础准备",
+    "pilot": "试点验证",
+    "standard": "标准交付",
+    "integration": "集成交付",
+}
+
+REPORT_ROI_BAND_LABELS = {
+    "conservative": "保守",
+    "midpoint": "中位",
+    "ideal": "理想",
+}
 
 DIMENSION_EXPLANATIONS = {
     "business_value": "业务价值维度得分较高，建议将已识别痛点作为试点收益和验收指标的起点。",
@@ -141,10 +174,38 @@ DISCLAIMER = (
     "不构成收益、投资、法律或合规承诺。"
 )
 
+REPORT_SNAPSHOT_SCHEMA_VERSION = "2.1"
+LEGAL_DOCUMENT_ORDER = (
+    "privacy",
+    "terms",
+    "roi_disclaimer",
+    "ai_content_notice",
+)
+_VERSION_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+_CORE_CATALOG_MANIFEST = load_core_catalog_manifest()
+_SCENARIO_CODES = tuple(
+    scenario["code"] for scenario in _CORE_CATALOG_MANIFEST["scenarios"]
+)
 _PUBLIC_SERVICE_NOT_INCLUDED = {
     service["code"]: tuple(service["not_included"])
-    for service in load_core_catalog_manifest()["services"]
+    for service in _CORE_CATALOG_MANIFEST["services"]
 }
+
+_DISPLAY_LABEL_KEYS = frozenset(
+    {
+        "dimensions",
+        "maturities",
+        "scenarios",
+        "integrations",
+        "service_categories",
+        "risk_labels",
+        "roi_bands",
+        "roi_groups",
+        "roi_options",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -152,6 +213,7 @@ class ReportPublicCopy:
     """Immutable release-owned copy supplied only by draft previews."""
 
     risk_explanations: Mapping[str, str]
+    display_labels: Mapping[str, object] | None = None
 
     def __post_init__(self):
         if not isinstance(self.risk_explanations, Mapping) or any(
@@ -164,6 +226,57 @@ class ReportPublicCopy:
             "risk_explanations",
             MappingProxyType(dict(self.risk_explanations)),
         )
+        object.__setattr__(
+            self,
+            "display_labels",
+            _freeze_display_labels(self.display_labels),
+        )
+
+
+@dataclass(frozen=True)
+class ReportLegalVersion:
+    document_type: str
+    legal_version_id: int
+    version_code: str
+    content_sha256: str
+    public_path: str
+    external_url: str | None
+
+    def __post_init__(self):
+        expected_path = f"/legal/{self.document_type}/{self.version_code}"
+        if (
+            self.document_type not in LEGAL_DOCUMENT_ORDER
+            or type(self.legal_version_id) is not int
+            or self.legal_version_id <= 0
+            or type(self.version_code) is not str
+            or _VERSION_CODE_PATTERN.fullmatch(self.version_code) is None
+            or type(self.content_sha256) is not str
+            or _SHA256_PATTERN.fullmatch(self.content_sha256) is None
+            or self.public_path != expected_path
+            or self.external_url is not None
+        ):
+            raise TypeError("invalid report legal version")
+
+
+@dataclass(frozen=True)
+class ReportLegalCopy:
+    versions: tuple[ReportLegalVersion, ...]
+    notices: Mapping[str, str]
+
+    def __post_init__(self):
+        if (
+            type(self.versions) is not tuple
+            or tuple(item.document_type for item in self.versions)
+            != LEGAL_DOCUMENT_ORDER
+            or any(type(item) is not ReportLegalVersion for item in self.versions)
+            or not isinstance(self.notices, Mapping)
+            or set(self.notices) != {"roi_disclaimer", "ai_content_notice"}
+        ):
+            raise TypeError("invalid report legal copy")
+        notices = dict(self.notices)
+        if any(not _valid_notice(value) for value in notices.values()):
+            raise TypeError("invalid report legal copy")
+        object.__setattr__(self, "notices", MappingProxyType(notices))
 
 
 def public_service_not_included(package):
@@ -184,6 +297,7 @@ def build_report_snapshot(
     roi_option_ranges,
     *,
     public_copy: ReportPublicCopy | None = None,
+    legal_copy: ReportLegalCopy | None = None,
 ) -> dict[str, object]:
     """Build the complete stored report record without persistence or generated prose."""
     reference_line = catalog.reference_lines.get(profile.branch_code)
@@ -203,7 +317,7 @@ def build_report_snapshot(
         else public_copy.risk_explanations
     )
     selected_matches = tuple(matches[:3])
-    return {
+    snapshot = {
         "schema_version": "2.0",
         "rule_version": catalog.version_code,
         "assessment": {
@@ -250,6 +364,99 @@ def build_report_snapshot(
             *({"year": year, "action": action} for year, action in ROADMAP_YEARS_2_3),
         ],
         "disclaimer": DISCLAIMER,
+    }
+    if legal_copy is None:
+        return snapshot
+    if type(legal_copy) is not ReportLegalCopy:
+        raise TypeError("invalid report legal copy")
+    if public_copy is None or public_copy.display_labels is None:
+        raise TypeError("invalid report public copy")
+    snapshot["schema_version"] = REPORT_SNAPSHOT_SCHEMA_VERSION
+    snapshot["display_labels"] = _copy_display_labels(public_copy.display_labels)
+    snapshot["legal"] = [
+        {
+            "document_type": item.document_type,
+            "legal_version_id": item.legal_version_id,
+            "version_code": item.version_code,
+            "content_sha256": item.content_sha256,
+            "public_path": item.public_path,
+            "external_url": item.external_url,
+        }
+        for item in legal_copy.versions
+    ]
+    snapshot["legal_notices"] = dict(legal_copy.notices)
+    return snapshot
+
+
+def _valid_notice(value):
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 2000
+        and value == unicodedata.normalize("NFKC", value).strip()
+        and not any(unicodedata.category(char).startswith("C") for char in value)
+    )
+
+
+def _freeze_display_labels(value):
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != _DISPLAY_LABEL_KEYS:
+        raise TypeError("invalid report public copy")
+    expected = {
+        "dimensions": DIMENSION_ORDER,
+        "maturities": tuple(YEAR_1_BY_MATURITY),
+        "scenarios": _SCENARIO_CODES,
+        "integrations": ("low", "medium", "high"),
+        "service_categories": tuple(REPORT_SERVICE_CATEGORY_LABELS),
+        "risk_labels": tuple(RISK_LABELS),
+        "roi_bands": tuple(REPORT_ROI_BAND_LABELS),
+        "roi_groups": ROI_CHOICE_ORDER,
+    }
+    frozen = {
+        name: _freeze_label_map(value[name], codes)
+        for name, codes in expected.items()
+    }
+    options = value["roi_options"]
+    if not isinstance(options, Mapping) or set(options) != set(ROI_CHOICE_ORDER):
+        raise TypeError("invalid report public copy")
+    frozen["roi_options"] = MappingProxyType(
+        {
+            group: _freeze_label_map(options[group], ROI_OPTION_ORDER[group])
+            for group in ROI_CHOICE_ORDER
+        }
+    )
+    return MappingProxyType(frozen)
+
+
+def _freeze_label_map(value, expected_codes):
+    if not isinstance(value, Mapping) or set(value) != set(expected_codes):
+        raise TypeError("invalid report public copy")
+    copied = {code: value[code] for code in expected_codes}
+    if any(not _valid_label(label) for label in copied.values()):
+        raise TypeError("invalid report public copy")
+    return MappingProxyType(copied)
+
+
+def _valid_label(value):
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 200
+        and value == unicodedata.normalize("NFKC", value).strip()
+        and not any(unicodedata.category(char).startswith("C") for char in value)
+    )
+
+
+def _copy_display_labels(value):
+    return {
+        name: (
+            {
+                group: dict(options)
+                for group, options in value[name].items()
+            }
+            if name == "roi_options"
+            else dict(value[name])
+        )
+        for name in _DISPLAY_LABEL_KEYS
     }
 
 

@@ -1,0 +1,30 @@
+{% extends "admin/base_admin.html" %}
+{% block admin_content %}
+<div class="admin-heading">
+  <div>
+    <h1>发布规则版本</h1>
+    <p class="muted">版本代码：<code data-release-code>{{ draft.code }}</code></p>
+  </div>
+  <a class="btn btn-outline" href="{{ url_for('admin.admin_rule_edit', release_id=draft.id) }}">返回草稿</a>
+</div>
+
+<section class="card admin-section stack">
+  <h2>发布前确认</h2>
+  <p>验证状态：<strong data-validation-status>{% if validation_errors %}未通过{% else %}通过{% endif %}</strong></p>
+  {% if compiled_digest %}<p>编译摘要：<code data-compiled-digest>{{ compiled_digest }}</code></p>{% endif %}
+  {% if validation_errors %}
+    <div role="alert">
+      <p>当前版本不能发布：</p>
+      <ul>{% for error in validation_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+  {% if can_publish %}
+    <form method="post" action="{{ url_for('admin.admin_rule_publish', release_id=draft.id) }}" data-rule-publish>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="expected_lock_version" value="{{ draft.lock_version }}">
+      <p>发布会切换活动规则快照，并归档上一个活动版本。</p>
+      <button class="btn btn-primary" type="submit">确认发布</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

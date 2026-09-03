@@ -119,6 +119,7 @@ def test_database_migrations_are_versioned_idempotent_and_preserve_data(
         "013_admin_export_audit",
         "014_legal_documents",
         "015_assessment_rule_releases",
+        "016_assessment_flow_enforcement",
     ]
     assert sentinel == "keep-me"
 
@@ -354,6 +355,83 @@ def test_init_db_reconciles_configured_external_privacy_once_after_migrations(
         "external_legacy",
         "https://legal.example/privacy",
     )
+
+
+@pytest.mark.parametrize("recorded_ordinal", (5, 6))
+def test_single_startup_upgrades_005_or_006_through_016_then_reconciles_history_once(
+    tmp_path, monkeypatch, recorded_ordinal
+):
+    staged = tmp_path / f"migrations-through-{recorded_ordinal:03d}"
+    staged.mkdir()
+    for source in sorted((PROJECT_ROOT / "migrations").glob("*.sql")):
+        if int(source.name[:3]) <= recorded_ordinal:
+            shutil.copy2(source, staged / source.name)
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", staged)
+    monkeypatch.setattr(models, "DB_PATH", str(tmp_path / "platform.db"))
+    monkeypatch.delenv("AI_PLATFORM_PRIVACY_POLICY_URL", raising=False)
+    db = models.get_db()
+    try:
+        migrations.apply_migrations(db)
+        lead_id = db.execute(
+            "INSERT INTO leads(company_name,contact_name,created_at,updated_at) "
+            "VALUES ('TEST legacy','TEST contact',?,?)",
+            ("2026-09-03 10:00:00", "2026-09-03 10:00:00"),
+        ).lastrowid
+        consent_id = db.execute(
+            "INSERT INTO lead_consents "
+            "(lead_id,policy_version,consented_at,source,identity_hash) "
+            "VALUES (?,?,?,?,?)",
+            (
+                lead_id,
+                CONSENT_POLICY_VERSION,
+                "2026-09-03 10:00:00",
+                "assessment",
+                "TEST legacy identity",
+            ),
+        ).lastrowid
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+    now = datetime(2026, 9, 3, 10, 0, 0, tzinfo=SHANGHAI)
+    kwargs = {
+        "privacy_policy_version": CONSENT_POLICY_VERSION,
+        "privacy_policy_url": "https://legal.example/privacy",
+        "now_provider": lambda: now,
+    }
+    models.init_db(**kwargs)
+    db = models.get_db()
+    try:
+        first = db.execute(
+            "SELECT c.legal_version_id,d.mode,d.version_code "
+            "FROM lead_consents c JOIN legal_documents d ON d.id=c.legal_version_id "
+            "WHERE c.id=?",
+            (consent_id,),
+        ).fetchone()
+        version = db.execute(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
+        ).fetchone()[0]
+        first_audits = db.execute(
+            "SELECT COUNT(*) FROM governance_audit_events "
+            "WHERE action='external_legal_reconciled'"
+        ).fetchone()[0]
+    finally:
+        db.close()
+
+    models.init_db(**kwargs)
+    db = models.get_db()
+    try:
+        second_audits = db.execute(
+            "SELECT COUNT(*) FROM governance_audit_events "
+            "WHERE action='external_legal_reconciled'"
+        ).fetchone()[0]
+    finally:
+        db.close()
+
+    assert version == "016_assessment_flow_enforcement"
+    assert tuple(first)[1:] == ("external_legacy", CONSENT_POLICY_VERSION)
+    assert first_audits == second_audits == 1
 
 
 def test_init_db_zero_argument_without_policy_url_does_not_invent_legal_text(
@@ -679,11 +757,11 @@ def test_011_preserves_deleted_resource_high_water_when_table_is_empty(
         db.close()
 
 
-def test_migration_ordinals_are_unique_and_contiguous_through_015():
+def test_migration_ordinals_are_unique_and_contiguous_through_016():
     paths = sorted((PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql"))
     ordinals = [int(path.name[:3]) for path in paths]
 
-    assert ordinals == list(range(1, 16))
+    assert ordinals == list(range(1, 17))
 
 
 def test_012_adds_only_real_column_operations_indexes_from_recorded_011(
