@@ -3,7 +3,7 @@
 ## Scope and environment
 
 - Frozen plan base: `d5d8445f0ac1b4425db905062a63330e4764e165`.
-- Verification date: 2026-09-01 (Asia/Shanghai).
+- Verification dates: 2026-09-01 and final-phone closure 2026-09-03 (Asia/Shanghai).
 - Surface: Codex in-app Browser only. Chrome, Computer Use, Playwright CLI, production, deployment, external networking, and the repository-wide full suite were not used.
 - Initial fixture: `127.0.0.1:51838`; launcher PID `3792`; child listener PID `17188`. Fix1 used `127.0.0.1:55844`, PID `30340`. The final-review fixture is `127.0.0.1:65353`, PID `6928`; every fixture used the same ignored database/media paths and mock-only source transport.
 - Disposable database/media: `.superpowers/sdd/2026-08-31-silver-evidence-public-ui/task6-browser.db` and `task6-media`.
@@ -122,7 +122,7 @@ All sixteen files have a PNG signature and were opened and inspected after final
 | Shift+Tab | NOT PROVEN | Same IAB native keypress limitation. |
 | Enter | NOT PROVEN | Native keypress produced no observable action on the focused input; mouse/HTTP/Node evidence is not substituted. |
 | Space | NOT PROVEN | Native keypress produced no observable action on the focused input; mouse/HTTP/Node evidence is not substituted. |
-| 200% zoom | NOT PROVEN | The IAB exposes no native browser-zoom control/API in this surface. Responsive 720/390/320 checks are not mislabeled as zoom proof. |
+| 200% zoom | PARTIALLY PROVEN | User-supplied Edge 200% above-fold and full-page homepage captures are preserved as visual truth and pass a same-input 625px-content comparison. Native 200% was not separately recaptured for every route, so a full-site native-zoom claim is intentionally not made. |
 | Pagination | NOT PROVEN / not applicable to fixture | The deterministic fixture contains 12 scenarios while the UI's minimum `per_page` is 20, so it has no second page to exercise. |
 | Complete assessment next/back journey | NOT PROVEN | After industry selection, the disposable fixture returned `评估选项暂时无法加载`. The recoverable error and retained selection are proven; six-step advance/back is not. |
 
@@ -139,8 +139,48 @@ The keyboard and zoom entries are capability limitations, not PASS claims. Autom
 - Final-review cleanup: CDP `Emulation.clearDeviceMetricsOverride` succeeded and acceptance tab `4` was closed at `/assessment`. Before stop, only `127.0.0.1:65353 LISTENING 6928` matched the fixture. Exact PID `6928` was stopped; final proof is `process_alive=False`, `listener_present=False`, and HTTP refused/unavailable. The resolved, inside-plan paths `task6-browser.db` (with absent WAL/SHM), `task6-media`, `final-review-browser`, `final-review-browser-v2`, `final-review-browser-v3`, and `test-tmp` were removed individually and all report `exists_after=False`.
 - Accepted `docs/design/evidence/*.png`, testing documentation, and the ignored Task 6 report/helpers were preserved. No broad deletion or production/external state was touched.
 
+## 2026-09-03 final-phone closure
+
+The final pass used the existing deterministic mock-only fixture on `127.0.0.1:62823`; the previously approved preview on `127.0.0.1:62767` was not touched. The user's 200% homepage capture was accepted as source visual truth, normalized proportionally to 625px content width, and compared in the same input with a fresh 640px requested viewport whose scrollbar left a 625px client.
+
+### Fresh responsive and interaction results
+
+| Check | Result | Evidence |
+|---|---|---|
+| All public routes at 640/390/320 | PASS | 39/39 route-width combinations; every result had `scrollWidth === clientWidth`. |
+| About at 320 | PASS after one P2 fix | Initial `332/305`; final `305/305`. Mixed Chinese/Latin principle copy now permits grid shrink and wraps anywhere on phone widths. |
+| Homepage chapter 01 at 390 | PASS | Real click retained visible chapter copy; DOM and viewport evidence disproved the apparent omission in the stitched user capture. |
+| Mobile menu at 390 | PASS | Real click opened it; Escape closed it and restored focus to the summary. |
+| Browser console | PASS | No errors or warnings in the tested mobile interaction. |
+
+### Fresh automation
+
+- TDD RED for the About phone contract: `1 failed in 1.19s`.
+- Focused GREEN: `1 passed in 0.82s`.
+- Full UI-foundation partition: `66 passed in 49.73s`.
+- Adjacent content-navigation and smoke partition: `58 passed in 37.31s`.
+- JavaScript syntax: `app.js`, `guided_story.js`, and `public_reveal.js` all exit `0`.
+- Node runtime: `35` tests, `35` pass, `0` fail.
+- `git diff --check`: exit `0` (line-ending notices only).
+- Supporting context: immediately preceding Task 22 repository full suite was `2170 passed in 1346.36s`; the final-phone production delta is one scoped two-declaration CSS rule.
+
+### Final-phone evidence files
+
+| File | Dimensions | Bytes | SHA-256 |
+|---|---:|---:|---|
+| `2026-09-03-user-home-200-percent-reference.png` | 625×5706 | 1,351,442 | `2729BFCC537389C56B6A65825BE1464ED3D241C8DD45957DF3D767A8C7FEC994` |
+| `2026-09-03-final-home-640.png` | 625×824 | 290,724 | `8E982F759F3D7C4A739E222E09D682A7773AEFCDF9484917963CEF6D6EA65D45` |
+| `2026-09-03-final-home-assessment-390.png` | 375×811 | 161,359 | `20A1A96818EFACD887AC056EA5677F5F9D871A4A0BF2EDD4E033855C40CDA956` |
+| `2026-09-03-final-about-320.png` | 305×804 | 207,339 | `BE8BE72955AB7275019E5A5C94E7738A296533693923F1784479FC542F58584C` |
+| `2026-09-03-final-home-640-comparison.png` | 1250×824 | 473,546 | `8526B27AE9D92E24FC5D1AE35C7E59DF80297634FA1BCD6E2C9B703214D4F208` |
+
+All five files have a PNG signature and were opened and inspected. The first and last preserve the density-normalized source/comparison; the three focused runtime frames document the final implementation state.
+
+Final-phone cleanup was exact. PID `8948` was first confirmed as the `127.0.0.1:62823` listener, then stopped; process and listener are absent. The fixture database/media and individually named test/image normalization scratch paths are absent. User preview PID `31692` remains the `127.0.0.1:62767` listener and was not touched.
+
 ## Limitations
 
 - This is a blocking design/interaction review, not a full WCAG conformance audit.
 - Evidence sheets contain explicit separators and overlap; they are not seamless compositor screenshots.
 - The fixture is deterministic and local, so it proves the published public journey without asserting production state.
+- Only the homepage has user-supplied native Edge 200% proof; full-site native 200% is not claimed separately from the 640/390/320 responsive matrix.

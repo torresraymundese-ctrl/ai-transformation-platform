@@ -766,6 +766,20 @@ def test_shared_navigation_and_footer_links_keep_touch_targets_and_mobile_column
     assert ".footer-inner > :first-child { grid-column: 1 / -1; }" in css
 
 
+def test_about_principles_wrap_long_mixed_language_copy_on_phone_widths(client):
+    """Long model and database names must not widen the 320px About page."""
+    page = _page(client.get("/about"))
+    css = client.get("/static/css/silver-evidence-public.css").get_data(as_text=True)
+    mobile_blocks = _css_blocks(css, "@media (max-width: 767px)")
+    principle_items = _css_declarations(
+        _css_rule_in_blocks(mobile_blocks, ".public-shell .about-principles > *")
+    )
+
+    assert page.select(".about-principles > p")
+    assert principle_items["min-width"] == "0"
+    assert principle_items["overflow-wrap"] == "anywhere"
+
+
 def test_navigation_brand_text_overrides_the_legacy_span_color(client):
     response = client.get("/static/css/ui-components.css")
     css = response.get_data(as_text=True)

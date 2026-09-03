@@ -956,6 +956,7 @@
   .public-shell .manifesto-chapter .public-reading { width: min(calc(100% - 2.5rem), 80rem); padding-left: 0; }
   .public-shell .manifesto-chapter__sequence { position: static; margin-bottom: 1.25rem; font-size: clamp(3rem, 18vw, 4.5rem); }
   .public-shell .about-principles { grid-template-columns: 1fr; }
+  .public-shell .about-principles > * { min-width: 0; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {

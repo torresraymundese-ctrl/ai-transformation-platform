@@ -5,7 +5,7 @@
 - Frozen plan base: `d5d8445f0ac1b4425db905062a63330e4764e165`.
 - Bound inputs: the Silver Evidence public UI spec, exact homepage/detail reference PNGs, and deterministic published local content.
 - Surface: Codex in-app Browser at desktop and mobile responsive states; no Chrome, Computer Use, Playwright CLI, production, network, deployment, admin/Task12, Stage 5B, or repository-wide full suite.
-- Final evidence: sixteen inspected true-PNG evidence sheets covering each route through its footer.
+- Final evidence: sixteen inspected true-PNG evidence sheets covering each route through its footer, plus five final-phone closure images dated 2026-09-03.
 
 ## Blocking visual verdict
 
@@ -32,6 +32,7 @@ Homepage/detail reference pairs were inspected in same-input native-pixel compar
 | Evidence quality | Closed | First segment round caught 700–800ms reveal transitions at 650ms. | All sixteen routes recaptured after 1100ms load and at least 1050ms per scroll; centered frames make resource filter, case meta, About 01, industry 02, and service 05 fully visible. |
 | P2 | Closed | Public auxiliary labels and shared chrome rendered at 11–13px although the binding spec requires at least 14px. | A shared `0.875rem` token now covers audited visible code/eyebrow/sequence/meta/help/optional labels plus real-cascade navigation, footer, and sticky CTA selectors. Parsed-CSS RED/GREEN and IAB computed audits report no visible sub-14px text; the only smaller match is an `aria-hidden` check glyph. |
 | P2 | Closed | Raising the desktop navigation CTA to 14px exposed it beside the mobile menu and wrapped its label onto two lines. | A media-cascade RED/GREEN restores the intended narrow-screen `display:none`; v3 mobile evidence shows the single 14px `菜单` summary, no desktop CTA, and no overflow. |
+| P2 | Closed | At 320px, mixed Chinese/Latin model and database names in About principles widened the document to 332px inside a 305px client. | Phone-only principle children now use `min-width: 0` and `overflow-wrap: anywhere`; parsed-CSS RED/GREEN passed and IAB proves `scrollWidth === clientWidth === 305`. |
 
 The Fix1 CSS corrections were test-first: authoritative RED `3 failed`, focused GREEN `66 passed`. The full scoped collection then recorded 581 passes plus one repeatable seven-day test-clock expiry; after the authorized test-only clock pin, its singleton and complete 31-test partition passed. Every one of the 582 collected scoped Python cases therefore has fresh pass evidence, and Node runtime is `34/34` pass. The final review's auxiliary-type and real-cascade contracts produced authentic REDs before their minimal fixes; final focused verification is Python `71/71` and Node `27/27`. All sixteen final-CSS evidence sheets were replaced and inspected. No open P0, P1, or P2 remains.
 
@@ -39,7 +40,7 @@ The Fix1 CSS corrections were test-first: authoritative RED `3 failed`, focused 
 
 PASS:
 
-- 25 responsive route/viewport checks across 1440, 1024, 910, 390, and 320 retained one `h1`, `main`, and `nav` with no horizontal overflow.
+- The original 25 responsive route/viewport checks retained one `h1`, `main`, and `nav` with no horizontal overflow. Final-phone closure added a fresh 39/39 matrix over all 13 public routes at requested widths 640, 390, and 320.
 - Real clicks cover desktop nav, list-to-detail, detail-to-assessment, header assessment, and mobile menu-to-About journeys. At 390px the desktop CTA is hidden and the single mobile summary remains 14px.
 - Scenario filters returned a 3-row valid result and a real 0-row empty state; clear restored 12. Resource guide filter returned 3.
 - HTTPS external resource links expose `_blank` plus `noopener noreferrer`.
@@ -51,7 +52,7 @@ PASS:
 NOT PROVEN:
 
 - Native Tab, Shift+Tab, Enter, and Space: the IAB keypress surface produced no observable focus/action movement, so no programmatic substitute is claimed.
-- Native 200% zoom: the IAB surface exposes no browser-zoom API; responsive geometry is not mislabeled as zoom proof.
+- Full-site native 200% zoom remains unclaimed because every route was not recaptured at native zoom. The user-supplied Edge 200% homepage above-fold and full-page captures are proven visual inputs and pass a density-normalized 625px-content comparison against the fresh 640px runtime.
 - Pagination: the deterministic fixture has 12 scenarios and the UI minimum page size is 20, so a second page does not exist.
 - Complete six-step assessment next/back: after industry selection the disposable fixture returned `评估选项暂时无法加载`; validation, recoverable error, and retained selection are proven, but the full journey is not.
 
@@ -60,5 +61,27 @@ This is a blocking design and interaction audit, not a full WCAG conformance cla
 Browser/fixture cleanup completed precisely: the media override and viewport were reset, the acceptance tab closed, PID `3792` stopped, PID `17188` confirmed absent, `:51838` lost its listener, HTTP refused the connection, and only plan-owned scratch data was removed.
 
 Final-review cleanup also completed precisely: the device-metrics override reset succeeded, tab `4` closed, exact PID `6928` stopped, `:65353` lost its listener, HTTP refused the connection, and the individually resolved final-review fixture/v1/v2/v3/test scratch paths all report absent. Accepted evidence, reports, helpers, references, and protected Task12 paths were preserved.
+
+## 2026-09-03 final phone closure
+
+### Visual truth and density normalization
+
+- Source visual truth: `docs/design/evidence/2026-09-03-user-home-200-percent-reference.png`, a 625×5706 true-PNG normalization of the user-supplied Edge 200% full-page homepage capture. The original browser capture was 1910×17437 device pixels; proportional normalization removes capture density while preserving composition.
+- Same-input comparison: `docs/design/evidence/2026-09-03-final-home-640-comparison.png` places the normalized 625px-content source and fresh 640px requested viewport result together at 1:1 pixels. The fresh browser's scrollbar leaves a 625px client.
+- Focused implementation evidence: `2026-09-03-final-home-640.png` (625×824), `2026-09-03-final-home-assessment-390.png` (375×811), and `2026-09-03-final-about-320.png` (305×804). All were captured from the deterministic local published fixture in the default state, except the assessment frame, which records a real chapter-01 selection.
+- The comparison preserves the established near-black/warm-white/silver/signal-blue palette, logo, menu, progress rail, hero CTA, mechanical-hand art, typographic hierarchy, and footer rhythm. The fresh 640 result improves the headline to a balanced two-line wrap without changing copy or visual language. No missing visible asset, incorrect radius, spacing break, or P0–P2 color/typography mismatch remains.
+
+### Iteration and interaction evidence
+
+- Initial route matrix: 38/39 passes. Only `/about` at 320 failed with document `scrollWidth/clientWidth = 332/305`.
+- Root cause: mixed-language `Qwen/DeepSeek/ChromaDB/Milvus` copy imposed a grid-item min-content width. The focused CSS contract first failed (`1 failed in 1.19s`), then passed (`1 passed in 0.82s`) after the minimal phone rule.
+- Final route matrix: 39/39 passes for `/`, industries list/detail, scenarios list/detail, services list/detail, cases list/detail, resources list/detail, assessment, and About at 640/390/320. Every route reports `scrollWidth === clientWidth`, including `/about` at `305/305`.
+- Homepage chapter 01 was clicked at 390 and remained fully visible; an apparent omission in the user's stitched full-page image was not reproduced in DOM or viewport evidence and is treated as a capture-stitch artifact.
+- The 390px mobile menu opened by real click; Escape closed it and restored focus to the summary. Console errors and warnings were empty.
+- Fresh verification: `tests/test_ui_foundations.py` is `66 passed in 49.73s`; adjacent content-navigation/smoke coverage is `58 passed in 37.31s`; JavaScript syntax checks passed; app/guided-story/public-reveal/assessment/analytics runtime is `35/35` pass; `git diff --check` passed.
+
+The 2026-09-03 final phone comparison and focused frames were opened and visually inspected after capture. No open P0, P1, or P2 remains.
+
+Final-phone fixture cleanup was exact: PID `8948` was confirmed as the `127.0.0.1:62823` listener before stop, then the process and listener disappeared. The plan-owned database/media and individually named test/image scratch paths were removed. User preview PID `31692` remained listening on `127.0.0.1:62767` and was not touched.
 
 final result: passed
