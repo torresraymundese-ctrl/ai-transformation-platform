@@ -296,6 +296,12 @@ sudo -u ai-platform /opt/ai-platform/.venv/bin/python \
 继续停止。`recover-media-storage --apply` 和旧内容 conversion 不得成为无人值守
 定时任务。
 
+`fetch-content` 同样不能未经演练直接加入 timer。它只从明确启用且已审核的 HTTPS
+来源 allowlist 获取内容并写入私有候选队列，不直接发布；来源 code、host、adapter、
+许可依据、robots 决策和正文保留策略必须先有审核记录。候选环境的手工命令、审计
+核对、重复运行和失败恢复步骤见
+[`docs/testing/content-operations.md`](../testing/content-operations.md)。
+
 Nginx 候选配置必须先把全部动态请求限制为 1 MiB，只给经过认证的媒体上传适配器
 精确路径 22 MiB。不能把 22 MiB 放到 `/admin/`、`/media/` 或整个 `server`：
 
@@ -411,6 +417,11 @@ ss -ltnp | grep '127.0.0.1:5080'
 上述命令必须命中新启动的候选版本。随后在 Nginx 仍停止的前提下完成管理员、
 隐私配置、完整评估、HTML/PDF、Session 隔离、预约与后台关联的运行时烟雾测试。
 任何一项失败都先停止 `ai-platform` 并执行回滚，不能启动 Nginx。
+
+运行时烟雾还必须完成内容运营手册中的四份法律文档门禁、规则四行业预览/原子发布、
+活动指针与快照健康、同一 Session 新旧 flow、公开服务、历史报告摘要稳定，以及
+工作台筛选/公式安全 CSV/审计一致性。已发布规则不得原地回写；回滚只能从经核验的
+历史内容复制新草稿并重新预览发布，禁止直接更新活动指针或不可变快照。
 
 只有以下检查全部通过后才允许测试并启动 Nginx：
 

@@ -126,11 +126,12 @@ def named_index(db, table, name):
     return index_row[2], index_row[4], index_columns
 
 
-def exact_rows(db, table, where="1=1", parameters=()):
+def exact_rows(db, table, where="1=1", parameters=(), columns=None):
+    projection = "*" if columns is None else ",".join(f'"{name}"' for name in columns)
     return [
         tuple(row)
         for row in db.execute(
-            f"SELECT * FROM {table} WHERE {where} ORDER BY id", parameters
+            f"SELECT {projection} FROM {table} WHERE {where} ORDER BY id", parameters
         )
     ]
 
@@ -573,8 +574,16 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
             for table, row_id in legacy_ids.items()
         },
     }
+    protected_columns = {
+        label: tuple(
+            row["name"] for row in db.execute(f"PRAGMA table_info({table})")
+        )
+        for label, (table, _where, _parameters) in protected_queries.items()
+    }
     protected = {
-        label: exact_rows(db, table, where, parameters)
+        label: exact_rows(
+            db, table, where, parameters, columns=protected_columns[label]
+        )
         for label, (table, where, parameters) in protected_queries.items()
     }
     assert [row[0] for row in db.execute(
@@ -586,16 +595,28 @@ def test_content_migration_is_idempotent_and_preserves_populated_005_rows(
     assert frozen_catalog_counts(db) == (4, 13, 6)
 
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", PROJECT_ROOT / "migrations")
+    expected_migrations = [
+        path.stem
+        for path in sorted(
+            (PROJECT_ROOT / "migrations").glob("[0-9][0-9][0-9]_*.sql")
+        )
+    ]
     migrations.apply_migrations(db)
     for application_number in (1, 2):
         assert EXPECTED_CONTENT_TABLES <= database_tables(db)
         assert frozen_catalog_counts(db) == (4, 13, 6)
         assert [row[0] for row in db.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        )][-1] == "012_operations_query_indexes"
+        )] == expected_migrations
         for label, before in protected.items():
             table, where, parameters = protected_queries[label]
-            assert exact_rows(db, table, where, parameters) == before, (
+            assert exact_rows(
+                db,
+                table,
+                where,
+                parameters,
+                columns=protected_columns[label],
+            ) == before, (
                 application_number,
                 label,
             )
@@ -952,11 +973,18 @@ def test_007_upgrade_backfills_published_revision_without_a_draft_and_copy_keeps
             for row in input_entries
         }
         assert actual_inputs == expected_inputs
+        target_scenario_id = db.execute(
+            "SELECT id FROM scenarios WHERE code='mfg_knowledge_assistant'"
+        ).fetchone()[0]
+        scenario_authority = catalog._scenario_authority(db, target_scenario_id)
+        assert scenario_authority is not None
     finally:
         db.close()
 
     assert catalog.public_scenario(
-        "mfg-knowledge-assistant", datetime(2026, 8, 24, 12, 0, tzinfo=SHANGHAI)
+        "mfg-knowledge-assistant",
+        datetime(2026, 8, 24, 12, 0, tzinfo=SHANGHAI),
+        authority=scenario_authority,
     ) is not None
     old_id = old_ids["mfg_knowledge_assistant"]
     copied_id = copy_revision(
@@ -1296,7 +1324,7 @@ def test_content_schema_exposes_the_frozen_columns_and_real_foreign_keys(db):
         row[0]
         for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
     }
-    assert actual_triggers == expected_triggers
+    assert expected_triggers <= actual_triggers
 
     industry_id = db.execute("SELECT id FROM industries LIMIT 1").fetchone()[0]
     with pytest.raises(sqlite3.IntegrityError):

@@ -73,18 +73,28 @@ def test_legacy_scrape_rejects_missing_csrf_before_running(admin_client, monkeyp
     network.assert_not_called()
 
 
-def test_legacy_scrape_control_is_disabled_with_queue_explanation(admin_client):
-    """The dashboard must not offer an active control for retired publication."""
+def test_dashboard_replaces_legacy_scrape_control_with_review_queue_link(admin_client):
+    """The dashboard must route operators to review instead of retired publication."""
     response = admin_client.get("/admin")
     page = BeautifulSoup(response.data, "html.parser")
-    control = page.select_one("button[data-ingestion-queue-state]")
+    queue_link = page.select_one('a[href="/admin/ingestion"]')
 
     assert response.status_code == 200
-    assert control is not None
-    assert control.has_attr("disabled")
-    assert control["data-ingestion-queue-state"] == "not-ready"
-    assert "内容接入队列尚未就绪" in control.get_text()
+    assert queue_link is not None
+    assert "接入候选" in queue_link.get_text()
+    assert page.select_one('button[data-ingestion-queue-state]') is None
+    assert page.select_one('form[action="/admin/scrape"]') is None
     assert b"fetch('/admin/scrape'" not in response.data
+
+    queue_response = admin_client.get(queue_link["href"])
+    queue_page = BeautifulSoup(queue_response.data, "html.parser")
+    current_action = queue_page.select_one('form[action="/admin/scrape"][method="post"]')
+    assert queue_response.status_code == 200
+    assert current_action is not None
+    assert current_action.select_one(
+        'input[name="csrf_token"][value="test-csrf-token"]'
+    ) is not None
+    assert "抓取已启用来源" in current_action.get_text()
 
 
 def test_direct_legacy_scraper_fails_closed_without_calling_source_adapter(monkeypatch):

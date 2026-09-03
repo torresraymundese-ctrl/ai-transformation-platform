@@ -149,18 +149,20 @@ def test_missing_page_uses_safe_custom_error_page(client):
     assert b"Traceback" not in response.data
 
 
-def test_scrape_failure_does_not_leak_exception_details(
+def test_ingestion_failure_does_not_leak_exception_details(
     admin_client, monkeypatch, caplog
 ):
-    """External-service failures must not expose tokens or stack details to users/logs."""
-    import scraper
+    """Reviewed-source failures must keep a stable redacted admin response."""
+    from blueprints.admin import ingestion as admin_ingestion
 
     secret_marker = "private-token-marker"
+    calls = []
 
-    def fail_scrape():
+    def fail_scrape(**_kwargs):
+        calls.append(True)
         raise RuntimeError(secret_marker)
 
-    monkeypatch.setattr(scraper, "run_scraper", fail_scrape)
+    monkeypatch.setattr(admin_ingestion, "run_scraper", fail_scrape)
     caplog.set_level(logging.ERROR)
 
     response = admin_client.post(
@@ -169,7 +171,8 @@ def test_scrape_failure_does_not_leak_exception_details(
     )
 
     assert response.status_code == 502
-    assert response.get_json() == {"success": False, "error": "scrape failed"}
+    assert response.get_json() == {"error": "ingestion_failed"}
+    assert calls == [True]
     assert secret_marker.encode("utf-8") not in response.data
     assert secret_marker not in caplog.text
 

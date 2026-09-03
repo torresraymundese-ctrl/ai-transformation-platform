@@ -50,6 +50,8 @@ Windows 缺少 Pango/Harfbuzz 原生运行库时，在线 HTML 报告仍可开�
   [`docs/testing/core-assessment-report.md`](docs/testing/core-assessment-report.md)
 - 内容目录发布旅程、已知内容缺口和五项浏览器证据：
   [`docs/testing/content-catalog.md`](docs/testing/content-catalog.md)
+- 内容运营、法律/规则版本、定时任务演练和成组恢复手册：
+  [`docs/testing/content-operations.md`](docs/testing/content-operations.md)
 - 管理员密钥、数据库备份/恢复、PDF、保留清理与服务上线：
   [`docs/deployment/security-and-service.md`](docs/deployment/security-and-service.md)
 - 产品规格：
