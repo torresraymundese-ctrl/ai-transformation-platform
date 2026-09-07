@@ -5,7 +5,7 @@
 {% block admin_navigation %}{% endblock %}
 {% block admin_content %}
   <section class="login-card" aria-labelledby="login-heading">
-    <a class="login-brand" href="/">企业 AI 转型平台</a>
+    <a class="login-brand admin-control-link" href="/">企业 AI 转型平台</a>
     <h1 id="login-heading">后台安全登录</h1>
     <p class="hint">请输入服务器环境中配置的管理员凭据。</p>
     {% if error %}{{ alert(error, "error", "admin-error-summary error") }}{% endif %}
@@ -15,6 +15,6 @@
       {{ form_field("password", "密码", type="password", required=true, autocomplete="current-password", class_name="field") }}
       <button class="submit btn btn-primary" type="submit">登录</button>
     </form>
-    <a class="login-return" href="/">← 返回网站</a>
+    <a class="login-return admin-control-link" href="/">← 返回网站</a>
   </section>
 {% endblock %}

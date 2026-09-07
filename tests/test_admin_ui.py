@@ -28,6 +28,56 @@ def _page(response):
     return BeautifulSoup(response.data, "html.parser")
 
 
+def _admin_css(client):
+    response = client.get("/static/css/admin.css")
+    assert response.status_code == 200
+    return response.get_data(as_text=True)
+
+
+def _css_blocks(css):
+    """Yield top-level selector/at-rule blocks without depending on CSS tooling."""
+    cursor = 0
+    while cursor < len(css):
+        opening = css.find("{", cursor)
+        if opening < 0:
+            return
+        depth = 1
+        closing = opening + 1
+        while closing < len(css) and depth:
+            if css[closing] == "{":
+                depth += 1
+            elif css[closing] == "}":
+                depth -= 1
+            closing += 1
+        assert depth == 0
+        yield css[cursor:opening].strip(), css[opening + 1 : closing - 1]
+        cursor = closing
+
+
+def _css_declarations(css, selector, *, media=None):
+    """Return declarations attached to one exact selector in one media context."""
+    rules = list(_css_blocks(css))
+    if media is not None:
+        matching_media = [body for prelude, body in rules if prelude == f"@media {media}"]
+        assert len(matching_media) == 1
+        rules = list(_css_blocks(matching_media[0]))
+
+    declarations = {}
+    for prelude, body in rules:
+        if prelude.startswith("@"):
+            continue
+        selectors = {item.strip() for item in prelude.split(",")}
+        if selector not in selectors:
+            continue
+        for item in body.split(";"):
+            name, separator, value = item.partition(":")
+            if separator:
+                declarations[name.strip().lower()] = value.strip().removesuffix(
+                    "!important"
+                ).strip()
+    return declarations
+
+
 def test_admin_shell_has_one_focusable_named_main_and_local_styles(admin_client):
     """Removing the shared landmark, skip target, or isolated CSS must fail."""
     page = _page(admin_client.get("/admin"))
@@ -68,6 +118,21 @@ def test_login_uses_the_shared_main_without_management_navigation(client):
         form.select_one('input[name="password"][autocomplete="current-password"]')
         is not None
     )
+
+
+def test_standalone_login_links_use_a_reusable_44px_target_rule(client):
+    """Removing target sizing from either standalone login link must fail."""
+    page = _page(client.get("/admin/login"))
+    links = page.select("a.admin-control-link")
+
+    assert {tuple(link.get("class", ())) for link in links} == {
+        ("login-brand", "admin-control-link"),
+        ("login-return", "admin-control-link"),
+    }
+    declarations = _css_declarations(_admin_css(client), ".admin-control-link")
+    assert declarations["display"] == "inline-flex"
+    assert declarations["min-height"] == "44px"
+    assert declarations["align-items"] == "center"
 
 
 def test_admin_navigation_preserves_groups_destinations_and_secure_logout(
@@ -132,10 +197,7 @@ def test_operations_pagination_exposes_current_choice_without_losing_query_state
 
 def test_admin_css_keeps_shared_responsive_and_accessibility_contracts(client):
     """Regressions in the required shell, aliases, input sizing, and focus fail."""
-    response = client.get("/static/css/admin.css")
-
-    assert response.status_code == 200
-    css = response.get_data(as_text=True)
+    css = _admin_css(client)
     for selector in (
         ".admin-layout",
         ".admin-main",
@@ -152,14 +214,57 @@ def test_admin_css_keeps_shared_responsive_and_accessibility_contracts(client):
         ".tag",
         ".flash",
     ):
-        assert selector in css
-    assert "grid-template-columns: 15rem minmax(0, 1fr)" in css
-    assert "@media (max-width: 1023px)" in css
-    assert "grid-template-columns: minmax(0, 1fr)" in css
-    assert ".admin-login .admin-layout" in css
-    assert "min-height: 44px" in css
-    assert "outline: 3px solid var(--ui-focus)" in css
-    assert ':not([type="checkbox"]):not([type="radio"])' in css
-    assert "overflow-x: auto" in css
-    assert "prefers-reduced-motion: reduce" in css
-    assert "var(--ui-" in css
+        assert _css_declarations(css, selector)
+    assert _css_declarations(css, ".admin-layout")["grid-template-columns"] == (
+        "15rem minmax(0, 1fr)"
+    )
+    assert _css_declarations(
+        css, ".admin-layout", media="(max-width: 1023px)"
+    )["grid-template-columns"] == "minmax(0, 1fr)"
+    assert _css_declarations(css, ".admin-login .admin-layout")[
+        "grid-template-columns"
+    ] == "minmax(0, 1fr)"
+    for selector in (".admin-nav a", ".admin-nav button", ".btn"):
+        assert _css_declarations(css, selector)["min-height"] == "44px"
+    assert _css_declarations(css, ":focus-visible")["outline"] == (
+        "3px solid var(--ui-focus)"
+    )
+    text_input = (
+        'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'
+    )
+    assert _css_declarations(css, text_input)["min-height"] == "44px"
+    assert _css_declarations(css, 'input[type="checkbox"]')["width"] == "auto"
+    assert _css_declarations(css, 'input[type="radio"]')["width"] == "auto"
+    assert _css_declarations(css, ".admin-table-wrap")["overflow-x"] == "auto"
+    assert _css_declarations(css, ".admin-main table")["overflow-x"] == "auto"
+    assert _css_declarations(
+        css, ".skip-link", media="(prefers-reduced-motion: reduce)"
+    )["transition"] == "none"
+    assert "var(--ui-" in _css_declarations(css, "body")["font-family"]
+
+
+def test_oversized_admin_rich_content_images_are_intrinsically_contained(client):
+    """A wide rich-content image must shrink without distorting its aspect ratio."""
+    document = BeautifulSoup(
+        '<main class="admin-main"><div data-rich-content>'
+        '<img src="oversized.png" width="2400" height="1600" alt=""></div></main>',
+        "html.parser",
+    )
+    assert document.select_one('.admin-main img[width="2400"]') is not None
+
+    declarations = _css_declarations(_admin_css(client), ".admin-main img")
+    assert declarations["max-width"] == "100%"
+    assert declarations["height"] == "auto"
+
+
+def test_print_admin_shell_removes_sidebar_track_and_expands_main(client):
+    """Print media must not retain a hidden 240px navigation grid column."""
+    css = _admin_css(client)
+
+    layout = _css_declarations(css, ".admin-layout", media="print")
+    navigation = _css_declarations(css, ".admin-nav", media="print")
+    main = _css_declarations(css, ".admin-main", media="print")
+    assert layout["grid-template-columns"] == "minmax(0, 1fr)"
+    assert navigation["display"] == "none"
+    assert main["grid-column"] == "1 / -1"
+    assert main["width"] == "100%"
