@@ -1,4 +1,4 @@
-<nav class="operations-pagination" data-pagination="operations" data-per-page="{{ page.per_page }}" aria-label="分页">
+<nav class="operations-pagination admin-actions" data-pagination="operations" data-per-page="{{ page.per_page }}" aria-label="运营队列分页">
   <span>第 {{ page.page }} / {{ page.total_pages or 1 }} 页，共 {{ page.total }} 项</span>
   {% for size in (20, 50) %}
   <a href="{{ request.path }}?{% for name, value in request.args.items() if name not in ('page', 'per_page') %}{{ name|urlencode }}={{ value|urlencode }}&amp;{% endfor %}page=1&amp;per_page={{ size }}" {% if size == page.per_page %}aria-current="true"{% endif %}>{{ size }} 条</a>

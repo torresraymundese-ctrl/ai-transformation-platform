@@ -1,24 +1,20 @@
 {% extends "admin/base_admin.html" %}
 {% from "components/ui.html" import alert, form_field %}
 {% block title %}后台登录 - 企业AI转型平台{% endblock %}
-{% block head %}
-  <style>
-    .admin-main{min-height:100vh;display:grid;place-items:center}
-    .login-card{width:min(92vw,400px);padding:32px;background:#fff;border:1px solid #d2d2d7;border-radius:16px;box-shadow:0 16px 48px rgba(0,0,0,.08)}
-    h1{font-size:24px;margin:0 0 8px}.hint{margin:0 0 24px;color:#6e6e73;font-size:14px}.field{margin-bottom:16px}.field label{display:block;margin-bottom:6px;font-weight:600;font-size:13px}.field input{width:100%;padding:11px 12px;border:1px solid #d2d2d7;border-radius:8px;font:inherit}.field input:focus{outline:3px solid rgba(0,113,227,.18);border-color:#0071e3}.error{padding:10px 12px;margin-bottom:16px;border-radius:8px;background:#fff1f0;color:#b42318;font-size:13px}.submit{width:100%;padding:12px;border:0;border-radius:8px;background:#0071e3;color:#fff;font:inherit;font-weight:700;cursor:pointer}
-  </style>
-{% endblock %}
+{% block body_class %}admin-login{% endblock %}
 {% block admin_navigation %}{% endblock %}
 {% block admin_content %}
-  <main class="login-card">
-    <h1>后台安全登录</h1>
+  <section class="login-card" aria-labelledby="login-heading">
+    <a class="login-brand" href="/">企业 AI 转型平台</a>
+    <h1 id="login-heading">后台安全登录</h1>
     <p class="hint">请输入服务器环境中配置的管理员凭据。</p>
-    {% if error %}{{ alert(error, "error", "error") }}{% endif %}
+    {% if error %}{{ alert(error, "error", "admin-error-summary error") }}{% endif %}
     <form method="POST" action="/admin/login">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {{ form_field("username", "账号", required=true, autocomplete="username", autofocus=true, class_name="field") }}
       {{ form_field("password", "密码", type="password", required=true, autocomplete="current-password", class_name="field") }}
-      <button class="submit" type="submit">登录</button>
+      <button class="submit btn btn-primary" type="submit">登录</button>
     </form>
-  </main>
+    <a class="login-return" href="/">← 返回网站</a>
+  </section>
 {% endblock %}

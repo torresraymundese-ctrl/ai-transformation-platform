@@ -1,60 +1,21 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}CMS后台 - 企业AI转型平台{% endblock %}</title>
 <meta name="robots" content="noindex,nofollow">
-<style>
-:root{--primary:#0071e3;--primary-dark:#0066cc;--accent:#bf4800;--bg:#f5f5f7;--text:#1d1d1f;--text-secondary:#86868b;--border:#d2d2d7;--radius:10px;}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text);font-size:14px;}
-.admin-nav{background:#1d1d1f;color:#fff;padding:0 24px;display:flex;align-items:center;height:50px;gap:24px;}
-.admin-nav a{color:#9CA3AF;text-decoration:none;font-size:13px;}
-.admin-nav a:hover,.admin-nav a.active{color:#fff;}
-.admin-nav .brand{font-weight:700;color:#fff;margin-right:auto;}
-.admin-wrap{display:flex;min-height:calc(100vh - 50px);}
-.admin-sidebar{width:200px;background:#fff;border-right:1px solid var(--border);padding:20px 0;}
-.admin-sidebar a{display:block;padding:10px 24px;color:var(--text-secondary);text-decoration:none;font-size:13px;transition:all 0.2s;}
-.admin-sidebar a:hover,.admin-sidebar a.active{background:#e8f4fd;color:var(--primary);border-right:3px solid var(--primary);}
-.admin-main{flex:1;padding:24px;}
-.card{background:#fff;border-radius:var(--radius);border:1px solid var(--border);}
-.admin-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
-.stat-card{background:#fff;border-radius:var(--radius);padding:20px;text-align:center;border:1px solid var(--border);}
-.stat-card .num{font-size:28px;font-weight:800;color:var(--primary);}
-.btn{display:inline-block;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;border:none;text-decoration:none;font-weight:600;}
-.btn-primary{background:var(--primary);color:#fff;}
-.btn-primary:hover{background:var(--primary-dark);}
-.btn-outline{background:#fff;border:1px solid var(--border);color:var(--text);}
-.btn-outline:hover{border-color:var(--primary);color:var(--primary);}
-.btn-danger{background:#DC2626;color:#fff;}
-.btn-sm{padding:4px 12px;font-size:12px;}
-table{width:100%;border-collapse:collapse;font-size:13px;}
-th{background:#f5f5f7;padding:10px 12px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);}
-td{padding:8px 12px;border-bottom:1px solid var(--border);}
-tr:hover td{background:#FAFBFC;}
-.form-group{margin-bottom:16px;}
-.form-group label{display:block;font-weight:600;margin-bottom:4px;font-size:13px;}
-.form-group input,.form-group textarea,.form-group select{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;}
-.form-group textarea{min-height:120px;resize:vertical;}
-.flash{background:#e8f4fd;border:1px solid var(--primary);padding:12px 16px;border-radius:var(--radius);margin-bottom:16px;color:var(--primary);}
-.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:#e8f4fd;color:var(--primary);margin:2px;}
-.admin-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;}.admin-heading h1{font-size:24px;}.admin-section{padding:20px;margin-bottom:20px;}.admin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}.muted{color:var(--text-secondary);}.stack{display:grid;gap:12px;}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f7;padding:12px;border-radius:6px;}.inline-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.inline-form .form-group{margin:0;min-width:150px;}.empty{padding:28px;text-align:center;color:var(--text-secondary);}
-@media(max-width:640px){
-.admin-nav{width:100%;max-width:100vw;overflow-x:auto;overscroll-behavior-x:contain;padding:0 16px;white-space:nowrap;}
-.admin-nav>*{flex:0 0 auto;}
-.admin-main{min-width:0;max-width:100vw;padding:16px;}
-.admin-main table{display:block;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;}
-.admin-heading{align-items:flex-start;flex-wrap:wrap;}
-.admin-grid{grid-template-columns:minmax(0,1fr);}
-.inline-form .form-group{min-width:min(150px,100%);flex:1 1 150px;}
-}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/design-tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
 {% block head %}{% endblock %}
 </head>
-<body data-admin-shell="true">
+<body class="{% block body_class %}{% endblock %}" data-admin-shell="true">
+<a class="skip-link" href="#admin-main">跳到后台主要内容</a>
+<div class="admin-layout">
 {% block admin_navigation %}{% include "components/admin_navigation.html" %}{% endblock %}
-<div class="admin-main">
+<main class="admin-main" id="admin-main" tabindex="-1" aria-label="后台主要内容">
 {% block admin_content %}{% endblock %}
+</main>
 </div>
 </body>
 </html>

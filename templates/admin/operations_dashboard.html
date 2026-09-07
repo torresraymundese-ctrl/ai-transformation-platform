@@ -12,9 +12,8 @@
   <div class="admin-grid">
     {% for card in snapshot.cards %}
     <article class="card admin-section" data-operation-card data-queue="{{ card.code }}" data-count="{{ card.count }}">
-      <p class="muted">{{ card.code }}</p>
       <h2>{{ card.label }}</h2>
-      <p class="stat-card num" aria-label="{{ card.label }}数量">{{ card.count }}</p>
+      <p class="stat-card num" data-operation-count aria-label="{{ card.label }}数量">{{ card.count }}</p>
       <a class="btn btn-outline" href="/admin?queue={{ card.code|urlencode }}">查看队列</a>
     </article>
     {% endfor %}
