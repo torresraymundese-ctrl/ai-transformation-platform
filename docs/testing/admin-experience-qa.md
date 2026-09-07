@@ -53,20 +53,20 @@ Edge's default tab zoom was 90%, so requested capability dimensions and encoded 
 
 ## Screenshot evidence
 
-These are unedited bytes returned by successful browser captures and visually inspected by the controller. Timed-out capture attempts and the browser's `ERR_BLOCKED_BY_CLIENT` page are excluded. Encoded pixels can differ from CSS viewport dimensions because of browser surface and zoom; these are viewport captures, not full-document captures.
+These are unedited JPEG/JFIF bytes returned by successful browser captures and visually inspected by the controller. Each file starts with JPEG/JFIF magic `FF D8 FF E0` and decodes as JPEG; the `.jpg` extension now matches the actual format without recapture, re-encoding, or transcoding. Timed-out capture attempts and the browser's `ERR_BLOCKED_BY_CLIENT` page are excluded. Encoded pixels can differ from CSS viewport dimensions because of browser surface and zoom; these are viewport captures, not full-document captures.
 
 | File | Browser / route / measured CSS viewport | Encoded px | Bytes | SHA-256 |
 | --- | --- | ---: | ---: | --- |
-| `docs/design/evidence/admin-actions-320.png` | IAB, `/admin/catalog/scenario/4`, 320x844 | 305x804 | 31,451 | `7EE53A829B124F00FA665E4C361C31B8AADC79D4DAB3B9C1DDA2982C3E631771` |
-| `docs/design/evidence/admin-catalog-390.png` | IAB, `/admin/catalog/scenario/4`, 390x844 | 375x811 | 33,294 | `E3820AD1B475C8EB84344369E28B1FDC694E456B5F5A2AA1774C8C2C7A921AC4` |
-| `docs/design/evidence/admin-conflict-390.png` | IAB, `/admin/catalog/scenario/4`, 390x844 | 375x811 | 32,047 | `1C76391A2D5CE11388A81E885A2D45CF8A3621671628E952EF2FA84EFCBC96BF` |
-| `docs/design/evidence/admin-dashboard-1440.png` | IAB, `/admin`, 1440x1024 | 1425x847 | 76,228 | `C634E93E545C0975849D78833F5F99AA741E652460CE53197E7283F4ECCCDCCF` |
-| `docs/design/evidence/admin-empty-1440.png` | Edge, `/admin/leads?q=QA-empty-no-matching-record`, 1440x1024 | 1581x1138 | 68,565 | `3741FFF6E6D68E208DA929B266C9EEF9C2A1A365F95904820B9D8ADB55E67293` |
-| `docs/design/evidence/admin-labels-320.png` | IAB, `/admin/assets/labels?unit=B`, 320x844 | 305x804 | 21,734 | `613513F32BB8102B60392A9E5A265AD7526BEA37B49ED726F250F0CBE99C761F` |
-| `docs/design/evidence/admin-login-320.png` | Edge, `/admin/login`, measured width 320; height not retained | 356x938 | 18,292 | `F1405D7DF6BBE4FD6CDF347E56B349F080533DEB59ECAF06E190A8A0CD5620E7` |
-| `docs/design/evidence/admin-rule-1440.png` | IAB, `/admin/rules/2`, 1440x1024 | 1425x847 | 73,512 | `E147D87E73ABD9D0EF012A3A909461186DA939FF8AAC0CE0AEEDEA8D92AADC8B` |
+| `docs/design/evidence/admin-actions-320.jpg` | IAB, `/admin/catalog/scenario/4`, 320x844 | 305x804 | 31,451 | `7EE53A829B124F00FA665E4C361C31B8AADC79D4DAB3B9C1DDA2982C3E631771` |
+| `docs/design/evidence/admin-catalog-390.jpg` | IAB, `/admin/catalog/scenario/4`, 390x844 | 375x811 | 33,294 | `E3820AD1B475C8EB84344369E28B1FDC694E456B5F5A2AA1774C8C2C7A921AC4` |
+| `docs/design/evidence/admin-conflict-390.jpg` | IAB, `/admin/catalog/scenario/4`, 390x844 | 375x811 | 32,047 | `1C76391A2D5CE11388A81E885A2D45CF8A3621671628E952EF2FA84EFCBC96BF` |
+| `docs/design/evidence/admin-dashboard-1440.jpg` | IAB, `/admin`, 1440x1024 | 1425x847 | 76,228 | `C634E93E545C0975849D78833F5F99AA741E652460CE53197E7283F4ECCCDCCF` |
+| `docs/design/evidence/admin-empty-1440.jpg` | Edge, `/admin/leads?q=QA-empty-no-matching-record`, 1440x1024 | 1581x1138 | 68,565 | `3741FFF6E6D68E208DA929B266C9EEF9C2A1A365F95904820B9D8ADB55E67293` |
+| `docs/design/evidence/admin-labels-320.jpg` | IAB, `/admin/assets/labels?unit=B`, 320x844 | 305x804 | 21,734 | `613513F32BB8102B60392A9E5A265AD7526BEA37B49ED726F250F0CBE99C761F` |
+| `docs/design/evidence/admin-login-320.jpg` | Edge, `/admin/login`, measured width 320; height not retained | 356x938 | 18,292 | `F1405D7DF6BBE4FD6CDF347E56B349F080533DEB59ECAF06E190A8A0CD5620E7` |
+| `docs/design/evidence/admin-rule-1440.jpg` | IAB, `/admin/rules/2`, 1440x1024 | 1425x847 | 73,512 | `E147D87E73ABD9D0EF012A3A909461186DA939FF8AAC0CE0AEEDEA8D92AADC8B` |
 
-`admin-actions-320.png` records the normal narrow action area; it is not an error screenshot. `admin-conflict-390.png` is the proven native 409 conflict state. The older Edge login capture has verified CSS width 320, but its exact CSS height was not retained and is intentionally recorded as unknown.
+`admin-actions-320.jpg` records the normal narrow action area; it is not an error screenshot. `admin-conflict-390.jpg` is the proven native 409 conflict state. The older Edge login capture has verified CSS width 320, but its exact CSS height was not retained and is intentionally recorded as unknown.
 
 ## Automated verification record
 

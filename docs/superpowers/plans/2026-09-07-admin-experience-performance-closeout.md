@@ -111,7 +111,7 @@ def test_home_has_no_remote_script_dependency(client):
 
 ### Task 4: Cross-page QA and closeout evidence
 
-**Files:** Create `docs/testing/admin-experience-qa.md`, `docs/design/evidence/admin-*.png` as needed; update only this plan's checkboxes after verification. Controller updates the external task card. Any discovered implementation defect returns to its original implementer and covering tests before re-review.
+**Files:** Create `docs/testing/admin-experience-qa.md`, `docs/design/evidence/admin-*.jpg` as needed; update only this plan's checkboxes after verification. Controller updates the external task card. Any discovered implementation defect returns to its original implementer and covering tests before re-review.
 
 **Interfaces:** Current Task 1–3 code, a new disposable TEST ONLY fixture server, browser screenshots obtained by controller. Keep existing PDF preview and user data untouched. Never fabricate screenshot paths or metrics.
 
