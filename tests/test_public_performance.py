@@ -1,7 +1,8 @@
 """Public SEO and asset-loading contracts for shipped public pages."""
 
 from datetime import datetime
-from urllib.parse import urlsplit
+import re
+from urllib.parse import urljoin, urlsplit
 
 import pytest
 from bs4 import BeautifulSoup
@@ -10,6 +11,11 @@ from content_clock import SHANGHAI
 
 
 NOW = datetime(2026, 9, 7, 10, 0, 0, tzinfo=SHANGHAI)
+CSS_URL_PATTERN = re.compile(r"url\(\s*(['\"]?)([^'\")]+)\1\s*\)", re.IGNORECASE)
+CSS_QUOTED_IMPORT_PATTERN = re.compile(
+    r"@import\s+(['\"])([^'\"]+)\1",
+    re.IGNORECASE,
+)
 
 
 def _page(response):
@@ -60,6 +66,52 @@ def _publish_legal(document_type, version_code, *, summary):
     return version_id
 
 
+def _assert_local_rendered_dependencies(document, *, path):
+    for script in document.select("script[src]"):
+        assert script["src"].startswith("/static/"), (
+            path,
+            "remote script dependency",
+            script["src"],
+        )
+        assert script.has_attr("defer"), path
+
+    for image in document.select("img[src]"):
+        assert image["src"].startswith(("/static/", "/media/")), (
+            path,
+            "remote image dependency",
+            image["src"],
+        )
+
+    for stylesheet in document.select('link[rel~="stylesheet"][href]'):
+        assert stylesheet["href"].startswith("/static/"), (
+            path,
+            "remote stylesheet dependency",
+            stylesheet["href"],
+        )
+
+
+def _css_asset_references(css):
+    references = [match.group(2).strip() for match in CSS_URL_PATTERN.finditer(css)]
+    references.extend(
+        match.group(2).strip()
+        for match in CSS_QUOTED_IMPORT_PATTERN.finditer(css)
+    )
+    return references
+
+
+def _assert_local_stylesheet_dependencies(css, *, stylesheet_href):
+    base = f"https://local-assets.invalid{stylesheet_href}"
+    for reference in _css_asset_references(css):
+        if reference.startswith("data:"):
+            continue
+        resolved = urlsplit(urljoin(base, reference))
+        assert (
+            resolved.scheme == "https"
+            and resolved.netloc == "local-assets.invalid"
+            and resolved.path.startswith("/static/")
+        ), (stylesheet_href, "remote CSS dependency", reference)
+
+
 @pytest.mark.parametrize(
     "path",
     (
@@ -73,12 +125,54 @@ def _publish_legal(document_type, version_code, *, summary):
         "/assessment",
     ),
 )
-def test_public_pages_use_only_local_deferred_script_dependencies(client, path):
+def test_public_pages_use_only_local_deferred_asset_dependencies(client, path):
     document = _page(client.get(path))
 
-    for script in document.select("script[src]"):
-        assert script["src"].startswith("/static/"), path
-        assert script.has_attr("defer"), path
+    _assert_local_rendered_dependencies(document, path=path)
+
+    stylesheets = document.select('link[rel~="stylesheet"][href]')
+    assert stylesheets, path
+    for stylesheet in stylesheets:
+        href = stylesheet["href"]
+        response = client.get(href)
+        assert response.status_code == 200, (path, href)
+        assert response.mimetype == "text/css", (path, href)
+        _assert_local_stylesheet_dependencies(
+            response.get_data(as_text=True),
+            stylesheet_href=href,
+        )
+
+
+@pytest.mark.parametrize(
+    "unsafe_markup",
+    (
+        '<img src="https://assets.example/remote.webp" alt="">',
+        '<link rel="stylesheet" href="//assets.example/remote.css">',
+    ),
+)
+def test_local_dependency_guard_rejects_remote_rendered_assets(unsafe_markup):
+    document = BeautifulSoup(
+        f"<html><head></head><body>{unsafe_markup}</body></html>",
+        "html.parser",
+    )
+
+    with pytest.raises(AssertionError, match="remote (image|stylesheet) dependency"):
+        _assert_local_rendered_dependencies(document, path="mutated fixture")
+
+
+@pytest.mark.parametrize(
+    "unsafe_css",
+    (
+        '@import "https://assets.example/remote-fonts.css";',
+        "@font-face { src: url(//assets.example/remote.woff2) format('woff2'); }",
+    ),
+)
+def test_local_dependency_guard_rejects_remote_css_imports_and_fonts(unsafe_css):
+    with pytest.raises(AssertionError, match="remote CSS dependency"):
+        _assert_local_stylesheet_dependencies(
+            unsafe_css,
+            stylesheet_href="/static/css/mutated.css",
+        )
 
 
 def test_public_route_matrix_has_unique_titles_and_trusted_canonicals(client):
@@ -139,9 +233,10 @@ def test_shipped_logo_and_decorative_images_have_intrinsic_dimensions(client, db
         response = client.get(path)
         assert response.status_code == 200, path
         document = _page(response)
-        images = document.select('img[src^="/static/"]')
+        images = document.select("img[src]")
         assert images, path
         for image in images:
+            assert image["src"].startswith("/static/"), (path, image["src"])
             assert image.get("width"), (path, image.get("src"))
             assert image.get("height"), (path, image.get("src"))
 

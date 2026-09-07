@@ -15,6 +15,13 @@ scripts are local and deferred. Inline scripts are not counted as external asset
 references. The admin login is included only to record the private/noindex boundary;
 its separate `admin.css` is not loaded by public pages.
 
+The focused regression visits the approved public route fixtures and inspects every
+rendered `img[src]`, every external `script[src]`, and every stylesheet link. It then
+loads each shipped stylesheet locally and inspects CSS `@import` and `url()` references,
+including font sources. Controlled negative fixtures prove that remote images,
+protocol-relative stylesheets, remote CSS imports, and remote font URLs are rejected;
+the guard does not rely on a selector that prefilters remote URLs out of view.
+
 The responses used the application's private analytics cache policy
 (`Cache-Control: private, no-store`). The byte counts below are decoded file sizes
 obtained through loopback requests, not compressed production transfer sizes. No
