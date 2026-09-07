@@ -5,9 +5,9 @@
     <fieldset data-content-block data-block-index="{{ loop.index0 }}" style="border:1px solid #E5E7EB;padding:16px;margin:12px 0;">
       <legend>{{ block.block_type }}</legend>
       <input type="hidden" name="blocks-{{ loop.index0 }}-type" value="{{ block.block_type }}" data-field-suffix="type">
-      <div class="form-group"><label>区块标题</label><input type="text" name="blocks-{{ loop.index0 }}-title" value="{{ block.title or '' }}" data-field-suffix="title"></div>
-      <div class="form-group"><label>正文</label><textarea name="blocks-{{ loop.index0 }}-body" data-field-suffix="body">{{ block.body_html or '' }}</textarea></div>
-      <div class="form-group"><label>媒体</label><select name="blocks-{{ loop.index0 }}-media_id" data-field-suffix="media_id"><option value="">不使用</option>{% for media in view.media_choices %}<option value="{{ media.id }}" {% if block.media_asset_id == media.id %}selected{% endif %}>{{ media.display_name }}</option>{% endfor %}</select></div>
+      <div class="form-group"><label for="block-{{ loop.index0 }}-title">区块标题</label><input id="block-{{ loop.index0 }}-title" type="text" name="blocks-{{ loop.index0 }}-title" value="{{ block.title or '' }}" data-field-suffix="title"></div>
+      <div class="form-group"><label for="block-{{ loop.index0 }}-body">正文</label><textarea id="block-{{ loop.index0 }}-body" name="blocks-{{ loop.index0 }}-body" data-field-suffix="body">{{ block.body_html or '' }}</textarea></div>
+      <div class="form-group"><label for="block-{{ loop.index0 }}-media">媒体</label><select id="block-{{ loop.index0 }}-media" name="blocks-{{ loop.index0 }}-media_id" data-field-suffix="media_id"><option value="">不使用</option>{% for media in view.media_choices %}<option value="{{ media.id }}" {% if block.media_asset_id == media.id %}selected{% endif %}>{{ media.display_name }}</option>{% endfor %}</select></div>
       {% if block.block_type == 'heading' %}
       <label>标题级别<select name="blocks-{{ loop.index0 }}-heading_level" data-field-suffix="heading_level">{% for level in (2,3,4) %}<option value="{{ level }}" {% if block.settings.get('level') == level %}selected{% endif %}>H{{ level }}</option>{% endfor %}</select></label>
       {% elif block.block_type == 'image_text' %}
@@ -29,8 +29,9 @@
     </fieldset>
   {% endfor %}
   </div>
-  <div style="display:flex;gap:8px;">
-    <select data-new-block-type>{% for block_type in ('heading','rich_text','image_text','metric','steps','download','cta') %}<option value="{{ block_type }}">{{ block_type }}</option>{% endfor %}</select>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <label for="new-block-type">新区块类型</label>
+    <select id="new-block-type" data-new-block-type>{% for block_type in ('heading','rich_text','image_text','metric','steps','download','cta') %}<option value="{{ block_type }}">{{ block_type }}</option>{% endfor %}</select>
     <button type="button" data-add-block>添加区块</button>
   </div>
 </fieldset>

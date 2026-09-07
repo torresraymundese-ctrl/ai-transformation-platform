@@ -5,7 +5,7 @@
 <section class="card admin-section" aria-labelledby="validation-heading">
   <h2 id="validation-heading">验证与编译</h2>
   {% if validation_errors %}
-    <ul class="error-list" data-validation-errors>{% for error in validation_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    <ul class="error-list admin-error-summary" data-validation-errors data-admin-error-summary role="alert" tabindex="-1">{% for error in validation_errors %}<li>{{ error }}</li>{% endfor %}</ul>
   {% else %}
     <p data-validation-result>规则草稿验证通过</p>
   {% endif %}
@@ -13,18 +13,18 @@
 </section>
 
 {% if draft.status == 'draft' %}
-<form method="post" action="{{ url_for('admin.admin_rule_edit', release_id=draft.id) }}" data-rule-edit>
+<form method="post" action="{{ url_for('admin.admin_rule_edit', release_id=draft.id) }}" data-rule-edit data-admin-editor>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="expected_lock_version" value="{{ draft.lock_version }}">
-  <section class="card admin-section">
-    <h2>基础设置</h2>
+  <section class="card admin-editor-section" id="editor-basic" aria-labelledby="editor-basic-title">
+    <h2 id="editor-basic-title">基础设置</h2>
     <label>版本名称<input name="name" value="{{ draft.name }}" maxlength="200" required></label>
     <label>痛点最少选择<input type="number" name="pain_min_selections" min="1" max="3" value="{{ draft.pain_min_selections }}" required></label>
     <label>痛点最多选择<input type="number" name="pain_max_selections" min="1" max="3" value="{{ draft.pain_max_selections }}" required></label>
   </section>
 
-  <section class="card admin-section" data-reorder="release-owned-labels">
-    <h2>行业、部门、痛点与企业规模</h2>
+  <section class="card admin-editor-section" id="editor-taxonomy" aria-labelledby="editor-taxonomy-title" data-reorder="release-owned-labels">
+    <h2 id="editor-taxonomy-title">行业、部门、痛点与企业规模</h2>
     {% for industry in draft.industries %}
       {% set prefix = 'industry__' ~ industry.code ~ '__' %}
       <fieldset data-industry-code="{{ industry.code }}"><legend>{{ industry.code }}</legend>
@@ -53,8 +53,8 @@
     </fieldset>
   </section>
 
-  <section class="card admin-section">
-    <h2>公开标签与解释</h2>
+  <section class="card admin-editor-section" id="editor-public-content" aria-labelledby="editor-public-content-title">
+    <h2 id="editor-public-content-title">公开标签与解释</h2>
     {% for family in ('risk_labels', 'risk_explanations', 'dimensions', 'maturities', 'integrations', 'roi_groups') %}
       <fieldset><legend>{{ family }}</legend>
       {% for code, text in draft.public_labels|attr(family)|items %}
@@ -71,8 +71,8 @@
     {% endfor %}
   </section>
 
-  <section class="card admin-section">
-    <h2>题目、选项与评分</h2>
+  <section class="card admin-editor-section" id="editor-scoring" aria-labelledby="editor-scoring-title">
+    <h2 id="editor-scoring-title">题目、选项与评分</h2>
     {% for question in draft.questions %}
       {% set prefix = 'question__' ~ question.code ~ '__' %}
       <fieldset data-question-code="{{ question.code }}"><legend>{{ question.code }}</legend>
@@ -87,8 +87,8 @@
     {% endfor %}
   </section>
 
-  <section class="card admin-section">
-    <h2>行业权重与基准线</h2>
+  <section class="card admin-editor-section" id="editor-benchmarks" aria-labelledby="editor-benchmarks-title">
+    <h2 id="editor-benchmarks-title">行业权重与基准线</h2>
     {% for branch_code, weights in draft.branch_weights.items() %}
       <fieldset><legend>{{ branch_code }} 权重</legend><div class="form-grid">{% for dimension in dimension_order %}<label>{{ dimension }}<input type="number" min="0" max="100" name="weight__{{ branch_code }}__{{ dimension }}" value="{{ weights[dimension] }}" required></label>{% endfor %}</div></fieldset>
     {% endfor %}
@@ -97,15 +97,15 @@
     {% endfor %}
   </section>
 
-  <section class="card admin-section">
-    <h2>ROI 选项区间</h2>
+  <section class="card admin-editor-section" id="editor-roi" aria-labelledby="editor-roi-title">
+    <h2 id="editor-roi-title">ROI 选项区间</h2>
     {% for group, options in draft.roi_ranges.items() %}
       <fieldset><legend>{{ group }}</legend>{% for code, triple in options.items() %}<div class="form-grid"><code>{{ code }}</code>{% for band in ('low', 'mid', 'high') %}<label>{{ band }}<input name="roi__{{ group }}__{{ code }}__{{ band }}" value="{{ triple[loop.index0] }}" inputmode="decimal" required></label>{% endfor %}</div>{% endfor %}</fieldset>
     {% endfor %}
   </section>
 
-  <section class="card admin-section" data-reorder="scenarios">
-    <h2>场景顺序与规则</h2>
+  <section class="card admin-editor-section" id="editor-scenarios" aria-labelledby="editor-scenarios-title" data-reorder="scenarios">
+    <h2 id="editor-scenarios-title">场景顺序与规则</h2>
     {% for scenario in draft.scenarios %}
       {% set prefix = 'scenario__' ~ scenario.code ~ '__' %}
       <fieldset data-scenario-code="{{ scenario.code }}"><legend>{{ scenario.code }}</legend>
@@ -130,7 +130,7 @@
     {% endfor %}
   </section>
 
-  <section class="card admin-section" data-reorder="services"><h2>服务包完整配置</h2>
+  <section class="card admin-editor-section" id="editor-services" aria-labelledby="editor-services-title" data-reorder="services"><h2 id="editor-services-title">服务包完整配置</h2>
     {% for service in draft.services %}{% set prefix = 'service__' ~ service.code ~ '__' %}
       <fieldset data-service-code="{{ service.code }}"><legend>{{ service.code }}</legend>
         <label>显示顺序<select name="{{ prefix }}position">{% for position in range(1, draft.services|length + 1) %}<option value="{{ position }}" {% if position == service.sort_order %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
@@ -147,7 +147,7 @@
       </fieldset>
     {% endfor %}
   </section>
-  <button class="btn btn-primary" type="submit">保存草稿</button>
+  <div class="admin-actions"><button class="btn btn-primary" type="submit">保存草稿</button></div>
 </form>
 
 <form method="post" action="{{ url_for('admin.admin_rule_preview', release_id=draft.id) }}" class="card admin-section" data-rule-preview>

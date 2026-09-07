@@ -2,10 +2,11 @@
   <legend>推荐关系（只可选择已发布目标）</legend>
   <div data-content-relations>
   {% for relation in form.relations %}
-    <div data-content-relation style="display:flex;gap:8px;margin:8px 0;">
+    <div data-content-relation style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;align-items:center;">
       <input type="hidden" name="relations-{{ loop.index0 }}-type" value="{{ relation.relation_type }}" data-relation-field="type">
       <span>{{ relation.relation_type }}</span>
-      <select name="relations-{{ loop.index0 }}-target_group_id" data-relation-field="target_group_id">
+      <label for="relation-{{ loop.index0 }}-target">关联目标</label>
+      <select id="relation-{{ loop.index0 }}-target" name="relations-{{ loop.index0 }}-target_group_id" data-relation-field="target_group_id">
       {% set target_type = relation.relation_type.split('_')[-1] %}
       {% for choice in view.relation_choices %}
         {% if choice.entry_type == target_type %}<option value="{{ choice.group_id }}" {% if relation.target_group_id == choice.group_id %}selected{% endif %}>{{ choice.title }}</option>{% endif %}
@@ -18,9 +19,11 @@
   {% endfor %}
   </div>
   {% if view.relation_choices %}
-  <div style="display:flex;gap:8px;">
-    <select data-new-relation-type><option value="{{ view.kind }}_case">{{ view.kind }}_case</option><option value="{{ view.kind }}_resource">{{ view.kind }}_resource</option></select>
-    <select data-new-relation-target>{% for choice in view.relation_choices %}<option value="{{ choice.group_id }}" data-entry-type="{{ choice.entry_type }}">{{ choice.title }}</option>{% endfor %}</select>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <label for="new-relation-type">关系类型</label>
+    <select id="new-relation-type" data-new-relation-type><option value="{{ view.kind }}_case">{{ view.kind }}_case</option><option value="{{ view.kind }}_resource">{{ view.kind }}_resource</option></select>
+    <label for="new-relation-target">关联目标</label>
+    <select id="new-relation-target" data-new-relation-target>{% for choice in view.relation_choices %}<option value="{{ choice.group_id }}" data-entry-type="{{ choice.entry_type }}">{{ choice.title }}</option>{% endfor %}</select>
     <button type="button" data-add-relation>添加关系</button>
   </div>
   {% else %}<p>目前没有可选择的已发布案例或资源。</p>{% endif %}

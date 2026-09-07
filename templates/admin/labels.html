@@ -15,6 +15,7 @@
 .label-card .dept{font-size:10px;opacity:0.75;}
 .label-card .qty{font-size:11px;font-weight:600;margin-top:2px;}
 @media screen{
+  .label-sheet-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;}
   .label-sheet{background:#fff;box-shadow:0 0 12px rgba(0,0,0,0.08);margin:20px auto;width:fit-content;}
   body{background:#e8e8ed;}
 }
@@ -23,19 +24,22 @@
   body{print-color-adjust:exact;-webkit-print-color-adjust:exact;color-adjust:exact;margin:0;padding:0;}
   .admin-nav,.label-toolbar,.no-print{display:none!important;}
   .admin-main{padding:0!important;}
+  .label-sheet-scroll{overflow:visible;}
   .label-sheet{box-shadow:none;margin:0;padding:2mm;}
 }
 </style>
 
+<h1 class="no-print">资产标签打印</h1>
 <div class="label-toolbar no-print">
-  <a href="/admin/assets/labels?unit=A" class="unit-btn {% if unit == 'A' %}active-a{% else %}btn-outline{% endif %}">单位A · 白底标签</a>
-  <a href="/admin/assets/labels?unit=B" class="unit-btn {% if unit == 'B' %}active-b{% else %}btn-outline{% endif %}">单位B · 红底标签</a>
-  <button class="btn-print" onclick="window.print()">🖨️ 打印</button>
+  <a href="/admin/assets/labels?unit=A" class="btn unit-btn {% if unit == 'A' %}active-a{% else %}btn-outline{% endif %}">单位A · 白底标签</a>
+  <a href="/admin/assets/labels?unit=B" class="btn unit-btn {% if unit == 'B' %}active-b{% else %}btn-outline{% endif %}">单位B · 红底标签</a>
+  <button class="btn btn-print" onclick="window.print()">🖨️ 打印</button>
   <a href="/admin/assets" class="btn btn-outline">← 返回仪表盘</a>
   <span style="font-size:12px;color:var(--text-secondary);">共 {{ labels|length }} 条</span>
 </div>
 
 {% if labels %}
+<div class="label-sheet-scroll" data-label-sheet-scroll>
 <div class="label-sheet">
   {% for label in labels %}
   <div class="label-card {% if unit == 'A' %}white{% else %}red{% endif %}">
@@ -48,10 +52,11 @@
   </div>
   {% endfor %}
 </div>
+</div>
 {% else %}
 <div class="card" style="padding:40px;text-align:center;">
   <p style="color:var(--text-secondary);font-size:16px;">暂无资产数据</p>
-  <p style="margin-top:8px;">请先在 <a href="/admin/assets/unit-{{ 'a' if unit == 'A' else 'b' }}">单位{{ unit }}资产管理</a> 中录入资产</p>
+  <p style="margin-top:8px;">请先在 <a class="admin-control-link" href="/admin/assets/unit-{{ 'a' if unit == 'A' else 'b' }}">单位{{ unit }}资产管理</a> 中录入资产</p>
 </div>
 {% endif %}
 {% endblock %}

@@ -1,7 +1,7 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-  <h2>核心内容目录 · {{ kind }}</h2>
+<div class="admin-heading">
+  <h1>核心内容目录 · {{ kind }}</h1>
   <div>共 {{ page.total }} 项</div>
 </div>
 <form method="get" class="inline-form" data-operations-filters="true">

@@ -1,8 +1,8 @@
 {% extends "admin/base_admin.html" %}
 {% set is_resource = entry_type == 'resource' %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-  <div><h2>{{ 'V2 审核资源' if is_resource else 'V2 有效期公告' }}</h2><p>共 {{ page.total }} 个修订</p></div>
+<div class="admin-heading">
+  <div><h1>{{ 'V2 审核资源' if is_resource else 'V2 有效期公告' }}</h1><p>共 {{ page.total }} 个修订</p></div>
   <a class="btn btn-primary" href="{{ url_for('admin.admin_resource_new_v2') if is_resource else url_for('admin.admin_announcement_new_v2') }}">新建{{ '资源' if is_resource else '公告' }}</a>
 </div>
 <form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>

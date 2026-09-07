@@ -1,8 +1,8 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+<div class="admin-heading">
   <div>
-    <h2>内容接入审核</h2>
+    <h1>内容接入审核</h1>
     <p style="color:var(--text-secondary);">仅显示固定、经审核来源进入的候选内容。</p>
   </div>
   <form method="post" action="/admin/scrape">

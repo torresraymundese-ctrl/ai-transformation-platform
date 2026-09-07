@@ -1,11 +1,11 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<h2>{% if asset %}编辑单位B资产 #{{ asset.id }}{% else %}新增单位B资产{% endif %}</h2>
+<h1>{% if asset %}编辑单位B资产 #{{ asset.id }}{% else %}新增单位B资产{% endif %}</h1>
 <form method="POST" style="max-width:500px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
-    <label>资产编码 *</label>
-    <select name="asset_code_id" required>
+    <label for="unit-b-asset-code">资产编码 *</label>
+    <select id="unit-b-asset-code" name="asset_code_id" required>
       <option value="">-- 请选择资产 --</option>
       <optgroup label="桌子">
         {% for c in codes if c.category == 'table' %}
@@ -20,12 +20,12 @@
     </select>
   </div>
   <div class="form-group">
-    <label>数量</label>
-    <input name="quantity" type="number" value="{{ asset.quantity if asset else 1 }}" min="1" required>
+    <label for="unit-b-quantity">数量</label>
+    <input id="unit-b-quantity" name="quantity" type="number" value="{{ asset.quantity if asset else 1 }}" min="1" required>
   </div>
   <div class="form-group">
-    <label>备注</label>
-    <input name="remark" value="{{ asset.remark if asset else '' }}" placeholder="可选备注">
+    <label for="unit-b-remark">备注</label>
+    <input id="unit-b-remark" name="remark" value="{{ asset.remark if asset else '' }}" placeholder="可选备注">
   </div>
   <div style="display:flex;gap:12px;">
     <button type="submit" class="btn btn-primary">保存</button>

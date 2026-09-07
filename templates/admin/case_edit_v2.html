@@ -1,16 +1,16 @@
 {% extends "admin/base_admin.html" %}
 {% set form = view.form %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-  <div><h2>V2 案例真实性与发布审核</h2>{% if form.id %}<code>case:{{ form.id }} · revision {{ form.revision_number }}</code>{% endif %}</div>
+<div class="admin-heading">
+  <div><h1>V2 案例真实性与发布审核</h1>{% if form.id %}<p class="muted"><code>case:{{ form.id }} · revision {{ form.revision_number }}</code></p>{% endif %}</div>
   <a class="btn btn-outline" href="{{ url_for('admin.admin_cases_v2') }}">返回案例</a>
 </div>
-{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
-{% if view.public_revision %}<section class="card" style="padding:16px;margin-bottom:16px"><h3>当前公开修订 #{{ view.public_revision.revision_number }}</h3><p>{{ view.public_revision.title }}</p></section>{% endif %}
+{% if error %}<div class="admin-error-summary" role="alert" tabindex="-1" data-admin-error-summary>{{ error }}</div>{% endif %}
+{% if view.public_revision %}<section class="card admin-section" aria-labelledby="current-public-title"><h2 id="current-public-title">当前公开修订 #{{ view.public_revision.revision_number }}</h2><p>{{ view.public_revision.title }}</p></section>{% endif %}
 
 {% if form.id and form.status != 'draft' %}
-<section class="card" style="padding:20px">
-  <h3>不可变修订</h3>
+<section class="card admin-section" aria-labelledby="immutable-title">
+  <h2 id="immutable-title">不可变修订</h2>
   <p>{{ form.title }}</p>
   <p>{{ form.summary }}</p>
   <form method="POST" action="{{ url_for('admin.admin_case_copy_v2', content_id=form.id) }}">
@@ -21,51 +21,64 @@
   </form>
 </section>
 {% else %}
-<form method="POST" class="card" style="padding:20px" data-content-editor>
+<form method="POST" data-admin-editor data-content-editor>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if form.id %}<input type="hidden" name="content_id" value="{{ form.id }}"><input type="hidden" name="lock_version" value="{{ form.lock_version }}">{% endif %}
-  <div class="form-group"><label>公开路径标识</label><input name="slug" value="{{ form.slug }}" maxlength="120" required></div>
-  <div class="form-group"><label>公开标题</label><input name="title" value="{{ form.title }}" maxlength="120" required></div>
-  <div class="form-group"><label>公开摘要</label><textarea name="summary" maxlength="300" required>{{ form.summary }}</textarea></div>
-  <div class="form-group"><label>SEO 标题</label><input name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></div>
-  <div class="form-group"><label>SEO 摘要</label><textarea name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></div>
-  <div class="form-group"><label>分享图</label><select name="share_image_media_id"><option value="">不使用</option>{% for media in view.share_image_choices %}<option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>{% endfor %}</select></div>
+  <section class="card admin-editor-section" id="editor-basic" aria-labelledby="editor-basic-title">
+    <h2 id="editor-basic-title">基本信息</h2>
+    <div class="form-group"><label>公开路径标识<input name="slug" value="{{ form.slug }}" maxlength="120" required></label></div>
+    <div class="form-group"><label>公开标题<input name="title" value="{{ form.title }}" maxlength="120" required></label></div>
+    <div class="form-group"><label>公开摘要<textarea name="summary" maxlength="300" required>{{ form.summary }}</textarea></label></div>
+  </section>
 
-  <fieldset class="form-group"><legend>真实性类型（必须明确选择）</legend>
-    <select name="verification_code" required><option value="public_verified" {% if form.verification_code == 'public_verified' %}selected{% endif %}>公开来源已核验</option><option value="authorized_anonymous" {% if form.verification_code == 'authorized_anonymous' %}selected{% endif %}>经授权匿名</option></select>
-    <label>核验结果<select name="is_verified"><option value="0" {% if form.is_verified == 0 %}selected{% endif %}>未通过</option><option value="1" {% if form.is_verified == 1 %}selected{% endif %}>已通过</option></select></label>
-  </fieldset>
-  <fieldset class="form-group"><legend>核验依据（必须明确选择）</legend>
-    <select name="basis_type" required><option value="public_source" {% if form.basis_type == 'public_source' %}selected{% endif %}>公开来源</option><option value="client_authorization" {% if form.basis_type == 'client_authorization' %}selected{% endif %}>客户授权</option><option value="internal_delivery_record" {% if form.basis_type == 'internal_delivery_record' %}selected{% endif %}>内部交付记录</option></select>
-    <label>内部依据编号（不公开）<input name="private_basis_reference" value="{{ form.private_basis_reference }}" maxlength="300"></label>
-    <label>公开来源 URL<input name="source_url" value="{{ form.source_url }}" maxlength="2048"></label>
-    {% if form.source_check_code %}<p>来源检查：{{ form.source_check_code }} · {{ form.source_checked_at }} 至 {{ form.source_check_expires_at }}</p>{% endif %}
-  </fieldset>
+  <section class="card admin-editor-section" id="editor-content" aria-labelledby="editor-content-title">
+    <h2 id="editor-content-title">公开内容与量化证据</h2>
+    {% include "admin/_content_blocks.html" %}
+    <fieldset class="form-group"><legend>量化指标与证据</legend>
+    {% for metric in form.metrics %}<fieldset style="border:1px solid #E5E7EB;padding:12px;margin:10px 0"><legend>指标 {{ loop.index }}</legend>
+      <label>指标名<input name="metrics-{{ loop.index0 }}-name" value="{{ metric.name }}" required></label>
+      <label>改造前<input name="metrics-{{ loop.index0 }}-before_value" value="{{ metric.before_value }}" required></label>
+      <label>改造后<input name="metrics-{{ loop.index0 }}-after_value" value="{{ metric.after_value }}" required></label>
+      <label>单位<input name="metrics-{{ loop.index0 }}-unit" value="{{ metric.unit }}" required></label>
+      <label>统计周期<input name="metrics-{{ loop.index0 }}-statistical_period" value="{{ metric.statistical_period }}" required></label>
+      <label>证据说明<textarea name="metrics-{{ loop.index0 }}-evidence_explanation" required>{{ metric.evidence_explanation }}</textarea></label>
+    </fieldset>{% endfor %}
+    </fieldset>
+  </section>
 
-  {% include "admin/_content_blocks.html" %}
+  <section class="card admin-editor-section" id="editor-media" aria-labelledby="editor-media-title">
+    <h2 id="editor-media-title">媒体</h2>
+    <div class="form-group"><label>分享图<select name="share_image_media_id"><option value="">不使用</option>{% for media in view.share_image_choices %}<option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>{% endfor %}</select></label></div>
+  </section>
 
-  <fieldset class="form-group"><legend>量化指标与证据</legend>
-  {% for metric in form.metrics %}<fieldset style="border:1px solid #E5E7EB;padding:12px;margin:10px 0"><legend>指标 {{ loop.index }}</legend>
-    <label>指标名<input name="metrics-{{ loop.index0 }}-name" value="{{ metric.name }}" required></label>
-    <label>改造前<input name="metrics-{{ loop.index0 }}-before_value" value="{{ metric.before_value }}" required></label>
-    <label>改造后<input name="metrics-{{ loop.index0 }}-after_value" value="{{ metric.after_value }}" required></label>
-    <label>单位<input name="metrics-{{ loop.index0 }}-unit" value="{{ metric.unit }}" required></label>
-    <label>统计周期<input name="metrics-{{ loop.index0 }}-statistical_period" value="{{ metric.statistical_period }}" required></label>
-    <label>证据说明<textarea name="metrics-{{ loop.index0 }}-evidence_explanation" required>{{ metric.evidence_explanation }}</textarea></label>
-  </fieldset>{% endfor %}
-  </fieldset>
+  <section class="card admin-editor-section" id="editor-seo" aria-labelledby="editor-seo-title">
+    <h2 id="editor-seo-title">SEO</h2>
+    <div class="form-group"><label>SEO 标题<input name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></label></div>
+    <div class="form-group"><label>SEO 摘要<textarea name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></label></div>
+  </section>
 
-  <fieldset class="form-group"><legend>人工审核确认（自动 PII 形状检查不等于匿名证明）</legend>
-    <label><input type="checkbox" name="review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>真实性与指标证据已人工复核</label>
-    <label><input type="checkbox" name="privacy_review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>隐私与 PII 已人工复核</label>
-    <label><input type="checkbox" name="media_review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>媒体与附件已人工复核</label>
-  </fieldset>
-  <div style="display:flex;gap:8px"><button class="btn btn-outline" name="action" value="save">保存草稿</button><button class="btn btn-outline" name="action" value="review">发布前检查</button><button class="btn btn-primary" name="action" value="publish">发布</button></div>
+  <section class="card admin-editor-section" id="editor-publishing" aria-labelledby="editor-publishing-title">
+    <h2 id="editor-publishing-title">真实性、隐私与发布审核</h2>
+    <fieldset class="form-group"><legend>真实性类型（必须明确选择）</legend>
+      <label>真实性类型<select name="verification_code" required><option value="public_verified" {% if form.verification_code == 'public_verified' %}selected{% endif %}>公开来源已核验</option><option value="authorized_anonymous" {% if form.verification_code == 'authorized_anonymous' %}selected{% endif %}>经授权匿名</option></select></label>
+      <label>核验结果<select name="is_verified"><option value="0" {% if form.is_verified == 0 %}selected{% endif %}>未通过</option><option value="1" {% if form.is_verified == 1 %}selected{% endif %}>已通过</option></select></label>
+    </fieldset>
+    <fieldset class="form-group"><legend>核验依据（必须明确选择）</legend>
+      <label>依据类型<select name="basis_type" required><option value="public_source" {% if form.basis_type == 'public_source' %}selected{% endif %}>公开来源</option><option value="client_authorization" {% if form.basis_type == 'client_authorization' %}selected{% endif %}>客户授权</option><option value="internal_delivery_record" {% if form.basis_type == 'internal_delivery_record' %}selected{% endif %}>内部交付记录</option></select></label>
+      <label>内部依据编号（不公开）<input name="private_basis_reference" value="{{ form.private_basis_reference }}" maxlength="300"></label>
+      <label>公开来源 URL<input name="source_url" value="{{ form.source_url }}" maxlength="2048"></label>
+      {% if form.source_check_code %}<p class="muted">来源检查：{{ form.source_check_code }} · {{ form.source_checked_at }} 至 {{ form.source_check_expires_at }}</p>{% endif %}
+    </fieldset>
+    <fieldset class="form-group"><legend>人工审核确认（自动 PII 形状检查不等于匿名证明）</legend>
+      <label><input type="checkbox" name="review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>真实性与指标证据已人工复核</label>
+      <label><input type="checkbox" name="privacy_review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>隐私与 PII 已人工复核</label>
+      <label><input type="checkbox" name="media_review_confirmed" value="1" {% if form.review_confirmed %}checked{% endif %}>媒体与附件已人工复核</label>
+    </fieldset>
+  </section>
+  <div class="admin-actions"><button class="btn btn-outline" name="action" value="save">保存草稿</button><button class="btn btn-outline" name="action" value="review">发布前检查</button><button class="btn btn-primary" name="action" value="publish">发布</button></div>
 </form>
 {% if form.id and form.basis_type == 'public_source' and form.source_url_sha256 %}<form method="POST" action="{{ url_for('admin.admin_case_source_check_v2', content_id=form.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_lock_version" value="{{ form.lock_version }}"><input type="hidden" name="expected_url_sha256" value="{{ form.source_url_sha256 }}"><button class="btn btn-outline">刷新公开来源检查</button></form>{% endif %}
 {% endif %}
-{% if view.public_revision %}<form method="POST" action="{{ url_for('admin.admin_case_edit_v2', content_id=view.public_revision.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="content_id" value="{{ view.public_revision.id }}"><input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}"><button class="btn btn-outline" name="action" value="archive">归档当前公开修订</button></form>{% endif %}
-{% if not form.id or form.status == 'draft' %}
-<script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>
-{% endif %}
+{% if view.public_revision %}<form method="POST" action="{{ url_for('admin.admin_case_edit_v2', content_id=view.public_revision.id) }}" style="margin-top:16px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="content_id" value="{{ view.public_revision.id }}"><input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}"><button class="btn btn-danger" name="action" value="archive">归档当前公开修订</button></form>{% endif %}
+{% if not form.id or form.status == 'draft' %}<script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>{% endif %}
 {% endblock %}

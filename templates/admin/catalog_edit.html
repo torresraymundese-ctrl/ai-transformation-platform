@@ -1,18 +1,18 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+<div class="admin-heading">
   <div>
-    <h2>维护核心目录公开文案</h2>
-    <code>{{ view.group_key }}</code>
+    <h1>维护核心目录公开文案</h1>
+    <p class="muted"><code>{{ view.group_key }}</code></p>
   </div>
   <a class="btn btn-outline" href="{{ url_for('admin.admin_catalog', kind=view.kind) }}">返回目录</a>
 </div>
 
-{% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+{% if error %}<div class="admin-error-summary" role="alert" tabindex="-1" data-admin-error-summary>{{ error }}</div>{% endif %}
 
-<section class="card" style="padding:20px;margin-bottom:20px;">
-  <h3>核心业务字段（只读）</h3>
-  <dl style="display:grid;grid-template-columns:180px 1fr;gap:8px 16px;">
+<section class="card admin-section" aria-labelledby="readonly-title">
+  <h2 id="readonly-title">核心业务字段（只读）</h2>
+  <dl style="display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr);gap:8px 16px;">
   {% for label, value in view.readonly_fields %}
     <dt>{{ label }}</dt><dd style="margin:0;word-break:break-word;">{{ value }}</dd>
   {% endfor %}
@@ -20,67 +20,88 @@
 </section>
 
 {% if view.public_revision %}
-<section class="card" style="padding:20px;margin-bottom:20px;">
-  <h3>当前公开修订 #{{ view.public_revision.revision_number }}</h3>
+<section class="card admin-section" aria-labelledby="current-public-title">
+  <h2 id="current-public-title">当前公开修订 #{{ view.public_revision.revision_number }}</h2>
   <p><strong>{{ view.public_revision.title }}</strong></p>
   <p>{{ view.public_revision.summary }}</p>
 </section>
 {% endif %}
 
-<form method="POST" class="card" style="padding:20px;" data-content-editor>
+<form method="POST" data-admin-editor data-content-editor>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="content_id" value="{{ form.id }}">
   <input type="hidden" name="lock_version" value="{{ form.lock_version }}">
-  <div class="form-group"><label>公开标题</label><input type="text" name="title" value="{{ form.title }}" maxlength="120" required></div>
-  <div class="form-group"><label>公开摘要</label><textarea name="summary" maxlength="300" required>{{ form.summary }}</textarea></div>
-  <div class="form-group"><label>SEO 标题</label><input type="text" name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></div>
-  <div class="form-group"><label>SEO 摘要</label><textarea name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></div>
-  <div class="form-group">
-    <label>分享图</label>
-    <select name="share_image_media_id">
-      <option value="">不使用</option>
-      {% for media in view.share_image_choices %}
-      <option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>
+
+  <section class="card admin-editor-section" id="editor-basic" aria-labelledby="editor-basic-title">
+    <h2 id="editor-basic-title">基本信息</h2>
+    <div class="form-group"><label for="catalog-title">公开标题</label><input id="catalog-title" type="text" name="title" value="{{ form.title }}" maxlength="120" required></div>
+    <div class="form-group"><label for="catalog-summary">公开摘要</label><textarea id="catalog-summary" name="summary" maxlength="300" required>{{ form.summary }}</textarea></div>
+    {% if view.kind in ('scenario', 'service') %}
+    <fieldset class="form-group">
+      <legend>适用成熟度（明确选择）</legend>
+      {% for code in ('explore','pilot','scale','collaborate') %}
+      <label style="display:inline-flex;gap:6px;margin-right:16px;"><input type="checkbox" name="maturity_codes" value="{{ code }}" {% if code in form.maturity_codes %}checked{% endif %}>{{ code }}</label>
       {% endfor %}
-    </select>
-  </div>
+    </fieldset>
+    {% endif %}
+  </section>
 
-  {% if view.kind in ('scenario', 'service') %}
-  <fieldset class="form-group">
-    <legend>适用成熟度（明确选择）</legend>
-    {% for code in ('explore','pilot','scale','collaborate') %}
-    <label style="display:inline-flex;gap:6px;margin-right:16px;"><input type="checkbox" name="maturity_codes" value="{{ code }}" {% if code in form.maturity_codes %}checked{% endif %}>{{ code }}</label>
-    {% endfor %}
-  </fieldset>
-  {% endif %}
+  <section class="card admin-editor-section" id="editor-content" aria-labelledby="editor-content-title">
+    <h2 id="editor-content-title">公开内容</h2>
+    {% include "admin/_content_blocks.html" %}
+  </section>
 
-  {% include "admin/_content_blocks.html" %}
-  {% include "admin/_content_relations.html" %}
+  <section class="card admin-editor-section" id="editor-media" aria-labelledby="editor-media-title">
+    <h2 id="editor-media-title">关系与媒体</h2>
+    <div class="form-group">
+      <label for="catalog-share-image">分享图</label>
+      <select id="catalog-share-image" name="share_image_media_id">
+        <option value="">不使用</option>
+        {% for media in view.share_image_choices %}
+        <option value="{{ media.id }}" {% if form.share_image_media_id == media.id %}selected{% endif %}>{{ media.display_name }} · {{ media.detected_mime }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% include "admin/_content_relations.html" %}
+  </section>
 
-  <div style="display:flex;gap:10px;margin-top:20px;">
+  <section class="card admin-editor-section" id="editor-seo" aria-labelledby="editor-seo-title">
+    <h2 id="editor-seo-title">SEO</h2>
+    <div class="form-group"><label for="catalog-seo-title">SEO 标题</label><input id="catalog-seo-title" type="text" name="seo_title" value="{{ form.seo_title }}" maxlength="60" required></div>
+    <div class="form-group"><label for="catalog-seo-description">SEO 摘要</label><textarea id="catalog-seo-description" name="seo_description" maxlength="160" required>{{ form.seo_description }}</textarea></div>
+  </section>
+
+  <section class="card admin-editor-section" id="editor-publishing" aria-labelledby="editor-publishing-title">
+    <h2 id="editor-publishing-title">审核与发布</h2>
+    <p class="muted">保存草稿不会改变当前公开内容；发布前请先执行检查。</p>
+  </section>
+  <div class="admin-actions">
     <button class="btn btn-outline" type="submit" name="action" value="save">保存草稿</button>
     <button class="btn btn-outline" type="submit" name="action" value="review">发布前检查</button>
     <button class="btn btn-primary" type="submit" name="action" value="publish">发布</button>
   </div>
 </form>
 
-<form method="POST" data-schedule-content class="card" style="padding:20px;margin-top:16px;">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <input type="hidden" name="content_id" value="{{ form.id }}">
-  <input type="hidden" name="lock_version" value="{{ form.lock_version }}">
-  <div class="form-group">
-    <label>计划发布时间（Asia/Shanghai）</label>
-    <input type="datetime-local" name="publish_at" value="{{ schedule_publish_at }}" step="1" required>
-  </div>
-  <button class="btn btn-outline" type="submit" name="action" value="schedule">安排定时发布</button>
+<form method="POST" data-schedule-content>
+  <section class="card admin-editor-section" aria-labelledby="schedule-title">
+    <h2 id="schedule-title">定时发布</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="content_id" value="{{ form.id }}">
+    <input type="hidden" name="lock_version" value="{{ form.lock_version }}">
+    <div class="form-group">
+      <label for="catalog-publish-at">计划发布时间（Asia/Shanghai）</label>
+      <input id="catalog-publish-at" type="datetime-local" name="publish_at" value="{{ schedule_publish_at }}" step="1" required>
+    </div>
+    <button class="btn btn-outline" type="submit" name="action" value="schedule">安排定时发布</button>
+  </section>
 </form>
 
 {% if view.public_revision %}
-<form method="POST" style="margin-top:16px;">
+<form method="POST">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="content_id" value="{{ view.public_revision.id }}">
   <input type="hidden" name="lock_version" value="{{ view.public_revision.lock_version }}">
-  <button class="btn btn-outline" type="submit" name="action" value="archive">归档当前公开修订</button>
+  <button class="btn btn-danger" type="submit" name="action" value="archive">归档当前公开修订</button>
 </form>
 {% endif %}
 <script src="{{ url_for('static', filename='js/content_editor.js') }}" defer></script>

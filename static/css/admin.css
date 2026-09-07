@@ -38,6 +38,8 @@ input,
 select,
 textarea { font: inherit; }
 
+fieldset { min-width: 0; }
+
 :focus-visible {
   outline: 3px solid var(--ui-focus);
   outline-offset: 3px;
@@ -189,7 +191,14 @@ textarea { font: inherit; }
   margin-bottom: var(--ui-space-4);
 }
 
-.admin-editor-section { scroll-margin-top: var(--ui-space-4); }
+.admin-editor-section {
+  scroll-margin-top: var(--ui-space-4);
+  overflow-wrap: anywhere;
+}
+
+.admin-editor-section > h2 { margin-top: 0; }
+
+form[data-admin-editor] { scroll-padding-bottom: 7rem; }
 
 .admin-grid,
 .admin-stats {
@@ -223,6 +232,15 @@ textarea { font: inherit; }
   background: var(--ui-surface-000);
   border: 1px solid var(--ui-line-200);
   border-radius: var(--ui-radius-panel);
+}
+
+.admin-actions .btn { flex: 0 1 auto; }
+
+form[data-admin-editor] .admin-actions {
+  position: sticky;
+  z-index: 10;
+  bottom: var(--ui-space-2);
+  box-shadow: 0 0.5rem 1.5rem rgb(6 8 11 / 10%);
 }
 
 .btn {
@@ -483,6 +501,10 @@ pre {
   .admin-stats { grid-template-columns: minmax(0, 1fr); }
 
   .inline-form .form-group { flex: 1 1 100%; }
+
+  form[data-admin-editor] { scroll-padding-bottom: 12rem; }
+
+  .admin-actions .btn { flex: 1 1 100%; }
 }
 
 @media print {
@@ -497,5 +519,7 @@ pre {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
   .skip-link { transition: none; }
 }

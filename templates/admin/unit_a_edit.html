@@ -1,11 +1,11 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<h2>{% if asset %}编辑单位A资产 #{{ asset.id }}{% else %}新增单位A资产{% endif %}</h2>
+<h1>{% if asset %}编辑单位A资产 #{{ asset.id }}{% else %}新增单位A资产{% endif %}</h1>
 <form method="POST" style="max-width:500px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group">
-    <label>科室 *</label>
-    <select name="department" required>
+    <label for="unit-a-department">科室 *</label>
+    <select id="unit-a-department" name="department" required>
       <option value="">-- 请选择科室 --</option>
       {% for d in departments %}
       <option value="{{ d.name }}" {% if asset and asset.department == d.name %}selected{% endif %}>{{ d.name }}</option>
@@ -14,8 +14,8 @@
     <small style="color:var(--text-secondary);">如果列表为空，请先在<a href="/admin/assets/departments">科室管理</a>中添加</small>
   </div>
   <div class="form-group">
-    <label>资产编码 *</label>
-    <select name="asset_code_id" required>
+    <label for="unit-a-asset-code">资产编码 *</label>
+    <select id="unit-a-asset-code" name="asset_code_id" required>
       <option value="">-- 请选择资产 --</option>
       <optgroup label="桌子">
         {% for c in codes if c.category == 'table' %}
@@ -30,12 +30,12 @@
     </select>
   </div>
   <div class="form-group">
-    <label>数量</label>
-    <input name="quantity" type="number" value="{{ asset.quantity if asset else 1 }}" min="1" required>
+    <label for="unit-a-quantity">数量</label>
+    <input id="unit-a-quantity" name="quantity" type="number" value="{{ asset.quantity if asset else 1 }}" min="1" required>
   </div>
   <div class="form-group">
-    <label>备注</label>
-    <input name="remark" value="{{ asset.remark if asset else '' }}" placeholder="可选的备注信息">
+    <label for="unit-a-remark">备注</label>
+    <input id="unit-a-remark" name="remark" value="{{ asset.remark if asset else '' }}" placeholder="可选的备注信息">
   </div>
   <div style="display:flex;gap:12px;">
     <button type="submit" class="btn btn-primary">保存</button>

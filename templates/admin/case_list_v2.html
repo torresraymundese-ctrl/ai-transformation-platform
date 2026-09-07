@@ -1,7 +1,7 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
-  <div><h2>V2 已验证案例</h2><p>共 {{ page.total }} 个修订</p></div>
+<div class="admin-heading">
+  <div><h1>V2 已验证案例</h1><p>共 {{ page.total }} 个修订</p></div>
   <a class="btn btn-primary" href="{{ url_for('admin.admin_case_new_v2') }}">新建案例</a>
 </div>
 <form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>

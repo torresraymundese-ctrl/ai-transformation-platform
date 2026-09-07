@@ -1,14 +1,14 @@
 {% extends "admin/base_admin.html" %}
 {% from "components/ui.html" import form_field %}
 {% block admin_content %}
-<h2>{% if code %}编辑编码 #{{ code.id }}{% else %}新增编码{% endif %}</h2>
+<h1>{% if code %}编辑编码 #{{ code.id }}{% else %}新增编码{% endif %}</h1>
 <form method="POST" style="max-width:500px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {{ form_field("code", "编码", code.code if code else "", required=true, placeholder="如 Z001, Y001") }}
   {{ form_field("name", "名称", code.name if code else "", required=true, placeholder="如 办公桌-标准型") }}
   <div class="form-group">
-    <label>类别 *</label>
-    <select name="category" required>
+    <label for="asset-category">类别 *</label>
+    <select id="asset-category" name="category" required>
       <option value="table" {% if code and code.category == 'table' %}selected{% endif %}>桌子</option>
       <option value="chair" {% if code and code.category == 'chair' %}selected{% endif %}>椅子</option>
     </select>
