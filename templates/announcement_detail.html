@@ -12,7 +12,7 @@
       <h1>{{ announcement.title }}</h1>
       <p>{{ announcement.summary }}</p>
     </div>
-    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-delivery-system.webp') }}" alt="" width="1600" height="900"></figure>
+    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-delivery-system.webp') }}" alt="" width="1600" height="900" loading="eager" fetchpriority="high"></figure>
   </div>
 </header>
 <section class="announcement-validity-band" data-public-reveal><div class="public-container"><dl class="editorial-meta editorial-meta--band"><div><dt>有效期</dt><dd data-announcement-validity>{{ announcement.valid_from }} 至 {{ announcement.valid_until }}</dd></div></dl></div></section>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ document.title }} - 企业AI转型平台{% endblock %}
+{% block head %}<meta name="description" content="{{ document.body_summary }}">{% endblock %}
 {% block content %}
 <article class="section-shell legal-document" data-legal-document="{{ document.document_type }}" data-legal-version="{{ document.version_code }}">
   <header><p class="eyebrow">法律文档 · {{ document.version_code }}</p><h1>{{ document.title }}</h1><p>{{ document.body_summary }}</p></header>

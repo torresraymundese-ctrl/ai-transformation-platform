@@ -13,7 +13,7 @@
       <h1>{{ case.title }}</h1>
       <p>{{ case.summary }}</p>
     </div>
-    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-trust-evidence.webp') }}" alt="" width="1600" height="900"></figure>
+    <figure class="editorial-cover__media" aria-hidden="true"><img src="{{ url_for('static', filename='images/ui/public-trust-evidence.webp') }}" alt="" width="1600" height="900" loading="eager" fetchpriority="high"></figure>
   </div>
 </header>
 <section class="editorial-meta-band" data-public-reveal>

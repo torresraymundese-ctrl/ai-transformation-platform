@@ -1,6 +1,6 @@
 """Public current and immutable historical legal-document routes."""
 
-from flask import Blueprint, abort, redirect, render_template
+from flask import Blueprint, abort, current_app, redirect, render_template, url_for
 
 from legal_repository import (
     DOCUMENT_TYPES,
@@ -14,7 +14,11 @@ from legal_repository import (
 bp = Blueprint("public_legal", __name__)
 
 
-def _render_or_redirect(document):
+def _canonical(endpoint, **values):
+    return f"{current_app.config['PUBLIC_BASE_URL']}{url_for(endpoint, **values)}"
+
+
+def _render_or_redirect(document, *, canonical):
     if document is None:
         abort(404)
     if document.mode == "external_legacy":
@@ -27,14 +31,24 @@ def _render_or_redirect(document):
         return redirect(normalized, code=302)
     if document.mode != "internal":
         abort(404)
-    return render_template("legal_detail.html", document=document)
+    return render_template(
+        "legal_detail.html",
+        document=document,
+        base_canonical=canonical,
+    )
 
 
 @bp.get("/legal/<document_type>")
 def legal_current(document_type):
     if document_type not in DOCUMENT_TYPES:
         abort(404)
-    return _render_or_redirect(load_public_legal_version(document_type))
+    return _render_or_redirect(
+        load_public_legal_version(document_type),
+        canonical=_canonical(
+            "public_legal.legal_current",
+            document_type=document_type,
+        ),
+    )
 
 
 @bp.get("/legal/<document_type>/<version_code>")
@@ -44,4 +58,11 @@ def legal_version(document_type, version_code):
         or VERSION_CODE_PATTERN.fullmatch(version_code) is None
     ):
         abort(404)
-    return _render_or_redirect(load_public_legal_version(document_type, version_code))
+    return _render_or_redirect(
+        load_public_legal_version(document_type, version_code),
+        canonical=_canonical(
+            "public_legal.legal_version",
+            document_type=document_type,
+            version_code=version_code,
+        ),
+    )
