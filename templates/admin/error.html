@@ -1,5 +1,6 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}{{ title }} - 企业AI转型平台{% endblock %}
+{% block body_class %}{% if not admin_authenticated %}admin-navigation-free{% endif %}{% endblock %}
 {% block admin_navigation %}{% if admin_authenticated %}{{ super() }}{% endif %}{% endblock %}
 {% block admin_content %}
 <section class="card admin-section" style="max-width:720px;margin:48px auto;text-align:center;">

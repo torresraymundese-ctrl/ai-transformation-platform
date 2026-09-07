@@ -404,19 +404,39 @@ def test_asset_auxiliary_new_and_edit_forms_have_page_headings_and_labels(
         "SELECT id FROM unit_b_assets WHERE asset_code_id=?", (code_id,)
     ).fetchone()[0]
 
-    paths = (
-        "/admin/assets/code/new",
-        f"/admin/assets/code/{code_id}",
-        "/admin/assets/departments/new",
-        f"/admin/assets/departments/{department_id}",
-        "/admin/assets/unit-a/new",
-        f"/admin/assets/unit-a/{unit_a_id}",
-        "/admin/assets/unit-b/new",
-        f"/admin/assets/unit-b/{unit_b_id}",
-    )
-    for path in paths:
+    paths = {
+        "/admin/assets/code/new": {"code", "name", "category", "sort_order"},
+        f"/admin/assets/code/{code_id}": {"code", "name", "category", "sort_order"},
+        "/admin/assets/departments/new": {"name", "sort_order"},
+        f"/admin/assets/departments/{department_id}": {"name", "sort_order"},
+        "/admin/assets/unit-a/new": {
+            "department",
+            "asset_code_id",
+            "quantity",
+            "remark",
+        },
+        f"/admin/assets/unit-a/{unit_a_id}": {
+            "department",
+            "asset_code_id",
+            "quantity",
+            "remark",
+        },
+        "/admin/assets/unit-b/new": {"asset_code_id", "quantity", "remark"},
+        f"/admin/assets/unit-b/{unit_b_id}": {
+            "asset_code_id",
+            "quantity",
+            "remark",
+        },
+    }
+    for path, expected_fields in paths.items():
         page = _page(admin_client.get(path))
         assert len(page.select("main#admin-main h1")) == 1, path
-        form = page.select_one('form[method="POST"]')
+        form = page.select_one('main#admin-main form[method="POST"]')
         assert form is not None
+        editable_fields = {
+            control["name"]
+            for control in form.select("input:not([type=hidden]), select, textarea")
+            if control.get("name")
+        }
+        assert expected_fields <= editable_fields, path
         _assert_named_controls(form)

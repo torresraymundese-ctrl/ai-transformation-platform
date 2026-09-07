@@ -243,6 +243,61 @@ def test_admin_css_keeps_shared_responsive_and_accessibility_contracts(client):
     assert "var(--ui-" in _css_declarations(css, "body")["font-family"]
 
 
+def test_populated_content_editor_controls_share_44px_touch_targets(
+    admin_client, db
+):
+    """Unclassed editor actions and wrapped choices must remain usable touch targets."""
+    scenario = db.execute(
+        "SELECT scenario_id FROM content_groups "
+        "WHERE entry_type='scenario' ORDER BY scenario_id LIMIT 1"
+    ).fetchone()
+    assert scenario is not None
+    page = _page(admin_client.get(f"/admin/catalog/scenario/{scenario['scenario_id']}"))
+    editor = page.select_one('form[data-content-editor]')
+    assert editor is not None
+
+    assert {
+        button["data-block-action"]
+        for button in editor.select(
+            '[data-content-block] button[data-block-action]'
+        )
+    } == {"up", "down", "remove"}
+    assert editor.select_one("button[data-add-block]") is not None
+    maturity_labels = editor.select(
+        'label:has(> input[type="checkbox"][name="maturity_codes"])'
+    )
+    assert len(maturity_labels) == 4
+
+    css = _admin_css(admin_client)
+    button_target = _css_declarations(
+        css, 'form[data-content-editor] button[type="button"]'
+    )
+    assert button_target["min-width"] == "44px"
+    assert button_target["min-height"] == "44px"
+    for input_type in ("checkbox", "radio"):
+        choice_target = _css_declarations(
+            css, f'.admin-main label:has(> input[type="{input_type}"])'
+        )
+        assert choice_target["display"] == "inline-flex"
+        assert choice_target["min-height"] == "44px"
+        assert choice_target["align-items"] == "center"
+
+
+def test_unauthenticated_admin_error_uses_single_column_shell(client):
+    """A navigation-free admin error must not retain the desktop sidebar track."""
+    client.application.config["ADMIN_PASSWORD_HASH"] = None
+
+    response = client.get("/admin/login")
+    assert response.status_code == 503
+    page = BeautifulSoup(response.data, "html.parser")
+    assert page.select_one("body.admin-navigation-free") is not None
+    assert page.select_one("nav.admin-nav") is None
+    assert len(page.select("main#admin-main")) == 1
+    assert _css_declarations(
+        _admin_css(client), ".admin-navigation-free .admin-layout"
+    )["grid-template-columns"] == "minmax(0, 1fr)"
+
+
 def test_oversized_admin_rich_content_images_are_intrinsically_contained(client):
     """A wide rich-content image must shrink without distorting its aspect ratio."""
     document = BeautifulSoup(
