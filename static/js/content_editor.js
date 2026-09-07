@@ -197,6 +197,9 @@
     hiddenType.dataset.relationField = 'type';
     const typeLabel = documentObject.createElement('span');
     typeLabel.textContent = relation.relationType;
+    const targetLabel = documentObject.createElement('label');
+    const targetLabelText = documentObject.createElement('span');
+    targetLabelText.textContent = '关联目标';
     const targetChoice = documentObject.createElement('select');
     targetChoice.dataset.relationField = 'target_group_id';
     for (const target of relation.targets) {
@@ -209,7 +212,8 @@
       if (target.value === relation.targetGroupId) option.setAttribute('selected', 'selected');
       targetChoice.append(option);
     }
-    row.append(hiddenType, typeLabel, targetChoice);
+    targetLabel.append(targetLabelText, targetChoice);
+    row.append(hiddenType, typeLabel, targetLabel);
     for (const action of ['up', 'down', 'remove']) {
       const button = documentObject.createElement('button');
       button.setAttribute('type', 'button');

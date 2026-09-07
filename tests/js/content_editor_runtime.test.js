@@ -249,6 +249,8 @@ test('relation DOM uses fixed choices and safe target label text', () => {
   const targetChoice = nodes.find(
     (node) => node.dataset.relationField === 'target_group_id',
   );
+  assert.equal(targetChoice.parentElement.tagName, 'label');
+  assert.equal(targetChoice.parentElement.children[0].textContent, '关联目标');
   assert.equal(targetChoice.children.length, 2);
   assert.deepEqual(editor.indexedRelationFieldNames(3), {
     type: 'relations-3-type',
