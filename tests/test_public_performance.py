@@ -28,7 +28,7 @@ def _publish_catalog(db):
     """Promote the checked-in neutral catalog in this test's disposable DB."""
     db.execute(
         "UPDATE content_items SET status='published',published_at=? "
-        "WHERE entry_type IN ('industry','scenario') AND status='draft'",
+        "WHERE entry_type IN ('industry','scenario','service') AND status='draft'",
         ("2026-08-24 10:00:00",),
     )
     db.commit()
@@ -112,6 +112,22 @@ def _assert_local_stylesheet_dependencies(css, *, stylesheet_href):
         ), (stylesheet_href, "remote CSS dependency", reference)
 
 
+def _assert_local_page_dependencies(client, document, *, path):
+    _assert_local_rendered_dependencies(document, path=path)
+
+    stylesheets = document.select('link[rel~="stylesheet"][href]')
+    assert stylesheets, path
+    for stylesheet in stylesheets:
+        href = stylesheet["href"]
+        response = client.get(href)
+        assert response.status_code == 200, (path, href)
+        assert response.mimetype == "text/css", (path, href)
+        _assert_local_stylesheet_dependencies(
+            response.get_data(as_text=True),
+            stylesheet_href=href,
+        )
+
+
 @pytest.mark.parametrize(
     "path",
     (
@@ -128,19 +144,7 @@ def _assert_local_stylesheet_dependencies(css, *, stylesheet_href):
 def test_public_pages_use_only_local_deferred_asset_dependencies(client, path):
     document = _page(client.get(path))
 
-    _assert_local_rendered_dependencies(document, path=path)
-
-    stylesheets = document.select('link[rel~="stylesheet"][href]')
-    assert stylesheets, path
-    for stylesheet in stylesheets:
-        href = stylesheet["href"]
-        response = client.get(href)
-        assert response.status_code == 200, (path, href)
-        assert response.mimetype == "text/css", (path, href)
-        _assert_local_stylesheet_dependencies(
-            response.get_data(as_text=True),
-            stylesheet_href=href,
-        )
+    _assert_local_page_dependencies(client, document, path=path)
 
 
 @pytest.mark.parametrize(
@@ -173,6 +177,18 @@ def test_local_dependency_guard_rejects_remote_css_imports_and_fonts(unsafe_css)
             unsafe_css,
             stylesheet_href="/static/css/mutated.css",
         )
+
+
+def test_approved_detail_dependency_guard_rejects_remote_mutation(client, db):
+    _publish_catalog(db)
+    path = "/industries/manufacturing"
+    document = _page(client.get(path))
+    document.select_one('link[rel~="stylesheet"]')["href"] = (
+        "https://assets.example/detail.css"
+    )
+
+    with pytest.raises(AssertionError, match="remote stylesheet dependency"):
+        _assert_local_page_dependencies(client, document, path=path)
 
 
 def test_public_route_matrix_has_unique_titles_and_trusted_canonicals(client):
@@ -226,6 +242,7 @@ def test_shipped_logo_and_decorative_images_have_intrinsic_dimensions(client, db
         "/industries",
         "/industries/manufacturing",
         "/scenarios/mfg-knowledge-assistant",
+        "/service-packages/foundation-workshop",
         "/about",
     )
 
@@ -233,6 +250,7 @@ def test_shipped_logo_and_decorative_images_have_intrinsic_dimensions(client, db
         response = client.get(path)
         assert response.status_code == 200, path
         document = _page(response)
+        _assert_local_page_dependencies(client, document, path=path)
         images = document.select("img[src]")
         assert images, path
         for image in images:
@@ -295,7 +313,9 @@ def test_approved_editorial_detail_heroes_are_eager_and_high_priority(
         "/resources/performance-resource",
         "/announcements/performance-announcement",
     ):
-        image = _page(admin_client.get(path)).select_one(".editorial-cover__media img")
+        document = _page(admin_client.get(path))
+        _assert_local_page_dependencies(admin_client, document, path=path)
+        image = document.select_one(".editorial-cover__media img")
         assert image is not None, path
         assert image.get("loading") == "eager", path
         assert image.get("fetchpriority") == "high", path
@@ -337,6 +357,7 @@ def test_internal_legal_current_and_history_have_escaped_metadata_from_trusted_o
 
     for path, response in responses.items():
         document = _page(response)
+        _assert_local_page_dependencies(client, document, path=path)
         canonicals = document.select('link[rel="canonical"]')
         descriptions = document.select('meta[name="description"]')
 
