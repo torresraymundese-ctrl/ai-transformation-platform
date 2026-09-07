@@ -422,36 +422,127 @@ def test_admin_shell_contains_mobile_navigation_tables_and_lead_controls(journey
     leads = BeautifulSoup(journey["admin"].get("/admin/leads").data, "html.parser")
     navigation = rules.select("nav.admin-nav")
     assert len(navigation) == 1
-    assert tuple(
-        link.get_text(" ", strip=True) for link in navigation[0].select("a")
-    ) == (
-        "CMS 后台管理",
-        "运营工作台",
-        "行业文案",
-        "场景文案",
-        "服务文案",
-        "审核资源",
-        "接入候选",
-        "法律文档",
-        "已验证案例",
-        "有效期公告",
-        "评估记录",
-        "规则版本",
-        "线索管理",
-        "诊断预约",
-        "隐私请求",
-        "资产管理",
-        "媒体管理",
-        "查看网站 →",
+    admin_navigation = navigation[0]
+    assert admin_navigation.select_one('a.brand[href="/admin"]') is not None
+    expected_groups = (
+        (
+            "运营",
+            (
+                ("运营工作台", "/admin"),
+                ("线索管理", "/admin/leads"),
+                ("诊断预约", "/admin/appointments"),
+            ),
+        ),
+        (
+            "内容",
+            (
+                ("行业文案", "/admin/catalog/industry"),
+                ("场景文案", "/admin/catalog/scenario"),
+                ("服务文案", "/admin/catalog/service"),
+                ("审核资源", "/admin/resources"),
+                ("接入候选", "/admin/ingestion"),
+                ("已验证案例", "/admin/cases"),
+                ("有效期公告", "/admin/announcements"),
+            ),
+        ),
+        (
+            "治理",
+            (
+                ("法律文档", "/admin/legal"),
+                ("评估记录", "/admin/assessments"),
+                ("规则版本", "/admin/rules"),
+                ("隐私请求", "/admin/data-requests"),
+            ),
+        ),
+        (
+            "资产",
+            (
+                ("资产管理", "/admin/assets"),
+                ("媒体管理", "/admin/media"),
+            ),
+        ),
     )
-    assert navigation[0].select_one('form[action="/admin/logout"] button') is not None
+    groups = admin_navigation.select(".admin-nav__group")
+    assert len(groups) == len(expected_groups)
+    for group, (heading, expected_links) in zip(groups, expected_groups):
+        assert group.select_one("h2").get_text(" ", strip=True) == heading
+        assert tuple(
+            (link.get_text(" ", strip=True), link["href"])
+            for link in group.select("a[href]")
+        ) == expected_links
+        assert not group.has_attr("hidden")
 
-    stylesheet = rules.select_one("head style").get_text().replace("\n", "")
-    assert "@media(max-width:640px)" in stylesheet
-    mobile = stylesheet.split("@media(max-width:640px)", 1)[1]
-    assert ".admin-nav{" in mobile and "overflow-x:auto" in mobile
-    assert ".admin-main{" in mobile and "min-width:0" in mobile
-    assert ".admin-main table{" in mobile and "overflow-x:auto" in mobile
+    website = admin_navigation.select_one(
+        '.admin-nav__footer a[href="/"][target="_blank"]'
+    )
+    assert website is not None
+    assert {item.lower() for item in website.get("rel", ())} == {
+        "noopener",
+        "noreferrer",
+    }
+    assert admin_navigation.select_one(
+        'a[href="/admin/rules"][aria-current="page"]'
+    ) is not None
+
+    logout = admin_navigation.select_one(
+        'form[method="POST"][action="/admin/logout"]'
+    )
+    assert logout is not None
+    assert logout.select_one('button[type="submit"]') is not None
+    csrf = logout.select_one('input[type="hidden"][name="csrf_token"]')
+    assert csrf is not None and csrf.get("value")
+
+    stylesheet_link = rules.select_one('link[href="/static/css/admin.css"]')
+    assert stylesheet_link is not None
+    stylesheet_response = journey["admin"].get(stylesheet_link["href"])
+    assert stylesheet_response.status_code == 200
+    stylesheet = stylesheet_response.get_data(as_text=True)
+
+    def css_blocks(source):
+        cursor = 0
+        while cursor < len(source):
+            opening = source.find("{", cursor)
+            if opening < 0:
+                return
+            depth = 1
+            closing = opening + 1
+            while closing < len(source) and depth:
+                depth += source[closing] == "{"
+                depth -= source[closing] == "}"
+                closing += 1
+            assert depth == 0
+            yield source[cursor:opening].strip(), source[opening + 1 : closing - 1]
+            cursor = closing
+
+    def declarations(selector, media=None):
+        blocks = list(css_blocks(stylesheet))
+        if media is not None:
+            media_blocks = [
+                body for prelude, body in blocks if prelude == f"@media {media}"
+            ]
+            assert len(media_blocks) == 1
+            blocks = list(css_blocks(media_blocks[0]))
+        result = {}
+        for prelude, body in blocks:
+            if selector not in {part.strip() for part in prelude.split(",")}:
+                continue
+            for item in body.split(";"):
+                name, separator, value = item.partition(":")
+                if separator:
+                    result[name.strip()] = value.strip()
+        return result
+
+    assert declarations(".admin-layout")["grid-template-columns"] == (
+        "15rem minmax(0, 1fr)"
+    )
+    assert declarations(".admin-main")["min-width"] == "0"
+    assert declarations(".admin-main table")["overflow-x"] == "auto"
+    assert declarations(".admin-layout", "(max-width: 1023px)")[
+        "grid-template-columns"
+    ] == "minmax(0, 1fr)"
+    assert "auto-fit" in declarations(
+        ".admin-nav__groups", "(max-width: 1023px)"
+    )["grid-template-columns"]
 
     assert rules.select("table th")
     assert all(not heading.has_attr("hidden") for heading in rules.select("table th"))
