@@ -1,12 +1,12 @@
 # Admin experience cross-page QA
 
-Status: **local evidence finalized for review; Task 4 and whole-closeout review remain pending**. This record must not be read as a production, Lighthouse/Core Web Vitals, native 200% browser-zoom, physical-print, or real-data acceptance result.
+Status: **the closeout implementation, scoped review, and automated verification gates are closed through `0cba461`**. Native 200% browser zoom, native generic-400 visual rendering, physical print, and Stage 7 production/real-data checks remain explicitly unproven or gated; this record must not be read as their acceptance result.
 
 ## Scope and isolation
 
 QA was performed on 2026-09-07 against the closeout branch and a loopback-only disposable fixture server at `http://127.0.0.1:62851`. The browser account, catalog content, copied rule, label asset, and stale-write conflict were synthetic TEST ONLY fixtures in a new temporary database under the ignored SDD workspace. No production service, external network, worktree `data/`, report data, or user data was accessed or changed.
 
-The controller reset the temporary viewport, closed only the owned in-app-browser tab, and stopped only the verified `62851` fixture-server process and launcher. Follow-up process/listener checks returned no rows. The user's original report tab and preview at `127.0.0.1:62841` were retained. Existing dirty `README.md`, `docs/testing/core-assessment-report.md`, and `data/` paths remain outside this closeout evidence commit.
+The controller reset each temporary viewport, closed only the owned in-app-browser tabs, and stopped only the verified `62851` fixture-server processes and launchers. On 2026-09-08 the final owned process IDs and `62851` listener were confirmed absent. The user's original report tab and preview at `127.0.0.1:62841` were retained. Existing dirty `README.md`, `docs/testing/core-assessment-report.md`, and `data/` paths remain outside this closeout evidence commit.
 
 The user accepted the existing report unchanged. This closeout did not edit report templates, report CSS/JavaScript, the PDF adapter, scoring, matching, ROI, report publishing, or report seed data.
 
@@ -19,7 +19,10 @@ Task-level independent reviews are clean after their recorded fix loops:
 - Task 1: shared shell review fixes closed at `f7895f79b54c276e7d826fe4bac4b7ba9874936e`; the final integration assertion was corrected and independently reviewed at `424b5d58b4d217131acd205c683ce4950873fccf`.
 - Task 2: editor/list review closed after the runtime relationship-label fix at `69ba0b1ec2770bcff21e3bef4bf821ef75d655c3`.
 - Task 3: SEO/asset review closed after complete approved-detail dependency coverage at `4e9842728a9b7e7732df83ce9c14aa2105f0da00`.
-- Whole-closeout review of `e718aa9..final HEAD`: pending controller dispatch/result. Stage 6 is not represented as blanket-complete while this review gate remains open.
+- Task 4 evidence review and JPEG-format re-review are clean through `22f469d093df6ceb8d82502ae6fbe47d0e1c28aa`.
+- The final broad review reported three findings: content-editor dynamic/plain buttons and wrapped choice labels lacked the 44px contract; the auxiliary-label test selected the logout form and could pass vacuously; and unauthenticated errors retained an empty 240px sidebar column.
+- Combined fix `0cba461015e6184390c865f59ae04019c230df03` changed only `static/css/admin.css`, `templates/admin/error.html`, `tests/test_admin_ui.py`, and `tests/test_admin_editor_ui.py`. The unique final scoped re-review found all three findings addressed, no new breakage, no out-of-scope observations, and no open or parked finding.
+- The scoped implementation, review, browser-fixture, and automated gates are closed through `0cba461`. This does not convert the explicitly unavailable native 200% zoom, generic-400 visual, or physical-print checks into passes, and does not close Stage 7 production/real-data authority gates.
 
 ## Browser route and responsive evidence
 
@@ -48,12 +51,15 @@ Additional controller checks covered:
 - Populated label sheet: at 320px the document measured 305/305 while the fixed-width 767px sheet scrolled inside a 273px local wrapper; all four toolbar controls measured 44px. Print dimensions were not changed.
 - Keyboard/focus: native `TAB` focused the skip link, `ENTER` moved focus to `main#admin-main`, and the next `TAB` reached the first queue link with a visible focus ring. On login, `TAB` reached the outlined submit button, `SHIFT+TAB` returned to the password field, and `ENTER` submitted. Native `SPACE` toggled the collaborate checkbox. `ESCAPE` was sent after the native required-field check, but there was no applicable modal to close, so no modal-dismissal claim is made.
 - Public legal metadata: after the final implementation restart, live loopback DOM contained exactly `https://preview.invalid/legal/privacy`, `https://preview.invalid/legal/privacy/test-privacy-v1`, and `https://preview.invalid/legal/terms` as the current privacy, historical privacy, and current terms canonicals, each with its synthetic reviewed summary description.
+- Final touch-target retest at 320x844: after using the real Add Block and Add Relation actions, all 16 current static/dynamic editor buttons measured at least 44px high (smallest width 47.2px), and all four wrapped choice labels measured at least 44px high (smallest width 62.4375px). Clicking the collaborate label text changed its checkbox from unchecked to checked and moved native focus to that checkbox. The dynamic relation retained its field name, visible label, selected fixture value, and document containment at 305/305; `SHIFT+TAB` exposed a visible focus ring without clipping.
+- Navigation-free error layout: the limited TEST ONLY route rendered the real `admin/error.html` at HTTP 200 because the browser surfaces replace non-2xx bodies. After the fix, an unauthenticated desktop error used one 1440px column with no navigation instead of leaving main at 240px; at 320px, main and document were 320/320 and the return-login target was 97.6x44px. This is layout-fixture evidence only, not native HTTP 400 visual acceptance. Genuine unauthenticated HTTP behavior remains covered by Python tests.
+- Actual multi-page interaction at 320x844 used 33 TEST ONLY draft resources plus one published fixture. With `status=draft&q=qa-page`, page 1 showed 20 unique records and native 下一页 showed the remaining 13 with no overlap or omission. Native 上一页 restored the original 20 rows; native `50 条` returned all 33 rows on page 1, preserving both filters. Document width stayed 305/305, actual logout returned the login form, and the final browser warning/error query was empty.
 
-Edge's default tab zoom was 90%, so requested capability dimensions and encoded PNG dimensions are not treated as CSS viewport evidence. The matrix and screenshot manifest use measured CSS viewport values. Narrow-viewport checks are not represented as an actual 200% browser-zoom test.
+Edge's default tab zoom was 90%, so requested capability dimensions and encoded image dimensions are not treated as CSS viewport evidence. The matrix and screenshot manifest use measured CSS viewport values. Narrow-viewport checks are not represented as an actual 200% browser-zoom test.
 
 ## Screenshot evidence
 
-These are unedited JPEG/JFIF bytes returned by successful browser captures and visually inspected by the controller. Each file starts with JPEG/JFIF magic `FF D8 FF E0` and decodes as JPEG; the `.jpg` extension now matches the actual format without recapture, re-encoding, or transcoding. Timed-out capture attempts and the browser's `ERR_BLOCKED_BY_CLIENT` page are excluded. Encoded pixels can differ from CSS viewport dimensions because of browser surface and zoom; these are viewport captures, not full-document captures.
+These are unedited JPEG/JFIF bytes returned by successful browser captures and visually inspected by the controller. Each file starts with JPEG/JFIF magic `FF D8 FF E0` and decodes as JPEG; the `.jpg` extension now matches the actual format without recapture, re-encoding, or transcoding. Timed-out capture attempts and the browser's `ERR_BLOCKED_BY_CLIENT` page are excluded. Encoded pixels can differ from CSS viewport dimensions because of browser surface and zoom; these are viewport captures, not full-document captures. The eight retained images predate the final `0cba461` fixes and are not represented as depicting the later touch-target, error-layout, or 33-row pagination states.
 
 | File | Browser / route / measured CSS viewport | Encoded px | Bytes | SHA-256 |
 | --- | --- | ---: | ---: | --- |
@@ -113,30 +119,47 @@ The journey RED reproduced the first full suite's only failure: it required the 
 | Four approved-detail/legal focused fixtures after round 2 | 4 passed in 3.40s |
 | Final Task 3 covering file after round 2 | 21 passed in 12.59s |
 
-The read-only loopback inventory contains 18 successful HTML routes, 160 rendered local references, and 21 unique local assets totalling 1,375,192 decoded bytes. These totals are a deduplicated local inventory, not per-page transfer weight or a production speed score. `python -m pip check` reported `No broken requirements found.`
+The read-only loopback inventory captured on 2026-09-07 contains 18 successful HTML routes, 160 rendered local references, and 21 unique local assets totalling 1,375,192 decoded bytes. These totals are a historical deduplicated local baseline, not per-page transfer weight, a production speed score, or a remeasurement after the final `0cba461` CSS patch. `python -m pip check` reported `No broken requirements found.`
+
+### Final broad-review fix verification
+
+| Command / phase | Actual result |
+| --- | --- |
+| Two focused missing-contract tests before implementation | 2 failed in 1.60s, exit 1 |
+| Auxiliary-label negative mutation | 1 failed in 0.93s on missing `label[for="department-name"]`, exit 1; exact template restored |
+| Three-finding focused GREEN | 3 passed in 2.18s, exit 0 |
+| `python -m pytest -q -p no:cacheprovider tests/test_admin_ui.py tests/test_admin_editor_ui.py tests/test_admin_auth.py` | 26 passed in 19.76s, exit 0 |
+| `node tests/js/content_editor_runtime.test.js` | 9 passed, 0 failed, exit 0 |
+| `node tests/js/admin_ui_runtime.test.js` | 4 passed, 0 failed, exit 0 |
+
+The auxiliary-label mutation demonstrates that the strengthened test is non-vacuous and selects the actual editable form. The final scoped re-review independently confirmed the 44px CSS contract, real form selection and field labels, and single-column unauthenticated error layout. It found all three broad-review findings addressed with no new breakage or open observation.
 
 ### Controller-wide runs
 
-The controller's final Node invocation covered all eight `tests/js/*.test.js` runtime files: 50 passed, 0 failed, 0 skipped, exit 0, in 361.1361ms.
+The controller's pre-final-fix Node invocation covered all eight `tests/js/*.test.js` runtime files: 50 passed, 0 failed, 0 skipped, exit 0, in 361.1361ms. After `0cba461`, a fresh `node --test` run over all eight files completed with **50 passed, 0 failed, 0 skipped in 420.8611ms, exit 0**. The post-review dependency check found no broken requirements, and the diff check was clean.
 
 The first full repository run used `python -m pytest -q -p no:cacheprovider` with an isolated `C:/Users/zz/AppData/Local/Temp/admin-final-0907-a384b21f97014fa2a16dd67baf854428` basetemp and process-local native DLL configuration. It completed with **1 failed, 2,202 passed in 1,251.25s (20:51), exit 1**. Its sole failure was `tests/test_operations_journey.py::test_admin_shell_contains_mobile_navigation_tables_and_lead_controls`, the obsolete shell assertion described above. Commit `424b5d5` then reproduced it RED, corrected it test-only, and passed the exact and 17-test covering runs.
 
 A second full repository attempt started at implementation HEAD `4e9842728a9b7e7732df83ce9c14aa2105f0da00` with `python -m pytest -q -p no:cacheprovider`, process-local `PYTHONIOENCODING=utf-8`/native DLL settings, and isolated basetemp `C:/Users/zz/AppData/Local/Temp/admin-final-rerun-0907-a26664a5c91b4d3cb98292e7c9ac9f30`. It was canceled by the controller at 61% after `tests/test_media_http.py::test_module_and_test_factories_allow_injection_but_wsgi_requires_safe_production_root` failed. The inherited UTF-8 setting made child Python emit UTF-8 while the Windows parent's `subprocess.run(..., text=True)` reader decoded with GBK; three reader threads raised `UnicodeDecodeError`, leaving captured `stdout` as `None`. A controlled one-test reproduction with the UTF-8 override produced 1 failed and 3 warnings in 3.49s; the same unchanged test under the original default environment passed in 3.29s. No application or test-code change was made for this harness-only mismatch. Because the run was canceled and did not reach a final suite summary, it is not a passing full run.
 
-The final verification in `final-pytest-native.log` ran at the same implementation HEAD, using the original Windows encoding environment (no `PYTHONIOENCODING` override), the existing process-local native DLL setting, and isolated basetemp `C:/Users/zz/AppData/Local/Temp/admin-final-native-0907-dec39e896c184638b96e1fa2f57c410b`. The canceled attempt left no Python processes. The native-environment run completed with **2,208 passed in 1,233.91s (20:33), exit 0**. Its final output contains no failure, warning, or skip summary.
+The native verification in `final-pytest-native.log` ran at implementation HEAD `4e98427`, using the original Windows encoding environment (no `PYTHONIOENCODING` override), the existing process-local native DLL setting, and isolated basetemp `C:/Users/zz/AppData/Local/Temp/admin-final-native-0907-dec39e896c184638b96e1fa2f57c410b`. It completed with **2,208 passed in 1,233.91s (20:33), exit 0** and no failure, warning, or skip summary. This result predates the final two Python tests and CSS/error-template fixes, so it is retained as history rather than substituted for post-review verification.
+
+The first post-review run in `final-postreview-pytest.log` stopped at 22% without a suite summary or exit marker. Recovery confirmed its execution session no longer existed and no matching test process remained. It is interrupted and **not counted as a pass**.
+
+The replacement post-review run completed at unchanged HEAD `0cba461015e6184390c865f59ae04019c230df03` in `final-postreview-0908-pytest.log`, execution session `30711`, using original Windows encoding, the existing process-local native DLL directory, `-q -p no:cacheprovider`, and isolated basetemp `C:/Users/zz/AppData/Local/Temp/admin-postreview-0908-7351cb6a05894bf9b256aa38ff5b5f61`. It finished with **2,210 passed in 1,299.32s (21:39), exit 0**; the retained log ends with `FINAL_POSTREVIEW_0908_EXIT=0` and has no failure, warning, or skip summary.
 
 ## Explicitly unproven or deferred
 
 - Actual native 200% browser zoom/reflow on the updated backend is unproven. The measured 320/390px viewport matrix is useful responsive evidence but is not equivalent to zoom.
 - Native visual rendering/focus of the generic HTTP 400 error page is unproven because both tested browser surfaces did not present that body. The 409 conflict alert/focus path is proven; focused HTTP and Node tests cover the generic summary contract.
 - Physical print/A4 output is unproven. Only temporary print-media emulation and CSS assertions were checked; emulation was restored after measurement.
-- Actual next-page UI behavior with more than 20 records is unproven. The real page-size interaction preserved filters and selected 50 rows per page; HTTP tests cover pagination/query behavior.
+- The 20+13 synthetic pagination interaction is proven locally, but it does not validate production data quality or production-scale pagination performance.
 - `ESCAPE` modal dismissal is not claimed because the exercised form had no applicable modal. Runtime coverage exists for the public mobile navigation Escape behavior, not an admin modal.
 - No Lighthouse, Core Web Vitals, compressed transfer, CDN, reverse-proxy cache, production latency, or deployment result was measured.
 - Browser captures contain only representative synthetic fixture states. They do not validate production data quality, permissions for real accounts, or every possible content length/localization combination.
 
 ## Deferred local evidence and Stage 7 authority gates
 
-Native 200% zoom, a generic 400 response rendered in a capable browser surface, and a synthetic dataset large enough to exercise a real next-page UI can be verified locally when the required browser capability/fixture is available; they do not require production credentials or server access. A physical-print check requires an available device and explicit approval before printing.
+Native 200% zoom and a generic 400 response rendered in a capable browser surface can be verified locally when the required browser capability is available; they do not require production credentials or server access. Synthetic multi-page navigation is already verified. A physical-print check requires an available device and explicit approval before printing.
 
 Stage 7 production work separately requires new authority and environment-specific inputs: a named target server/environment, deployment credentials and access approval, approved real-data migration/validation scope, backup/rollback plan, and production monitoring/acceptance owners. Production compression/CDN/cache behavior, Lighthouse/Core Web Vitals, production latency, and real-data acceptance belong to that authorized environment. None of those production actions was performed or implied by this local closeout.
