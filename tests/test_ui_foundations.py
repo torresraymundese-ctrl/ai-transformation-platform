@@ -148,6 +148,8 @@ def _css_custom_color(css, name):
 
 
 def _css_rule(css, selector):
+    # Static responses retain Git's checkout line endings; CSS semantics do not.
+    css = css.replace("\r\n", "\n")
     match = re.search(
         rf"(?m)^{re.escape(selector)}\s*\{{(?P<declarations>[^}}]*)\}}",
         css,
@@ -155,6 +157,19 @@ def _css_rule(css, selector):
     )
     assert match is not None, selector
     return match.group("declarations")
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_css_readers_match_multiline_selectors_with_either_checkout_newline(newline):
+    css = f".first,{newline}.second {{ color: #ffffff; }}{newline}"
+    assert _css_rule(css, ".first,\n.second").strip() == "color: #ffffff;"
+    with pytest.raises(AssertionError):
+        _css_rule(css, ".first,\n.missing")
+    nested = f"@media (min-width: 60rem) {{{newline}  {css}}}{newline}"
+    blocks = _css_blocks(nested, "@media (min-width: 60rem)")
+    assert _css_rule_in_blocks(blocks, ".first,\n.second").strip() == "color: #ffffff;"
+    with pytest.raises(AssertionError):
+        _css_rule_in_blocks(blocks, ".first,\n.missing")
 
 
 def _css_member_rule(css, selector):
@@ -228,7 +243,7 @@ def _css_rule_in_blocks(blocks, selector):
     for block in blocks:
         match = re.search(
             rf"(?m)^\s*{re.escape(selector)}\s*\{{(?P<declarations>[^}}]*)\}}",
-            block,
+            block.replace("\r\n", "\n"),
             re.DOTALL,
         )
         if match is not None:
@@ -725,7 +740,8 @@ def test_shared_navigation_and_footer_use_readable_text_colors(client):
     assert _contrast_ratio(paper, graphite) >= 4.5
     assert ".nav-links a { color: var(--ui-ink-650);" in css
     assert ".footer { color: var(--ui-paper-050); background: var(--ui-graphite-950); }" in css
-    assert ".footer a,\n.footer-bottom { color: var(--ui-paper-050); }" in css
+    footer_links = _css_declarations(_css_rule(css, ".footer a,\n.footer-bottom"))
+    assert footer_links["color"] == "var(--ui-paper-050)"
 
 
 def test_task5_small_editorial_and_assessment_text_meets_aa_contrast(client):
