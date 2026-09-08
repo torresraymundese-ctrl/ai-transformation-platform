@@ -1,12 +1,12 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
 <div class="admin-heading">
-  <div><h1>V2 已验证案例</h1><p>共 {{ page.total }} 个修订</p></div>
+  <div><h1>已验证案例</h1><p>共 {{ page.total }} 个修订</p></div>
   <a class="btn btn-primary" href="{{ url_for('admin.admin_case_new_v2') }}">新建案例</a>
 </div>
-<form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
-<table><thead><tr><th>公开路径</th><th>标题</th><th>修订</th><th>状态</th><th>操作</th></tr></thead><tbody>
-{% for row in page.items %}<tr><td><code>/cases/{{ row.slug }}</code></td><td>{{ row.title }}</td><td>#{{ row.revision_number }}</td><td>{{ row.status }}</td><td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_case_edit_v2', content_id=row.id) }}">审核与编辑</a></td></tr>{% else %}<tr><td colspan="5">暂无 V2 案例。</td></tr>{% endfor %}
-</tbody></table>
+<form method="get" class="inline-form admin-section card" data-operations-filters="true"><label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item | admin_label }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
+<div class="admin-table-wrap" role="region" aria-label="数据列表，可横向滚动" tabindex="0"><table class="admin-data-table"><thead><tr><th>公开路径</th><th>标题</th><th>修订</th><th>状态</th><th>操作</th></tr></thead><tbody>
+{% for row in page.items %}<tr><td><code>/cases/{{ row.slug }}</code></td><td>{{ row.title }}</td><td>#{{ row.revision_number }}</td><td>{{ row.status | admin_label }}</td><td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_case_edit_v2', content_id=row.id) }}">审核与编辑</a></td></tr>{% else %}<tr><td colspan="5">暂无案例。</td></tr>{% endfor %}
+</tbody></table></div>
 {% include "admin/_pagination.html" %}
 {% endblock %}

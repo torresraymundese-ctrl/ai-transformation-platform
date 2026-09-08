@@ -1455,5 +1455,7 @@ def test_data_request_page_lists_workflow_without_contact_values_in_errors(
     page = BeautifulSoup(listing.data, "html.parser")
     row = page.select_one(f'tr[data-request-id="{request_id}"]')
     assert row is not None
-    assert "correction" in row.get_text(" ", strip=True)
-    assert "received" in row.get_text(" ", strip=True)
+    assert "更正信息" in row.get_text(" ", strip=True)
+    assert "已收到" in row.get_text(" ", strip=True)
+    assert row.select_one('input[name="new_status"][value="verifying"]') is not None
+    assert page.select_one('select[name="status"] option[value="received"][selected]') is not None

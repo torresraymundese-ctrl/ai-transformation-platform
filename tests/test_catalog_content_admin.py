@@ -9,12 +9,15 @@ from publishing_service import create_content_draft, publish_content
 CSRF = "test-csrf-token"
 
 
-def _first(db, kind="scenario"):
+def _first(db):
+    # Content IDs follow set iteration during seeding; the first scenario may
+    # be the intentionally non-publishable data_process_foundation fallback.
+    # These editor success paths require a known, complete public scenario.
     return db.execute(
         "SELECT ci.*,g.canonical_slug,g.scenario_id,g.industry_id,g.service_id "
         "FROM content_items ci JOIN content_groups g ON g.id=ci.content_group_id "
-        "WHERE g.entry_type=? ORDER BY ci.id LIMIT 1",
-        (kind,),
+        "WHERE g.entry_type='scenario' AND g.canonical_slug=? ORDER BY ci.id LIMIT 1",
+        ("mfg-knowledge-assistant",),
     ).fetchone()
 
 

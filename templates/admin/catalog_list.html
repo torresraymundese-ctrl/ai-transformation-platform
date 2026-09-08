@@ -1,31 +1,31 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
 <div class="admin-heading">
-  <h1>核心内容目录 · {{ kind }}</h1>
+  <h1>{{ kind | admin_label('catalog') }}</h1>
   <div>共 {{ page.total }} 项</div>
 </div>
-<form method="get" class="inline-form" data-operations-filters="true">
-  <label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+<form method="get" class="inline-form admin-section card" data-operations-filters="true">
+  <label>状态 <select name="status"><option value="">全部</option>{% for item in ('draft','scheduled','published','archived') %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item | admin_label }}</option>{% endfor %}</select></label>
   <label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label>
   <button class="btn btn-primary" type="submit">筛选</button>
 </form>
-<table>
+<div class="admin-table-wrap" role="region" aria-label="数据列表，可横向滚动" tabindex="0"><table class="admin-data-table">
   <thead>
-    <tr><th>稳定身份</th><th>公开路径</th><th>文案标题</th><th>状态</th><th>操作</th></tr>
+    <tr><th>文案标题</th><th>内容编号</th><th>公开路径</th><th>状态</th><th>操作</th></tr>
   </thead>
   <tbody>
   {% for row in page.items %}
     <tr data-catalog-row="{{ row.group_key }}">
-      <td><code>{{ row.group_key }}</code></td>
-      <td><code>{{ row.slug }}</code></td>
-      <td>{{ row.title }}</td>
-      <td>{{ row.status }}</td>
+      <td><strong>{{ row.title }}</strong></td>
+      <td><code class="muted">{{ row.group_key }}</code></td>
+      <td><code class="muted">{{ row.slug }}</code></td>
+      <td>{{ row.status | admin_label }}</td>
       <td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_catalog_edit', kind=row.kind, core_id=row.core_id) }}">维护公开文案</a></td>
     </tr>
   {% else %}
     <tr><td colspan="5">暂无目录项。</td></tr>
   {% endfor %}
   </tbody>
-</table>
+</table></div>
 {% include "admin/_pagination.html" %}
 {% endblock %}

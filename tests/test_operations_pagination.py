@@ -411,7 +411,8 @@ def test_draft_and_scheduled_content_filters_are_mutually_exclusive(
         page = BeautifulSoup(response.data, "html.parser")
         table_rows = page.select("table tbody tr")
         assert len(table_rows) == 1
-        assert table_rows[0].select("td")[3].get_text(strip=True) == "scheduled"
+        assert table_rows[0].select("td")[3].get_text(strip=True) == "已排期"
+        assert page.select_one('select[name="status"] option[value="scheduled"][selected]') is not None
 
 
 def test_privacy_lead_selector_is_empty_until_bounded_escaped_search(

@@ -1,6 +1,8 @@
 """Data access for public content, assessments, and CMS records."""
 
 import catalog_content_repository as catalog
+from admin_display import assessment_result_labels
+from assessment_repository import MAX_REPORT_SNAPSHOT_BYTES
 import case_repository as cases
 from content_clock import as_shanghai, format_shanghai, shanghai_now
 from content_validation import ContentValidationError
@@ -273,11 +275,32 @@ def update_case(case_id, item):
 def list_assessments(limit=50):
     db = get_db()
     try:
-        return db.execute(
-            "SELECT * FROM assessments ORDER BY created_at DESC LIMIT ?", (limit,)
+        rows = db.execute(
+            "SELECT a.id,a.created_at,a.lead_id,a.submission_key,l.id AS linked_lead_id,l.anonymized_at,"
+            "CASE WHEN a.lead_id IS NULL AND a.submission_key IS NULL THEN a.company_name "
+            "WHEN l.id IS NULL THEN '线索已不存在' "
+            "WHEN l.anonymized_at IS NOT NULL THEN '已匿名化' "
+            "ELSE l.company_name END AS company_name,"
+            "CASE WHEN a.lead_id IS NULL AND a.submission_key IS NULL THEN a.contact_email "
+            "WHEN l.anonymized_at IS NULL THEN l.email END AS contact_email,"
+            "CASE WHEN a.lead_id IS NULL AND a.submission_key IS NULL THEN a.result END AS result,"
+            "CASE WHEN length(CAST(a.report_snapshot_json AS BLOB))<=? "
+            "THEN a.report_snapshot_json END AS report_snapshot_json "
+            "FROM assessments a LEFT JOIN leads l ON l.id=a.lead_id "
+            "ORDER BY a.created_at DESC,a.id DESC LIMIT ?",
+            (MAX_REPORT_SNAPSHOT_BYTES, limit),
         ).fetchall()
     finally:
         db.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        raw = item.pop("report_snapshot_json")
+        item["package_name"] = None
+        if item["lead_id"] is not None or item["submission_key"] is not None:
+            item["result"], item["package_name"] = assessment_result_labels(raw)
+        items.append(item)
+    return items
 
 
 def list_announcements():

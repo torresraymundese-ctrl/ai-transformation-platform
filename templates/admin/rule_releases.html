@@ -1,8 +1,8 @@
 {% extends "admin/base_admin.html" %}
 {% block admin_content %}
-<div class="admin-heading"><div><h1>评估规则版本</h1><p class="muted">复制活动版本，在草稿中编辑并通过真实评估管线预览。</p></div></div>
+<div class="admin-heading"><div><h1>评估规则版本</h1><p class="muted">复制当前生效版本，在草稿中修改并预览评估结果，确认后再发布。</p></div></div>
 <form method="get" class="inline-form admin-section card">
-  <div class="form-group"><label for="rule_status">状态</label><select id="rule_status" name="status"><option value="" {% if selected_status is none %}selected{% endif %}>全部</option>{% for status in statuses %}<option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></div>
+  <div class="form-group"><label for="rule_status">状态</label><select id="rule_status" name="status"><option value="" {% if selected_status is none %}selected{% endif %}>全部</option>{% for status in statuses %}<option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status | admin_label }}</option>{% endfor %}</select></div>
   <div class="form-group"><label for="rule_per_page">每页</label><select id="rule_per_page" name="per_page"><option value="20" {% if page.per_page == 20 %}selected{% endif %}>20</option><option value="50" {% if page.per_page == 50 %}selected{% endif %}>50</option></select></div>
   <button class="btn btn-primary" type="submit">筛选</button>
 </form>
@@ -10,12 +10,12 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-group"><label for="copy_code">新版本代码</label><input id="copy_code" name="code" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"></div>
   <div class="form-group"><label for="copy_name">新版本名称</label><input id="copy_name" name="name" required maxlength="200"></div>
-  <button class="btn btn-primary" type="submit">复制活动版本</button>
+  <button class="btn btn-primary" type="submit">复制当前版本</button>
 </form>
 <section class="card admin-section">
-{% if page.items %}<table><thead><tr><th>版本代码</th><th>名称</th><th>状态</th><th>锁版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
-{% for item in page.items %}<tr data-release-id="{{ item.id }}"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.lock_version }}</td><td>{{ item.updated_at }}</td><td><a href="{{ url_for('admin.admin_rule_edit', release_id=item.id) }}">{% if item.status == 'draft' %}编辑{% else %}查看{% endif %}</a>{% if item.status == 'draft' %} <a href="{{ url_for('admin.admin_rule_publish', release_id=item.id) }}">发布</a>{% endif %}</td></tr>{% endfor %}
-</tbody></table>{% else %}<p class="empty">暂无规则版本。</p>{% endif %}
+{% if page.items %}<div class="admin-table-wrap" role="region" aria-label="数据列表，可横向滚动" tabindex="0"><table class="admin-data-table"><thead><tr><th>版本代码</th><th>名称</th><th>状态</th><th>修订号</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
+{% for item in page.items %}<tr data-release-id="{{ item.id }}"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.status | admin_label }}</td><td>{{ item.lock_version }}</td><td>{{ item.updated_at }}</td><td><a href="{{ url_for('admin.admin_rule_edit', release_id=item.id) }}">{% if item.status == 'draft' %}编辑{% else %}查看{% endif %}</a>{% if item.status == 'draft' %} <a href="{{ url_for('admin.admin_rule_publish', release_id=item.id) }}">发布</a>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="empty">暂无规则版本。</p>{% endif %}
 </section>
 {% if page.total_pages > 1 %}<nav aria-label="分页"><span data-page-current>{{ page.page }} / {{ page.total_pages }}</span>{% if page.page > 1 %}<a data-page="previous" href="{{ url_for('admin.admin_rule_releases', status=selected_status or '', per_page=page.per_page, page=page.page-1) }}">上一页</a>{% endif %}{% if page.page < page.total_pages %}<a data-page="next" href="{{ url_for('admin.admin_rule_releases', status=selected_status or '', per_page=page.per_page, page=page.page+1) }}">下一页</a>{% endif %}</nav>{% endif %}
 {% endblock %}

@@ -6,7 +6,7 @@
   <div class="admin-heading">
     <div>
       <h1>运营工作台</h1>
-      <p class="muted">只读提醒来自当前业务数据，不建立额外任务状态。</p>
+      <p class="muted">查看待联系线索、诊断预约与待审核内容。</p>
     </div>
   </div>
   <div class="admin-grid">
@@ -25,14 +25,14 @@
     <div>
       <p><a href="/admin">← 返回运营工作台</a></p>
       <h1>{{ queue_label }}</h1>
-      <p class="muted">共 {{ page.total }} 项，只读显示当前数据库投影。</p>
+      <p class="muted">共 {{ page.total }} 项，根据当前业务记录汇总。</p>
     </div>
   </div>
   <div class="card admin-section stack">
     {% for item in page.items %}
     <article data-operation-row data-id="{{ item.id }}">
       <strong>{{ item.display_title or "已匿名化记录" }}</strong>
-      <span class="muted">{{ item.display_meta or "" }}{% if item.status %} · {{ item.status }}{% endif %}</span>
+      <span class="muted">{{ item.display_meta or "" }}{% if item.status %} · {{ item.status | admin_label }}{% endif %}</span>
     </article>
     {% else %}
     <p class="empty" data-empty-state>当前没有待处理项目。</p>

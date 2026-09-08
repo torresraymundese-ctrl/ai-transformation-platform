@@ -10,10 +10,10 @@
     <button class="btn btn-primary" type="submit">抓取已启用来源</button>
   </form>
 </div>
-<form method="get" class="inline-form" data-operations-filters="true"><label>状态 <select name="state"><option value="">全部</option>{% for item in ('fetched','pending_review','accepted','rejected') %}<option value="{{ item }}" {% if filters.state == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
+<form method="get" class="inline-form admin-section card" data-operations-filters="true"><label>状态 <select name="state"><option value="">全部</option>{% for item in ('fetched','pending_review','accepted','rejected') %}<option value="{{ item }}" {% if filters.state == item %}selected{% endif %}>{{ item | admin_label }}</option>{% endfor %}</select></label><label>搜索 <input name="q" value="{{ filters.search or '' }}" maxlength="100"></label><button class="btn btn-primary" type="submit">筛选</button></form>
 <div class="card" style="padding:20px;">
   {% if page.items %}
-    <table style="width:100%;border-collapse:collapse;">
+    <div class="admin-table-wrap" role="region" aria-label="数据列表，可横向滚动" tabindex="0"><table class="admin-data-table">
       <thead><tr><th>编号</th><th>来源</th><th>标题</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>
       {% for candidate in page.items %}
@@ -21,12 +21,12 @@
           <td>{{ candidate.id }}</td>
           <td>{{ candidate.source_name }}</td>
           <td>{{ candidate.title }}</td>
-          <td>{{ candidate.state }}</td>
+          <td>{{ candidate.state | admin_label }}</td>
           <td><a href="/admin/ingestion/{{ candidate.id }}">查看并选择</a></td>
         </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
   {% else %}
     <p>当前没有候选内容。</p>
   {% endif %}
