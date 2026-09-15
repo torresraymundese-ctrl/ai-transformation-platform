@@ -10,3 +10,8 @@ natapp.exe
 ngrok.exe
 *.zip
 .worktrees/
+
+# 缓存与临时目录
+.pytest_cache/
+.tmp/
+.superpowers/

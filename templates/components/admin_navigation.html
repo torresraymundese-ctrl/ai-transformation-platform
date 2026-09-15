@@ -1,6 +1,10 @@
-<nav class="admin-nav" aria-label="后台主导航">
+<nav class="admin-nav" aria-label="后台主导航" data-admin-nav>
+  <div class="admin-nav__header">
   <a href="/admin" class="brand">CMS 后台管理</a>
+  <button type="button" class="admin-nav__toggle" data-admin-nav-toggle aria-controls="admin-nav-panel" aria-expanded="true" hidden>展开菜单</button>
+  </div>
 
+  <div class="admin-nav__panel" id="admin-nav-panel" data-admin-nav-panel>
   <div class="admin-nav__groups">
     <section class="admin-nav__group" aria-labelledby="admin-nav-operations">
       <h2 id="admin-nav-operations">运营</h2>
@@ -49,5 +53,6 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit">退出</button>
     </form>
+  </div>
   </div>
 </nav>

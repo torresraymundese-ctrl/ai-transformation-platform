@@ -36,8 +36,45 @@
     }, true);
   }
 
+  function bindNavigation(documentObject, windowObject) {
+    const nav = documentObject.querySelector('[data-admin-nav]');
+    if (!nav || nav.dataset.adminNavBound === 'true' || !windowObject ||
+        typeof windowObject.matchMedia !== 'function') return;
+    const toggle = nav.querySelector('[data-admin-nav-toggle]');
+    const panel = nav.querySelector('[data-admin-nav-panel]');
+    const brand = nav.querySelector('.brand');
+    if (!toggle || !panel || !brand) return;
+    nav.dataset.adminNavBound = 'true';
+    const media = windowObject.matchMedia('(max-width: 1023px)');
+
+    function setExpanded(expanded) {
+      panel.hidden = !expanded;
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.textContent = expanded ? '收起菜单' : '展开菜单';
+    }
+    function syncWidth() {
+      if (!media.matches && documentObject.activeElement === toggle) brand.focus();
+      toggle.hidden = !media.matches;
+      if (media.matches && panel.contains(documentObject.activeElement)) toggle.focus();
+      setExpanded(!media.matches);
+    }
+    toggle.addEventListener('click', function () {
+      if (media.matches) setExpanded(panel.hidden);
+    });
+    nav.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && media.matches && !panel.hidden) {
+        event.preventDefault();
+        toggle.focus();
+        setExpanded(false);
+      }
+    });
+    media.addEventListener('change', syncWidth);
+    syncWidth();
+  }
+
   function bind(documentObject, windowObject) {
     if (!documentObject) return;
+    bindNavigation(documentObject, windowObject);
     focusServerSummary(documentObject);
     documentObject.querySelectorAll('form[data-admin-editor]').forEach(function (form) {
       bindEditor(form, windowObject);

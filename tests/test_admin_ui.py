@@ -100,6 +100,30 @@ def test_admin_stylesheet_is_not_loaded_by_the_public_shell(client):
     assert page.select_one('link[href="/static/css/admin.css"]') is None
 
 
+def test_navigation_disclosure_preserves_no_script_access_and_complete_panel(admin_client):
+    page = _page(admin_client.get('/admin'))
+    toggle = page.select_one('button[data-admin-nav-toggle][type="button"]')
+    assert toggle is not None
+    assert toggle.has_attr('hidden')
+    panel = page.find(id=toggle['aria-controls'])
+    assert panel is not None and not panel.has_attr('hidden')
+    assert set(ADMIN_DESTINATIONS) <= {a.get('href') for a in panel.select('a')}
+    assert panel.select_one('form[action="/admin/logout"] input[name="csrf_token"]')
+
+
+def test_catalog_status_actions_do_not_inherit_arbitrary_word_breaks(admin_client):
+    page = _page(admin_client.get('/admin/catalog/industry'))
+    rows = page.select('[data-catalog-row]')
+    assert rows
+    for row in rows:
+        assert row.select_one('td.admin-cell-status')
+        assert row.select_one('td.admin-cell-actions a.btn')
+    css = _admin_css(admin_client)
+    for selector in ('.admin-cell-status', '.admin-cell-actions .btn'):
+        assert _css_declarations(css, selector).get('white-space') == 'nowrap'
+    assert _css_declarations(css, '.admin-nav [hidden]').get('display') == 'none'
+
+
 def test_login_uses_the_shared_main_without_management_navigation(client):
     """The public login must not expose a second main or admin destinations."""
     page = _page(client.get("/admin/login"))

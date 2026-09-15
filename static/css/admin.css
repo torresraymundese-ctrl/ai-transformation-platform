@@ -99,6 +99,29 @@ fieldset { min-width: 0; }
   text-decoration: none;
 }
 
+.admin-nav__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+}
+
+.admin-nav__header .brand { width: auto; }
+
+.admin-nav .admin-nav__toggle {
+  width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  border: 1px solid var(--ui-silver-200);
+}
+
+.admin-nav__panel {
+  display: grid;
+  gap: var(--ui-space-4);
+}
+
+.admin-nav [hidden] { display: none; }
+
 .admin-nav__groups {
   display: grid;
   gap: var(--ui-space-4);
@@ -484,6 +507,11 @@ table {
 }
 
 .admin-data-table .admin-control-link { white-space: nowrap; }
+
+.admin-cell-status,
+.admin-cell-actions .btn { white-space: nowrap; }
+
+.admin-data-table .admin-cell-actions { width: 1%; }
 
 th,
 td {

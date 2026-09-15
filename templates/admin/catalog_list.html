@@ -19,8 +19,8 @@
       <td><strong>{{ row.title }}</strong></td>
       <td><code class="muted">{{ row.group_key }}</code></td>
       <td><code class="muted">{{ row.slug }}</code></td>
-      <td>{{ row.status | admin_label }}</td>
-      <td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_catalog_edit', kind=row.kind, core_id=row.core_id) }}">维护公开文案</a></td>
+      <td class="admin-cell-status">{{ row.status | admin_label }}</td>
+      <td class="admin-cell-actions"><a class="btn btn-outline btn-sm" href="{{ url_for('admin.admin_catalog_edit', kind=row.kind, core_id=row.core_id) }}">维护公开文案</a></td>
     </tr>
   {% else %}
     <tr><td colspan="5">暂无目录项。</td></tr>

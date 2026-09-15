@@ -13,12 +13,12 @@ class FakeElement {
   }
 
   addEventListener(type, callback, capture = false) {
-    this.listeners.set(`${type}:${capture}`, callback);
+    const key = `${type}:${capture}`;
+    this.listeners.set(key, [...(this.listeners.get(key) || []), callback]);
   }
 
   dispatch(type, event, capture = false) {
-    const callback = this.listeners.get(`${type}:${capture}`);
-    if (callback) callback(event);
+    for (const callback of this.listeners.get(`${type}:${capture}`) || []) callback(event);
   }
 
   closest(selector) {
@@ -42,6 +42,7 @@ class FakeDocument {
   }
 
   querySelector(selector) {
+    if (selector === '[data-admin-nav]') return null;
     assert.equal(selector, '[data-admin-error-summary]');
     return this.summary;
   }
@@ -107,4 +108,79 @@ test('absent form and summary are a no-op and never access browser storage', () 
 
   assert.doesNotThrow(() => adminUi.bind(new FakeDocument(), guardedWindow));
   assert.equal(storageAccesses, 0);
+});
+
+function navigationFixture(narrow) {
+  const toggle = new FakeElement();
+  toggle.hidden = true;
+  toggle.attributes = {};
+  toggle.setAttribute = (key, value) => { toggle.attributes[key] = value; };
+  const panel = new FakeElement();
+  panel.hidden = false;
+  const brand = new FakeElement();
+  const link = new FakeElement();
+  panel.contains = element => element === link;
+  const nav = new FakeElement();
+  nav.querySelector = selector => ({
+    '[data-admin-nav-toggle]': toggle,
+    '[data-admin-nav-panel]': panel,
+    '.brand': brand,
+  })[selector];
+  const documentObject = new FakeDocument();
+  let toggleHidden = true;
+  Object.defineProperty(toggle, 'hidden', {
+    get() { return toggleHidden; },
+    set(value) {
+      toggleHidden = value;
+      // Browsers may blur synchronously when a focused control is hidden.
+      if (value && documentObject.activeElement === toggle) documentObject.activeElement = null;
+    },
+  });
+  const originalQuery = documentObject.querySelector.bind(documentObject);
+  documentObject.querySelector = selector => selector === '[data-admin-nav]' ? nav : originalQuery(selector);
+  const media = { matches: narrow, addEventListener(type, listener) {
+    assert.equal(type, 'change'); this.listener = listener;
+  } };
+  const windowObject = { matchMedia(query) {
+    assert.equal(query, '(max-width: 1023px)'); return media;
+  } };
+  return { toggle, panel, brand, link, nav, documentObject, windowObject, media };
+}
+
+test('narrow navigation collapses, toggles once after repeated binding, and Escape restores focus', () => {
+  const f = navigationFixture(true);
+  adminUi.bind(f.documentObject, f.windowObject);
+  adminUi.bind(f.documentObject, f.windowObject);
+  assert.equal(f.toggle.hidden, false);
+  assert.equal(f.panel.hidden, true);
+  assert.equal(f.toggle.attributes['aria-expanded'], 'false');
+  f.toggle.dispatch('click', {});
+  assert.equal(f.panel.hidden, false);
+  assert.equal(f.toggle.attributes['aria-expanded'], 'true');
+  f.toggle.dispatch('click', {});
+  assert.equal(f.panel.hidden, true);
+  f.toggle.dispatch('click', {});
+  let prevented = false;
+  f.nav.dispatch('keydown', { key: 'Escape', preventDefault() { prevented = true; } });
+  assert.equal(f.panel.hidden, true);
+  assert.equal(f.toggle.focusCount, 1);
+  assert.equal(prevented, true);
+});
+
+test('breakpoint transitions show desktop navigation and never hide the focused control', () => {
+  const f = navigationFixture(false);
+  adminUi.bind(f.documentObject, f.windowObject);
+  assert.equal(f.panel.hidden, false);
+  assert.equal(f.toggle.hidden, true);
+  f.documentObject.activeElement = f.link;
+  f.media.matches = true;
+  f.media.listener();
+  assert.equal(f.panel.hidden, true);
+  assert.equal(f.toggle.focusCount, 1);
+  f.documentObject.activeElement = f.toggle;
+  f.media.matches = false;
+  f.media.listener();
+  assert.equal(f.panel.hidden, false);
+  assert.equal(f.toggle.hidden, true);
+  assert.equal(f.brand.focusCount, 1);
 });
